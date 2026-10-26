@@ -35,6 +35,21 @@ public record WorkResultRow(
         @Schema(description = "진행상태 한글 표기 — 화면이 매핑표를 들고 있지 않도록 서버가 준다")
         String statusLabel,
         @Schema(description = """
+                **DSRE 진행상태**(`tbl_request_info.STATE`). 위 `status` 와 **다른 축**이다.
+
+                · `status`  = 우리 기록(삭제일·발송일·**작업요청서 출력시각**)으로 판정
+                · `dsreStatus` = DSRE2 가 들고 있는 값
+
+                ‼️**둘은 어긋날 수 있고, 그게 정상이다.** DSRE 의 발송준비중(W)은
+                거래명세서 발급뿐 아니라 **DSRE2 상자계산 저장**에서도 생긴다 —
+                주체가 둘이라 우리 기준을 무엇으로 바꿔도 완전히 맞출 수 없다.
+                그래서 하나로 합치지 않고 **나란히 내려 어긋난 건이 보이게** 한다.
+
+                DSRE 연동이 꺼져 있거나 묶인 신청이 없으면(수기 매출) **null**.""")
+        com.daesung.sales.dsre.gateway.OrderState dsreStatus,
+        @Schema(description = "DSRE 진행상태 한글 표기. 값이 없으면 null")
+        String dsreStatusLabel,
+        @Schema(description = """
                 삭제 여부. `status=CANCELED` 와 같은 값이다 —
                 진행상태로 통합됐지만, 줄 색칠처럼 따로 쓰는 곳이 있어 함께 둔다.""")
         boolean deleted,

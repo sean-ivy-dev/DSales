@@ -840,6 +840,165 @@ public class JdbcDsreGateway implements DsreGateway {
         return dsreJdbcTemplate.update(CHANGE_STATE_SQL, toCode, reqCd, fromCode);
     }
 
+    // ── 발송완료 / 발송취소 (DSRE2 FM_LOGI_DeliveryMng 와 같은 처리) ─────────────────────
+
+    // 행 잠금 — 조회와 변경 사이에 DSRE2 데스크톱이 같은 신청을 옮기지 못하게 한다.
+    private static final String SHIP_LOCK_SQL =
+            "SELECT STATE, APPLY_GN FROM tbl_request_info WHERE REQ_CD=? FOR UPDATE";
+
+    private static final String SHIP_DEL_DT_SQL =
+            "SELECT DEL_DT FROM tbl_logis_info WHERE REQ_CD=?";
+
+    // 자재 현재고 차감. DSRE2 Use_Resource 와 같은 원천(TBL_LOGIS_CNT RES_GN='R' × 자재 연결된 리소스).
+    private static final String SHIP_DEDUCT_SQL = """
+            UPDATE tbl_materials_info m
+              JOIN (SELECT r.MAT_CD, SUM(lc.REQCNT) AS CNT
+                      FROM tbl_logis_cnt lc
+                      JOIN tbl_resource_info r ON lc.RES_CD = r.RES_CD
+                     WHERE lc.REQ_CD = ? AND lc.RES_GN = 'R' AND r.MAT_CD IS NOT NULL
+                     GROUP BY r.MAT_CD) b ON m.MAT_CD = b.MAT_CD
+               SET m.CNT = m.CNT - b.CNT
+            """;
+
+    // 자재 출고내역. DSRE2 는 리소스(RES_CD)별로 한 줄씩 넣는다 — 같은 단위로 맞춘다.
+    private static final String SHIP_DTL_INSERT_SQL = """
+            INSERT INTO tbl_materials_dtl (REQ_CD, MAT_CD, INOUT_GN, ACCD_YN, DELI_YN, CNT, SDATE, REG_DATE, REG_USER)
+            SELECT lc.REQ_CD, r.MAT_CD, 'O', ?, 'N', SUM(lc.REQCNT), ?, NOW(), ?
+              FROM tbl_logis_cnt lc
+              JOIN tbl_resource_info r ON lc.RES_CD = r.RES_CD
+             WHERE lc.REQ_CD = ? AND lc.RES_GN = 'R' AND r.MAT_CD IS NOT NULL
+             GROUP BY lc.REQ_CD, lc.RES_CD, r.MAT_CD
+            """;
+
+    private static final String SHIP_SET_DEL_DT_SQL =
+            "UPDATE tbl_logis_info SET DEL_DT=? WHERE REQ_CD=?";
+
+    // 이미 발송완료인 건은 발송일만 고친다(DSRE2 CHK='Y' 분기와 같다).
+    private static final String SHIP_REDATE_LOGIS_SQL =
+            "UPDATE tbl_logis_info SET DEL_DT=?, REG_DATE=NOW(), REG_USER=? WHERE REQ_CD=?";
+    // ‼️<b>ACCD_YN 은 보지 않는다.</b> 날짜를 고치는 데 사고처리 여부를 가릴 이유가 없고,
+    //   그 조건을 두면 **상자계산 화면(FM_LOGI_BoxCalc)으로 발송된 건이 빠진다** —
+    //   그쪽은 사고처리 신청이어도 ACCD_YN 을 기본값 'N' 으로 넣기 때문에,
+    //   우리가 'Y' 로 찾으면 한 줄도 안 걸린다(발송일만 바뀌고 출고내역 날짜는 옛날 그대로 남는다).
+    //   되돌리는 쪽(UNSHIP_*)도 ACCD_YN 을 안 보므로 조건을 맞춰 둔다.
+    private static final String SHIP_REDATE_DTL_SQL = """
+            UPDATE tbl_materials_dtl SET SDATE=?, REG_DATE=NOW(), REG_USER=?
+             WHERE REQ_CD=? AND INOUT_GN='O' AND DELI_YN='N'
+            """;
+
+    // 발송취소: 출고내역에 적힌 만큼 되돌린다.
+    // ★DSRE2 는 이때 REQ_CD 의 출고내역을 조건 없이 전부 지우지만, 접수 때 생기는 발송의뢰분(DELI_YN='Y')까지
+    //   지워져 재고 근거가 사라진다. 우리는 발송처리가 넣은 줄(INOUT_GN='O', DELI_YN='N')만 되돌린다.
+    private static final String UNSHIP_RESTORE_SQL = """
+            UPDATE tbl_materials_info m
+              JOIN (SELECT MAT_CD, SUM(CNT) AS CNT
+                      FROM tbl_materials_dtl
+                     WHERE REQ_CD = ? AND INOUT_GN = 'O' AND DELI_YN = 'N'
+                     GROUP BY MAT_CD) b ON m.MAT_CD = b.MAT_CD
+               SET m.CNT = m.CNT + b.CNT
+            """;
+    private static final String UNSHIP_DTL_DELETE_SQL =
+            "DELETE FROM tbl_materials_dtl WHERE REQ_CD=? AND INOUT_GN='O' AND DELI_YN='N'";
+    private static final String UNSHIP_CLEAR_DEL_DT_SQL =
+            "UPDATE tbl_logis_info SET DEL_DT=NULL WHERE REQ_CD=?";
+
+    // 신청번호 목록 → 진행상태. ‼️SQL 을 조립하지 않는다 — 목록은 CSV 한 개를 바인딩해
+    //   FIND_IN_SET 으로 푼다(이 파일의 custCodes 필터와 같은 방식).
+    private static final String STATES_OF_SQL =
+            "SELECT REQ_CD, STATE FROM tbl_request_info WHERE FIND_IN_SET(REQ_CD, ?) > 0";
+
+    @Override
+    public java.util.Map<Integer, String> statesOf(java.util.Collection<Integer> reqCds) {
+        String csv = csvNum(reqCds);
+        if (csv == null) {
+            return java.util.Map.of();
+        }
+        java.util.Map<Integer, String> out = new java.util.HashMap<>();
+        dsreJdbcTemplate.query(STATES_OF_SQL, rs -> {
+            out.put(rs.getInt("REQ_CD"), trim(rs.getString("STATE")));
+        }, csv);
+        return out;
+    }
+
+    private static final DateTimeFormatter SDATE_FMT = DateTimeFormatter.BASIC_ISO_DATE;   // char(8) yyyyMMdd
+
+    @Override
+    public List<DsreShipResult> ship(List<Integer> reqCds, LocalDate delDate, String actor) {
+        String user = regUser(actor);
+        String sdate = delDate.format(SDATE_FMT);
+        List<DsreShipResult> out = dsreTransactionTemplate.execute(status -> {
+            List<DsreShipResult> rs = new ArrayList<>();
+            for (Integer reqCd : new java.util.LinkedHashSet<>(reqCds)) {
+                List<Map<String, Object>> row = dsreJdbcTemplate.queryForList(SHIP_LOCK_SQL, reqCd);
+                if (row.isEmpty()) {
+                    rs.add(new DsreShipResult(reqCd, null, DsreShipResult.Outcome.NOT_FOUND, null));
+                    continue;
+                }
+                String state = trim((String) row.get(0).get("STATE"));
+                // 사고처리분(APPLY_GN='A')이면 출고내역 ACCD_YN='Y' — DSRE2 라디오 버튼 기준과 같다.
+                String accdYn = "A".equals(trim((String) row.get(0).get("APPLY_GN"))) ? "Y" : "N";
+                LocalDate prev = delDtOf(reqCd);
+                if (OrderState.SHIPPED.code().equals(state)) {
+                    dsreJdbcTemplate.update(SHIP_REDATE_LOGIS_SQL, delDate, user, reqCd);
+                    // ‼️accdYn 은 넘기지 않는다 — 상자계산 화면으로 발송된 건은 ACCD_YN 이
+                    //   기본값 'N' 이라, 'Y' 로 찾으면 한 줄도 안 걸린다(위 SQL 주석 참고).
+                    dsreJdbcTemplate.update(SHIP_REDATE_DTL_SQL, sdate, user, reqCd);
+                    rs.add(new DsreShipResult(reqCd, state, DsreShipResult.Outcome.DATE_ONLY, prev));
+                    continue;
+                }
+                if (!OrderState.READY_TO_SHIP.code().equals(state)) {
+                    rs.add(new DsreShipResult(reqCd, state, DsreShipResult.Outcome.SKIPPED, prev));
+                    continue;
+                }
+                dsreJdbcTemplate.update(SHIP_DEDUCT_SQL, reqCd);
+                dsreJdbcTemplate.update(SHIP_DTL_INSERT_SQL, accdYn, sdate, user, reqCd);
+                dsreJdbcTemplate.update(CHANGE_STATE_SQL, OrderState.SHIPPED.code(), reqCd, state);
+                dsreJdbcTemplate.update(SHIP_SET_DEL_DT_SQL, delDate, reqCd);
+                rs.add(new DsreShipResult(reqCd, state, DsreShipResult.Outcome.CHANGED, prev));
+            }
+            return rs;
+        });
+        return (out == null) ? List.of() : out;
+    }
+
+    @Override
+    public List<DsreShipResult> unship(List<Integer> reqCds, String actor) {
+        List<DsreShipResult> out = dsreTransactionTemplate.execute(status -> {
+            List<DsreShipResult> rs = new ArrayList<>();
+            for (Integer reqCd : new java.util.LinkedHashSet<>(reqCds)) {
+                List<Map<String, Object>> row = dsreJdbcTemplate.queryForList(SHIP_LOCK_SQL, reqCd);
+                if (row.isEmpty()) {
+                    rs.add(new DsreShipResult(reqCd, null, DsreShipResult.Outcome.NOT_FOUND, null));
+                    continue;
+                }
+                String state = trim((String) row.get(0).get("STATE"));
+                LocalDate prev = delDtOf(reqCd);
+                if (!OrderState.SHIPPED.code().equals(state)) {
+                    rs.add(new DsreShipResult(reqCd, state, DsreShipResult.Outcome.SKIPPED, prev));
+                    continue;
+                }
+                dsreJdbcTemplate.update(UNSHIP_RESTORE_SQL, reqCd);
+                dsreJdbcTemplate.update(UNSHIP_DTL_DELETE_SQL, reqCd);
+                dsreJdbcTemplate.update(CHANGE_STATE_SQL, OrderState.READY_TO_SHIP.code(), reqCd, state);
+                dsreJdbcTemplate.update(UNSHIP_CLEAR_DEL_DT_SQL, reqCd);
+                rs.add(new DsreShipResult(reqCd, state, DsreShipResult.Outcome.CHANGED, prev));
+            }
+            return rs;
+        });
+        return (out == null) ? List.of() : out;
+    }
+
+    private LocalDate delDtOf(int reqCd) {
+        List<java.sql.Date> d = dsreJdbcTemplate.queryForList(SHIP_DEL_DT_SQL, java.sql.Date.class, reqCd);
+        return (d.isEmpty() || d.get(0) == null) ? null : d.get(0).toLocalDate();
+    }
+
+    /** DSRE {@code REG_USER} 는 varchar(20). 넘치면 INSERT 가 실패해 발송 전체가 막힌다. */
+    private static String regUser(String actor) {
+        String a = (actor == null || actor.isBlank()) ? "sales" : actor;
+        return a.length() > 20 ? a.substring(0, 20) : a;
+    }
+
     /**
      * 집계·저장함수 결과를 Integer로. MySQL이 COUNT()·FUNC_REQINWON_GET()을 BIGINT로 돌려줘
      * Integer 직접 캐스팅은 ClassCastException이 난다(실제로 발생).

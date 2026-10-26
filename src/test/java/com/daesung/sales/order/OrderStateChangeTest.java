@@ -16,6 +16,7 @@ import com.daesung.sales.audit.service.StatusHistoryService;
 import com.daesung.sales.common.exception.BusinessException;
 import com.daesung.sales.dsre.gateway.DsreGateway;
 import com.daesung.sales.dsre.gateway.DsreOrderRow;
+import com.daesung.sales.dsre.gateway.DsreShipResult;
 import com.daesung.sales.dsre.gateway.OrderState;
 import com.daesung.sales.order.service.OrderService;
 import java.util.List;
@@ -50,6 +51,7 @@ class OrderStateChangeTest {
     @Mock private DsreGateway dsreGateway;
     @Mock private StatusHistoryService statusHistoryService;
     @Mock private com.daesung.sales.logistics.service.ShipmentService shipmentService;
+    @Mock private com.daesung.sales.common.audit.CurrentAuditor currentAuditor;
     @InjectMocks private OrderService orderService;
 
     private static DsreOrderRow order(int reqCd, String stateCode) {
@@ -57,6 +59,14 @@ class OrderStateChangeTest {
                 "00001", "학교", "상품", "1회", "P0001", 1, 2026, "3",
                 100, 4, "처리", null, null, null, null, null, null,
                 1200L, 4, null, null);
+    }
+
+    private static List<DsreShipResult> shipped(int reqCd, String before) {
+        return List.of(new DsreShipResult(reqCd, before, DsreShipResult.Outcome.CHANGED, null));
+    }
+
+    private static List<DsreShipResult> conflict(int reqCd, String now) {
+        return List.of(new DsreShipResult(reqCd, now, DsreShipResult.Outcome.SKIPPED, null));
     }
 
     private void given(int reqCd, String state) {
@@ -95,7 +105,7 @@ class OrderStateChangeTest {
     @DisplayName("★★발송취소는 우리 쪽 발송 기록도 내린다 — 그게 없어서 '취소가 안 된다'는 지적을 받았다")
     void 발송취소는_발송일도_내린다() {
         given(7, "D");
-        when(dsreGateway.changeState(7, "D", "W")).thenReturn(1);
+        when(dsreGateway.unship(eq(List.of(7)), any())).thenReturn(shipped(7, "D"));
 
         var r = orderService.changeState(List.of(7), OrderState.READY_TO_SHIP, "오발송");
 
@@ -123,7 +133,8 @@ class OrderStateChangeTest {
     void 발송완료_일괄() {
         given(1, "W");
         given(2, "W");
-        when(dsreGateway.changeState(anyInt(), eq("W"), eq("D"))).thenReturn(1);
+        when(dsreGateway.ship(eq(List.of(1)), any(), any())).thenReturn(shipped(1, "W"));
+        when(dsreGateway.ship(eq(List.of(2)), any(), any())).thenReturn(shipped(2, "W"));
 
         var r = orderService.changeState(List.of(1, 2), OrderState.SHIPPED, "물류 발송");
 
@@ -137,7 +148,7 @@ class OrderStateChangeTest {
     void 부분_실패는_전체를_막지_않는다() {
         given(1, "W");
         given(2, "D");   // 이미 발송완료 — 넘어가야 할 건
-        when(dsreGateway.changeState(1, "W", "D")).thenReturn(1);
+        when(dsreGateway.ship(eq(List.of(1)), any(), any())).thenReturn(shipped(1, "W"));
 
         var r = orderService.changeState(List.of(1, 2), OrderState.SHIPPED, null);
 
@@ -148,7 +159,7 @@ class OrderStateChangeTest {
         assertThat(skipped.reqCd()).isEqualTo(2);
         assertThat(skipped.message()).as("왜 넘어갔는지 건별로 알려준다").contains("이미 발송완료");
         // 안 바뀐 건에 쓰기를 시도하지 않는다
-        verify(dsreGateway, never()).changeState(eq(2), anyString(), anyString());
+        verify(dsreGateway, never()).ship(eq(List.of(2)), any(), any());
     }
 
     @Test
@@ -161,6 +172,7 @@ class OrderStateChangeTest {
         assertThat(r.changed()).isZero();
         assertThat(r.results().get(0).message()).contains("접수완료 → 발송완료", "허용되지 않");
         verify(dsreGateway, never()).changeState(anyInt(), anyString(), anyString());
+        verify(dsreGateway, never()).ship(any(), any(), any());
     }
 
     @Test
@@ -178,12 +190,14 @@ class OrderStateChangeTest {
     @DisplayName("★발송취소(D→W) — 9/27 회의로 열린 전이. 그 전엔 막혀 있었다")
     void 발송취소() {
         given(1, "D");
-        when(dsreGateway.changeState(1, "D", "W")).thenReturn(1);
+        when(dsreGateway.unship(eq(List.of(1)), any())).thenReturn(shipped(1, "D"));
 
         var r = orderService.changeState(List.of(1), OrderState.READY_TO_SHIP, "오발송");
 
         assertThat(r.changed()).as("실물이 나간 뒤의 되돌리기라 되되, 한 칸만").isEqualTo(1);
-        verify(dsreGateway).changeState(1, "D", "W");
+        // ★상태만 바꾸지 않고 자재 복원까지 하는 경로로 간다(작업요청서 발송취소와 같은 처리)
+        verify(dsreGateway).unship(eq(List.of(1)), any());
+        verify(dsreGateway, never()).changeState(anyInt(), anyString(), anyString());
         // 실물이 나간 뒤라 이력이 특히 중요하다 — DSRE2는 제자리 UPDATE라 우리가 안 남기면 흔적이 없다.
         verify(statusHistoryService).record(any(), anyLong(), anyString(),
                 eq("D"), eq("W"), eq("오발송"));
@@ -193,7 +207,8 @@ class OrderStateChangeTest {
     @DisplayName("★그 사이 남이 바꿨으면 성공으로 치지 않는다 — 같은 행을 두 시스템이 쓴다")
     void 동시변경() {
         given(1, "W");
-        when(dsreGateway.changeState(1, "W", "D")).thenReturn(0);   // 조건부 UPDATE가 0행
+        when(dsreGateway.ship(eq(List.of(1)), any(), any()))
+                .thenReturn(conflict(1, "D"));   // 잠그고 보니 이미 남이 옮겨 놓았다
 
         var r = orderService.changeState(List.of(1), OrderState.SHIPPED, null);
 

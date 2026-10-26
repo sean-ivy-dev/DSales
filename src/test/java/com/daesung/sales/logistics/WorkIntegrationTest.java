@@ -111,6 +111,16 @@ class WorkIntegrationTest extends IntegrationTestSupport {
         assertThat(row.path("sentDate").asText()).isEqualTo("2027-04-12");
         // 레거시에 completeDate를 쓰는 코드가 없다 — 우리도 임의로 만들지 않았다.
         assertThat(row.path("completed").asBoolean()).isFalse();
+
+        // ★DSRE 진행상태는 **우리 상태와 다른 축**으로 나란히 나간다.
+        //   DSRE 의 발송준비중(W)은 거래명세서 발급뿐 아니라 상자계산 저장에서도 생겨서,
+        //   우리 기준을 무엇으로 바꿔도 완전히 맞출 수 없다 — 합치지 않고 둘 다 보여 준다.
+        // ‼️CI 는 DSRE 연동을 끄고 돈다(daesung.dsre.enabled=false). 그때 이 칸은 비고
+        //   화면은 그대로 떠야 한다 — 연동이 없다고 작업결과가 막히면 안 된다.
+        //   ※ 응답은 NON_NULL 이라 값이 없으면 **키 자체가 빠진다**(has 로 보면 안 된다).
+        assertThat(row.hasNonNull("dsreStatus")).as("연동이 꺼져 있으면 값이 없다").isFalse();
+        assertThat(row.hasNonNull("dsreStatusLabel")).isFalse();
+        assertThat(row.path("status").asText()).as("우리 상태는 그대로 나온다").isNotBlank();
     }
 
     @Test

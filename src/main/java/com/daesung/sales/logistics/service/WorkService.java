@@ -36,8 +36,74 @@ public class WorkService {
     private final com.daesung.sales.consignment.repository.ConsignmentOutRepository consignmentOutRepository;
     private final SaleRepository saleRepository;
     private final CurrentAuditor currentAuditor;
+    /**
+     * DSRE 진행상태를 나란히 보여주기 위한 게이트웨이.
+     * ‼️<b>선택 주입</b>이다 — 연동이 꺼져 있으면 빈이 없다. 필수로 두면 작업결과 화면이 통째로 못 뜬다.
+     */
+    private final org.springframework.beans.factory.ObjectProvider<
+            com.daesung.sales.dsre.gateway.DsreGateway> dsreGateway;
 
     /** 발송 건을 찾기 위한 키. 학교·분류가 null일 수 있어 빈 문자열로 정규화해 맞춘다. */
+    /**
+     * 발송 건별 <b>DSRE 진행상태</b>. 연동이 꺼져 있으면 빈 맵이다.
+     *
+     * <p>한 발송 건에 신청이 여럿 묶일 수 있다. 그때는 <b>가장 덜 진행된 상태</b>를 쓴다 —
+     * 하나라도 아직 안 나갔으면 그 발송 건은 끝난 게 아니기 때문이다.
+     * (발송완료 처리도 "묶인 신청이 다 나간 뒤에" 옮기는 것과 같은 결이다.)
+     */
+    private java.util.Map<Long, com.daesung.sales.dsre.gateway.OrderState> dsreStates(
+            List<Shipment> shipments) {
+        var gw = dsreGateway.getIfAvailable();
+        if (gw == null || shipments.isEmpty()) {
+            return java.util.Map.of();
+        }
+        List<Long> ids = shipments.stream().map(Shipment::getId).toList();
+        java.util.Map<Long, java.util.List<Integer>> reqByShipment = new java.util.HashMap<>();
+        java.util.Set<Integer> allReq = new java.util.HashSet<>();
+        for (Object[] r : shipmentRepository.findReqCdsOf(ids)) {
+            Long sid = ((Number) r[0]).longValue();
+            Integer reqCd = ((Number) r[1]).intValue();
+            reqByShipment.computeIfAbsent(sid, k -> new ArrayList<>()).add(reqCd);
+            allReq.add(reqCd);
+        }
+        if (allReq.isEmpty()) {
+            return java.util.Map.of();
+        }
+        java.util.Map<Integer, String> states = gw.statesOf(allReq);
+
+        java.util.Map<Long, com.daesung.sales.dsre.gateway.OrderState> out = new java.util.HashMap<>();
+        reqByShipment.forEach((sid, reqCds) -> {
+            com.daesung.sales.dsre.gateway.OrderState least = null;
+            for (Integer reqCd : reqCds) {
+                var st = com.daesung.sales.dsre.gateway.OrderState.ofCode(states.get(reqCd))
+                        .orElse(null);
+                if (st == null) {
+                    continue;
+                }
+                // ‼️CANCELED 는 진행 순서가 아니라 **별개 종결**이다. ordinal 로 비교하면
+                //   삭제된 신청이 '가장 진행된 것'으로 잡혀 나머지를 가린다 — 끼워 넣지 않는다.
+                if (st == com.daesung.sales.dsre.gateway.OrderState.CANCELED) {
+                    continue;
+                }
+                if (least == null || st.ordinal() < least.ordinal()) {
+                    least = st;
+                }
+            }
+            if (least != null) {
+                out.put(sid, least);
+            }
+        });
+        return out;
+    }
+
+    private static Long shipmentKey(Shipment s) {
+        return s.getId();
+    }
+
+    private static String labelOrNull(com.daesung.sales.dsre.gateway.OrderState st) {
+        return (st == null) ? null : st.label();
+    }
+
     private static String key(LocalDate date, Long partnerId, String schoolCode, String tradeClass) {
         return date + "|" + partnerId + "|" + (schoolCode == null ? "" : schoolCode)
                 + "|" + (tradeClass == null ? "" : tradeClass);
@@ -87,6 +153,11 @@ public class WorkService {
                         boolToInt(printed), boolToInt(acknowledged), null)
                 : shipmentRepository.search(from, to, tradeClass, partnerId, printed, acknowledged, null);
 
+        // ★DSRE 진행상태는 **한 번에** 읽는다. 행마다 findOrder 를 돌리면 원격 DB 왕복이 수십 번이다.
+        //   연동이 꺼져 있으면 빈 맵 — 그 칸만 null 로 나가고 화면은 그대로 뜬다.
+        java.util.Map<Long, com.daesung.sales.dsre.gateway.OrderState> dsreByShipment =
+                dsreStates(found);
+
         List<WorkResultRow> rows = new ArrayList<>();
         for (Shipment s : found) {
             if (wanted != null && !wanted.contains(s.progressState())) {
@@ -111,7 +182,10 @@ public class WorkService {
                     s.getSchoolCode(), s.getSchoolName(),
                     s.getPrintedAt() != null,
                     s.getAcknowledgedAt() != null, s.getAcknowledgedBy(),
-                    s.progressState(), s.progressState().label(), s.getDeletedAt() != null,
+                    s.progressState(), s.progressState().label(),
+                    dsreByShipment.get(shipmentKey(s)),
+                    labelOrNull(dsreByShipment.get(shipmentKey(s))),
+                    s.getDeletedAt() != null,
                     s.getCompletedAt() != null, s.getSentDate(),
                     whNames.isEmpty() ? null : whNames,
                     q, total, s.getBoxCount(), s.getSendMemo(), s.getMemo()));

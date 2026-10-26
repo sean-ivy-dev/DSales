@@ -5,6 +5,11 @@ import com.daesung.sales.audit.service.StatusHistoryService;
 import com.daesung.sales.common.audit.CurrentAuditor;
 import com.daesung.sales.common.exception.BusinessException;
 import com.daesung.sales.common.exception.ErrorCode;
+import com.daesung.sales.common.tx.AfterRollback;
+import com.daesung.sales.dsre.gateway.DsreGateway;
+import com.daesung.sales.dsre.gateway.DsreShipResult;
+import com.daesung.sales.dsre.gateway.OrderState;
+import com.daesung.sales.logistics.dto.DsreStateSync;
 import com.daesung.sales.logistics.dto.ShippingUpdateRequest;
 import com.daesung.sales.logistics.dto.TrackingUploadResponse;
 import com.daesung.sales.logistics.entity.DeliveryType;
@@ -13,6 +18,7 @@ import com.daesung.sales.logistics.repository.ShipmentRepository;
 import com.daesung.sales.partner.entity.Partner;
 import com.daesung.sales.sale.entity.Sale;
 import java.io.IOException;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -22,6 +28,7 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.springframework.web.multipart.MultipartFile;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,6 +47,8 @@ public class ShipmentService {
     private final ShipmentRepository shipmentRepository;
     private final StatusHistoryService statusHistoryService;
     private final CurrentAuditor currentAuditor;
+    /** DSRE 연동이 꺼져 있으면(daesung.dsre.enabled=false) 비어 있다 — 그땐 우리 발송일만 다룬다. */
+    private final ObjectProvider<DsreGateway> dsreGateway;
 
     /**
      * 매출 1건에 대응하는 발송 건을 확보한다(없으면 생성). 근거: UC_TabPages.vb:752 —
@@ -136,33 +145,129 @@ public class ShipmentService {
     }
 
     /**
-     * 작업요청서 단위 <b>발송취소</b>(프론트 실측 2026-10-12 A-3).
-     *
-     * <p>★<b>왜 따로 필요한가</b> — 10/08에 넣은 발송취소는 {@code POST /orders/state} 의
-     * <b>D→W 전환</b>에 딸려 동작한다. 그런데 작업요청서에서 직접 [발송완료]를 누른 건은
-     * 묶인 신청의 DSRE 상태가 D 가 아니다(실측: 작업요청서 76 → reqCds=[990011] 의 상태가 A).
-     * 그 건은 D→W 대상이 아니라 <b>발송일을 내릴 방법이 아예 없었다</b>.
+     * 작업요청서 단위 <b>발송취소</b>(프론트 실측 2026-10-12 A-3 → 2026-10-23 DSRE 연동).
      *
      * <p>★<b>발송일만 내린다.</b> 박스 수·송장번호·수령인은 그대로 둔다 —
      * 물건을 싸 둔 사실은 취소되지 않고, 다시 보낼 때 그 값이 필요하다
      * (송장번호는 지우면 복원할 수 없다). 10/08 회신의 원칙과 같다.
      *
-     * <p>‼️<b>DSRE 상태는 건드리지 않는다.</b> 주문 상태는 order 사이트·DSRE2 데스크톱도
-     * 함께 쓰는 값이라, 작업요청서 버튼 하나로 올리기 시작하면 상태를 바꾸는 주체가 셋이 된다.
-     * "DSRE2 분리 유지" 전제에서 우리가 임의로 늘릴 범위가 아니다 —
-     * 신청 상태까지 되돌릴 일이면 {@code POST /orders/state} 를 함께 쓴다.
-     *
-     * @return 실제로 내려갔으면 true(애초에 발송 전이면 false — 이미 원하는 상태다)
+     * <p>★<b>묶인 신청의 DSRE 상태도 되돌린다</b>(2026-10-23, 발주처 정의 "발송완료 = 물류 담당자가
+     * 발송 처리한 시점"). 발송완료(D)인 신청만 발송준비중(W)으로 내리고, 발송완료 때 뺀 자재를
+     * 돌려놓는다({@link DsreGateway#unship}). 그 신청이 걸린 <b>다른 발송 건</b>도 함께 내린다 —
+     * 신청은 발송준비중인데 그 신청의 다른 상자는 발송완료로 남으면 두 화면이 서로 다른 말을 한다.
+     * (10/12 에는 "상태를 바꾸는 주체가 셋이 된다"며 보류했던 것이다 — 발주처 정의로 닫혔다.)
      */
     @Transactional
-    public boolean revertSent(Long shipmentId, String reason) {
+    public RevertOutcome revertSent(Long shipmentId, String reason) {
         Shipment s = getOrThrow(shipmentId);
         boolean changed = s.revertSent();
-        if (changed) {
-            statusHistoryService.record(StatusEntityType.SHIPMENT, s.getId(),
-                    FIELD_SENT, true, false, "발송취소 — " + orNoReason(reason));
+        if (!changed) {
+            return new RevertOutcome(false, List.of());
         }
-        return changed;
+        String why = orNoReason(reason);
+        statusHistoryService.record(StatusEntityType.SHIPMENT, s.getId(),
+                FIELD_SENT, true, false, "발송취소 — " + why);
+
+        DsreGateway gw = dsreGateway.getIfAvailable();
+        List<Integer> reqCds = (gw == null) ? List.of() : shipmentRepository.findReqCds(s.getId());
+        if (reqCds.isEmpty()) {
+            return new RevertOutcome(true, List.of());   // DSRE 꺼짐 또는 수기 매출만 있는 발송
+        }
+        List<DsreShipResult> rs = gw.unship(reqCds, currentAuditor.username());
+        List<DsreStateSync> out = new ArrayList<>();
+        for (DsreShipResult r : rs) {
+            if (r.changed()) {
+                statusHistoryService.record(StatusEntityType.DSRE_ORDER, (long) r.reqCd(), "STATE",
+                        r.beforeState(), OrderState.READY_TO_SHIP.code(),
+                        "작업요청서 발송취소(발송건 " + s.getId() + ") — " + why);
+                revertSentByReqCd(r.reqCd(), why);   // 같은 신청의 다른 발송 건
+                AfterRollback.register(AfterRollback.Kind.UNDO_UNSHIP, r.reqCd(), () -> gw.ship(
+                        List.of(r.reqCd()),
+                        r.prevDelDate() != null ? r.prevDelDate() : LocalDate.now(),
+                        currentAuditor.username()));
+            }
+            out.add(toSync(r, OrderState.READY_TO_SHIP, unshipMessage(r)));
+        }
+        return new RevertOutcome(true, out);
+    }
+
+    /** 발송취소 결과. {@code changed=false} 면 애초에 발송 전이었다(오류가 아니다). */
+    public record RevertOutcome(boolean changed, List<DsreStateSync> dsre) {
+    }
+
+    /**
+     * 발송완료(발송일 입력) 때 묶인 신청의 DSRE 상태를 발송완료(D)로 옮긴다.
+     *
+     * <p>규칙 — 발주처 정의(자료요청서 3-2(가)) "발송완료 = 물류 담당자가 발송 처리한 시점".
+     * <ul>
+     *   <li><b>발송준비중(W)인 신청만</b> 옮긴다. 접수완료·상품준비중은 건너뛰고 이유를 돌려준다 —
+     *       단계를 건너뛰어 발송완료가 되면 검수·준비 단계가 의미 없어진다. 우리 발송일은 그대로 저장한다.</li>
+     *   <li>한 신청이 <b>여러 발송 건</b>에 걸리면(분류가 다르면 상자가 갈린다), 그 발송 건이 <b>전부</b>
+     *       발송된 뒤에야 옮긴다. 상자 하나 보냈다고 신청 전체가 발송완료가 되면 안 된다.</li>
+     *   <li>DSRE 처리는 DSRE2 발송처리 화면과 같다(자재 차감·출고내역·발송일). DSRE 가 실패하면 예외로
+     *       우리 발송일도 저장되지 않고, DSRE 는 됐는데 우리 저장이 실패하면 DSRE 를 되돌린다.</li>
+     * </ul>
+     */
+    private List<DsreStateSync> shipToDsre(Shipment s, LocalDate sentDate) {
+        DsreGateway gw = dsreGateway.getIfAvailable();
+        List<Integer> reqCds = (gw == null) ? List.of() : shipmentRepository.findReqCds(s.getId());
+        if (reqCds.isEmpty()) {
+            return List.of();
+        }
+        List<DsreStateSync> out = new ArrayList<>();
+        List<Integer> ready = new ArrayList<>();
+        for (Integer reqCd : reqCds) {
+            List<Long> pending = shipmentRepository.findByReqCd(reqCd).stream()
+                    .filter(o -> !o.getId().equals(s.getId()) && !o.isSent() && o.getDeletedAt() == null)
+                    .map(Shipment::getId)
+                    .toList();
+            if (pending.isEmpty()) {
+                ready.add(reqCd);
+            } else {
+                out.add(new DsreStateSync(reqCd, false, null, null,
+                        OrderState.SHIPPED.code(), OrderState.SHIPPED.label(),
+                        "같은 신청의 다른 발송 건 " + pending + " 이 아직 발송 전이라 발송완료로 바꾸지 않았습니다."));
+            }
+        }
+        if (ready.isEmpty()) {
+            return out;
+        }
+        List<DsreShipResult> rs = gw.ship(ready, sentDate, currentAuditor.username());
+        for (DsreShipResult r : rs) {
+            if (r.changed()) {
+                statusHistoryService.record(StatusEntityType.DSRE_ORDER, (long) r.reqCd(), "STATE",
+                        r.beforeState(), OrderState.SHIPPED.code(),
+                        "작업요청서 발송완료(발송건 " + s.getId() + ")");
+                AfterRollback.register(AfterRollback.Kind.UNDO_SHIP, r.reqCd(),
+                        () -> gw.unship(List.of(r.reqCd()), currentAuditor.username()));
+            }
+            out.add(toSync(r, OrderState.SHIPPED, shipMessage(r)));
+        }
+        return out;
+    }
+
+    private static DsreStateSync toSync(DsreShipResult r, OrderState to, String message) {
+        return new DsreStateSync(r.reqCd(), r.changed(), r.beforeState(), OrderState.labelOf(r.beforeState()),
+                to.code(), to.label(), message);
+    }
+
+    private static String shipMessage(DsreShipResult r) {
+        return switch (r.outcome()) {
+            case CHANGED -> null;
+            case DATE_ONLY -> "이미 발송완료라 발송일만 고쳤습니다.";
+            case NOT_FOUND -> "DSRE2에 해당 신청이 없습니다.";
+            case SKIPPED -> OrderState.labelOf(r.beforeState())
+                    + " 상태라 발송완료로 바꾸지 않았습니다. 발송준비중(거래명세서 출력)을 먼저 거쳐야 합니다.";
+        };
+    }
+
+    private static String unshipMessage(DsreShipResult r) {
+        return switch (r.outcome()) {
+            case CHANGED -> null;
+            case NOT_FOUND -> "DSRE2에 해당 신청이 없습니다.";
+            case DATE_ONLY, SKIPPED -> OrderState.labelOf(r.beforeState())
+                    + " 상태라 DSRE에서 되돌릴 발송완료가 없습니다.";
+        };
     }
 
     /**
@@ -270,12 +375,13 @@ public class ShipmentService {
      * 수령인이 지워지면 택배가 누구에게 가는지 알 수 없게 된다.
      */
     @Transactional
-    public Shipment updateShipping(Long shipmentId, ShippingUpdateRequest req) {
+    public List<DsreStateSync> updateShipping(Long shipmentId, ShippingUpdateRequest req) {
         Shipment s = getOrThrow(shipmentId);
         s.updateShipping(req.boxCount(), req.sentDate(), req.sendMemo());
         s.updateDelivery(req.deliveryType(), req.receiverName(), req.receiverPhone());
         s.updateTracking(req.courierName(), req.trackingNo());
-        return s;
+        // 발송일이 들어오면 = 발송 처리. 묶인 신청의 DSRE 상태도 발송완료로(2026-10-23).
+        return (req.sentDate() == null) ? List.of() : shipToDsre(s, req.sentDate());
     }
 
     /**

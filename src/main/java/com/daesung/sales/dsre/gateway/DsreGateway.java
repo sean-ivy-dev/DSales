@@ -106,6 +106,21 @@ public interface DsreGateway {
     java.util.Optional<DsreOrderRow> findOrder(int reqCd);
 
     /**
+     * 신청번호별 <b>진행상태 코드</b>를 한 번에 읽는다.
+     *
+     * <p>★목록 화면용이라 <b>건별 조회(findOrder)를 돌리면 안 된다</b> —
+     * 작업결과 한 페이지가 수십 행이고 DSRE2 는 원격 DB다.
+     *
+     * <p>왜 필요한가: 우리 진행상태({@code Shipment.progressState()})는 우리 필드
+     * (삭제일·발송일·작업요청서 출력시각)로만 판정하는데, DSRE 의 {@code W} 는
+     * <b>거래명세서 발급과 상자계산 저장 두 곳</b>에서 생긴다. 두 값이 어긋나는 건이
+     * 반드시 남으므로, 하나로 맞추려 하지 말고 <b>나란히 보여 준다</b>.
+     *
+     * @return 찾은 것만 담은 맵(없는 신청번호는 키가 없다)
+     */
+    java.util.Map<Integer, String> statesOf(java.util.Collection<Integer> reqCds);
+
+    /**
      * 거래명세서 발급 → 발송준비중(W) 전환. <b>상품준비중(S)일 때만</b> 바뀐다.
      *
      * <p>조건부 UPDATE인 이유: 명세서를 재출력했다고 이미 발송완료(D)된 건이 W로 되돌아가면
@@ -127,6 +142,29 @@ public interface DsreGateway {
      * @return 실제로 바뀐 행 수(0 또는 1)
      */
     int changeState(int reqCd, String fromCode, String toCode);
+
+    /**
+     * 발송완료 처리. DSRE2 발송처리 화면({@code FM_LOGI_DeliveryMng.Set_WorkState/Use_Resource})이
+     * 하는 일을 그대로 한다 — <b>신청 전부를 한 트랜잭션</b>으로.
+     *
+     * <ul>
+     *   <li>발송준비중(W): STATE→D · 자재 현재고 차감 · 자재 출고내역 기록 · 발송일 기록 → {@code CHANGED}</li>
+     *   <li>이미 발송완료(D): 발송일만 고친다 → {@code DATE_ONLY}</li>
+     *   <li>그 밖의 상태: 건드리지 않는다 → {@code SKIPPED}(단계를 건너뛰어 발송완료로 만들지 않는다)</li>
+     * </ul>
+     *
+     * <p>하나라도 SQL 이 실패하면 전부 되돌아간다(반쪽 발송 = 상태는 D 인데 자재는 그대로, 를 막는다).
+     */
+    java.util.List<DsreShipResult> ship(java.util.List<Integer> reqCds, java.time.LocalDate delDate, String actor);
+
+    /**
+     * 발송취소. {@link #ship}의 역 — 발송완료(D)인 신청만 STATE→W · 자재 현재고 복원 ·
+     * 출고내역 삭제 · 발송일 비움. 그 밖의 상태는 {@code SKIPPED}. 한 트랜잭션.
+     *
+     * <p>복원 수량은 <b>출고내역({@code tbl_materials_dtl})에 실제로 적힌 값</b>으로 한다.
+     * 발송 뒤 신청 수량이 바뀌었어도 뺀 만큼만 돌려놓기 위해서다.
+     */
+    java.util.List<DsreShipResult> unship(java.util.List<Integer> reqCds, String actor);
 
     /**
      * 신청 가능한 시행 목록(주문 등록 1단계). 판매중인 것만 — 종료된 시행으로는 신청할 수 없다.

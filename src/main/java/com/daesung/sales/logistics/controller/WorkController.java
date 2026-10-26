@@ -187,12 +187,28 @@ public class WorkController {
                       (연동 여부는 물류팀 인터뷰 회신 대기).
 
                     **지정하지 않은 항목은 건드리지 않는다** — 박스 수만 고치려다
-                    발송일이나 수령인이 지워지면 택배가 누구에게 가는지 알 수 없게 된다.""")
+                    발송일이나 수령인이 지워지면 택배가 누구에게 가는지 알 수 없게 된다.
+
+                    ★**발송일(`sentDate`)을 보내면 = 발송완료 처리**다(2026-10-23).
+                    이 발송 건에 묶인 신청(`reqCds`)의 **DSRE 진행상태도 발송완료(D)** 로 옮기고,
+                    DSRE2 발송처리 화면과 똑같이 **자재 재고 차감·출고내역·발송일**까지 처리한다.
+                    · **발송준비중(W)인 신청만** 옮긴다. 다른 상태는 건너뛰고 `dsre[].message` 에 이유를 준다.
+                    · 이미 발송완료인 신청은 발송일만 고친다.
+                    · 한 신청이 다른 발송 건에도 걸려 있으면, 그 건들이 다 발송된 뒤에 옮긴다.
+                    · DSRE 처리가 실패하면 **전체가 실패**한다(우리 발송일도 저장 안 됨).
+
+                    응답 `dsre` = 신청별 결과. 묶인 신청이 없거나(수기 매출) 발송일을 안 보냈으면 빈 목록.""")
     @PutMapping("/work-orders/{id}/shipping")
-    public ApiResponse<Void> updateShipping(@PathVariable Long id,
-                                            @Valid @RequestBody ShippingUpdateRequest req) {
-        shipmentService.updateShipping(id, req);
-        return ApiResponse.success(null);
+    public ApiResponse<ShippingResult> updateShipping(@PathVariable Long id,
+                                                      @Valid @RequestBody ShippingUpdateRequest req) {
+        return ApiResponse.success(new ShippingResult(shipmentService.updateShipping(id, req)));
+    }
+
+    /** 발송정보 입력 결과. */
+    @io.swagger.v3.oas.annotations.media.Schema(name = "ShippingResult")
+    public record ShippingResult(
+            @io.swagger.v3.oas.annotations.media.Schema(description = "묶인 신청별 DSRE 진행상태 반영 결과")
+            java.util.List<com.daesung.sales.logistics.dto.DsreStateSync> dsre) {
     }
 
     @Operation(summary = "작업요청서 발송취소(2026-10-12 A-3)",
@@ -210,23 +226,25 @@ public class WorkController {
                     · 사유를 받아 상태변경 이력에 남긴다. 안 적으면 `(사유 미입력)`으로 적힌다.
                     · 이미 발송 전이면 `changed=false` — 오류가 아니다(이미 원하는 상태다).
 
-                    ‼️**DSRE 주문 상태는 건드리지 않는다.** 그 값은 order 사이트·DSRE2 데스크톱도
-                    함께 쓴다 — 여기서 올리기 시작하면 상태를 바꾸는 주체가 셋이 된다.
-                    신청 상태까지 되돌릴 일이면 `POST /orders/state`(D→W)를 함께 쓴다.""")
+                    ★**묶인 신청의 DSRE 진행상태도 되돌린다**(2026-10-23). 발송완료(D)인 신청만
+                    발송준비중(W)으로 내리고, 발송완료 때 뺀 **자재 재고를 돌려놓는다**.
+                    그 신청이 걸린 다른 발송 건의 발송일도 함께 내린다. 응답 `dsre` = 신청별 결과.""")
     @DeleteMapping("/work-orders/{id}/shipping")
     public ApiResponse<RevertResult> revertShipping(
             @PathVariable Long id,
             @Valid @RequestBody(required = false) com.daesung.sales.logistics.dto.ReasonRequest req) {
-        boolean changed = shipmentService.revertSent(id,
+        var r = shipmentService.revertSent(id,
                 com.daesung.sales.logistics.dto.ReasonRequest.reasonOf(req));
-        return ApiResponse.success(new RevertResult(changed));
+        return ApiResponse.success(new RevertResult(r.changed(), r.dsre()));
     }
 
     /** 되돌리기 결과. {@code changed=false} 면 애초에 발송 전이었다는 뜻이다(오류가 아니다). */
     @io.swagger.v3.oas.annotations.media.Schema(name = "ShippingRevertResult")
     public record RevertResult(
             @io.swagger.v3.oas.annotations.media.Schema(description = "실제로 발송일이 내려갔으면 true")
-            boolean changed) {
+            boolean changed,
+            @io.swagger.v3.oas.annotations.media.Schema(description = "묶인 신청별 DSRE 진행상태 반영 결과")
+            java.util.List<com.daesung.sales.logistics.dto.DsreStateSync> dsre) {
     }
 
     @Operation(summary = "송장 등록용 양식 다운로드",

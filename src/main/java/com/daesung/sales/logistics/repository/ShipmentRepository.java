@@ -33,6 +33,39 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             """)
     List<Shipment> findByReqCd(@Param("reqCd") Integer reqCd);
 
+    /**
+     * 발송 건에 묶인 신청번호들 — {@link #findByReqCd}의 역방향(작업요청서 {@code reqCds} 와 같은 기준).
+     * 취소된 매출은 뺀다.
+     */
+    @Query("""
+            select distinct sa.reqCd from Sale sa join sa.product p, Shipment sh
+             where sh.id = :shipmentId
+               and sa.reqCd is not null and sa.canceled = false
+               and sa.salesDate = sh.tradeDate
+               and sa.partner.id = sh.partner.id
+               and coalesce(sa.schoolCode, '') = coalesce(sh.schoolCode, '')
+               and coalesce(p.salesDivision, '') = coalesce(sh.tradeClass, '')
+             order by sa.reqCd
+            """)
+    List<Integer> findReqCds(@Param("shipmentId") Long shipmentId);
+
+    /**
+     * 여러 발송 건의 신청번호를 <b>한 번에</b>. 반환 {@code Object[]}: [shipmentId, reqCd].
+     *
+     * <p>★목록 화면이 쓴다. {@link #findReqCds} 를 행마다 부르면 N+1 이고,
+     * 그 뒤에 DSRE 왕복까지 붙으면 한 페이지에 수십 번이 된다.
+     */
+    @Query("""
+            select distinct sh.id, sa.reqCd from Sale sa join sa.product p, Shipment sh
+             where sh.id in :shipmentIds
+               and sa.reqCd is not null and sa.canceled = false
+               and sa.salesDate = sh.tradeDate
+               and sa.partner.id = sh.partner.id
+               and coalesce(sa.schoolCode, '') = coalesce(sh.schoolCode, '')
+               and coalesce(p.salesDivision, '') = coalesce(sh.tradeClass, '')
+            """)
+    List<Object[]> findReqCdsOf(@Param("shipmentIds") java.util.Collection<Long> shipmentIds);
+
     /** 같은 (일자·거래처·학교·분류)의 발송 건. 매출을 여러 번 등록해도 한 건에 묶는다. */
     @Query("""
             select s from Shipment s

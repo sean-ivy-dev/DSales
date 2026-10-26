@@ -160,7 +160,7 @@ public class OrderService {
             return skip(reqCd, fromCode, to,
                     OrderState.labelOf(fromCode) + " → " + to.label() + " 전환은 허용되지 않습니다.");
         }
-        if (dsreGateway.changeState(reqCd, fromCode, to.code()) == 0) {
+        if (applyState(reqCd, from, to) == 0) {
             // 조회와 UPDATE 사이에 DSRE2 데스크톱이 먼저 옮겼다. 성공으로 보고하면 담당자가 속는다.
             return skip(reqCd, fromCode, to, "그 사이 다른 곳에서 상태가 바뀌었습니다. 새로고침 후 다시 시도하세요.");
         }
@@ -180,6 +180,37 @@ public class OrderService {
 
         return new ItemResult(reqCd, true, fromCode, OrderState.labelOf(fromCode),
                 to.code(), to.label(), null);
+    }
+
+    /**
+     * DSRE 상태를 옮긴다. 발송완료·발송취소는 <b>자재 처리까지</b> 한다(2026-10-23) —
+     * 상태만 바꾸면 DSRE2 발송처리 화면으로 보낸 건과 달리 자재 재고가 줄지 않는다.
+     * 작업요청서의 발송완료·발송취소와 같은 처리({@link DsreGateway#ship}/{@link DsreGateway#unship})다.
+     *
+     * @return 실제로 바뀐 건 수(0이면 그 사이 다른 곳에서 상태가 바뀌었다)
+     */
+    private int applyState(int reqCd, OrderState from, OrderState to) {
+        if (from == OrderState.READY_TO_SHIP && to == OrderState.SHIPPED) {
+            boolean ok = dsreGateway.ship(List.of(reqCd), LocalDate.now(), currentAuditor.username())
+                    .stream().anyMatch(com.daesung.sales.dsre.gateway.DsreShipResult::changed);
+            if (ok) {
+                com.daesung.sales.common.tx.AfterRollback.register(
+                        com.daesung.sales.common.tx.AfterRollback.Kind.UNDO_SHIP, reqCd,
+                        () -> dsreGateway.unship(List.of(reqCd), currentAuditor.username()));
+            }
+            return ok ? 1 : 0;
+        }
+        if (from == OrderState.SHIPPED && to == OrderState.READY_TO_SHIP) {
+            var r = dsreGateway.unship(List.of(reqCd), currentAuditor.username()).stream()
+                    .filter(com.daesung.sales.dsre.gateway.DsreShipResult::changed).findFirst();
+            r.ifPresent(x -> com.daesung.sales.common.tx.AfterRollback.register(
+                    com.daesung.sales.common.tx.AfterRollback.Kind.UNDO_UNSHIP, reqCd,
+                    () -> dsreGateway.ship(List.of(reqCd),
+                            x.prevDelDate() != null ? x.prevDelDate() : LocalDate.now(),
+                            currentAuditor.username())));
+            return r.isPresent() ? 1 : 0;
+        }
+        return dsreGateway.changeState(reqCd, from.code(), to.code());
     }
 
     private static ItemResult skip(int reqCd, String fromCode, OrderState to, String message) {
