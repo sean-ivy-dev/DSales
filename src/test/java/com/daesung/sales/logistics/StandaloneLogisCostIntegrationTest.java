@@ -170,4 +170,45 @@ class StandaloneLogisCostIntegrationTest extends IntegrationTestSupport {
     void 단가없으면_행없음() {
         assertThat(rowOf("SLC" + SFX)).isNull();
     }
+
+    @Test
+    @DisplayName("‼️자재 구성이 없으면 0원 행 대신 빠지고, 사유가 실린다")
+    void 자재없으면_행없이_사유만() {
+        // 단가는 등록하되 **자재를 하나도 매칭하지 않는다** — 운영에서 실제로 이 상태였다
+        //   ('생명과학 SET'이 단가 50/50/50 인데 자재 0건이라 전 항목 0원으로 나갔다).
+        Long p = product("SLD" + SFX, "자재없는상품", true);
+        // ★운영과 같은 모양으로 만든다 — 작업구분에 **기본·출고 작업비가 0**이다.
+        //   그 둘이 있으면 자재가 없어도 노무비가 잡혀 행이 정상적으로 나온다(그게 맞다).
+        //   운영의 '생명과학 SET'이 바로 basic=0·trade=0 + 자재 0건이라 전 항목이 0원이었다.
+        int zeroLabor = 7500 + (int) (System.nanoTime() % 400);
+        assertThat(post("/masters/work-types", Map.of(
+                "packType", zeroLabor, "name", "노무비없음" + SFX,
+                "paper", 50, "omr", 30, "etc", 10, "label", 5,
+                "basic", 0, "trade", 0)).path("success").asBoolean()).isTrue();
+        assertThat(post("/logistics-costs/products",
+                Map.of("productId", p, "packType", zeroLabor)).path("success").asBoolean()).isTrue();
+        Long sup2 = createId("/masters/clients",
+                Map.of("code", "SLS2" + SFX, "name", "인쇄2", "type", "NORMAL"));
+        Long pt2 = createId("/masters/clients",
+                Map.of("code", "SLP2" + SFX, "name", "자재없는거래처", "type", "NORMAL"));
+        Long wh2 = createId("/masters/warehouses",
+                Map.of("code", "SLW2" + SFX, "name", "물류2", "type", "MAIN"));
+        assertThat(post("/stock/inbound", Map.of(
+                "processedDate", "2090-01-05", "supplierClientId", sup2,
+                "destinationWarehouseId", wh2,
+                "items", List.of(Map.of("productId", p, "unitCost", 100, "qty", 999))))
+                .path("success").asBoolean()).isTrue();
+        // ‼️**팔아야** 집계 대상이 된다 — missingRateProducts 는 그 기간에 출고된 상품만 훑는다.
+        sell(pt2, wh2, p, 10);
+
+        // ★0원 행이 아니라 **행이 아예 없어야** 한다.
+        assertThat(rowOf("SLD" + SFX)).as("0원 행을 끼워 넣지 않는다").isNull();
+
+        // ★대신 사유가 나와야 한다 — 아무 설명 없이 사라지면 빠진 줄이 있다는 것조차 모른다.
+        List<String> missing = standaloneService.missingRateProducts(
+                java.time.LocalDate.parse("2090-03-01"), java.time.LocalDate.parse("2090-03-31"));
+        assertThat(missing).anyMatch(m -> m.startsWith("SLD" + SFX) && m.contains("자재 구성 없음"));
+        // 단가 자체가 없는 상품은 다른 사유로 잡힌다 — 열어야 할 화면이 다르기 때문이다.
+        assertThat(missing).anyMatch(m -> m.startsWith("SLC" + SFX) && m.contains("단가 미등록"));
+    }
 }

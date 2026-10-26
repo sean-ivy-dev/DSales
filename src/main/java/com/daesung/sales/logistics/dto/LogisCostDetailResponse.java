@@ -25,7 +25,21 @@ public record LogisCostDetailResponse(
         @Schema(description = "구분 ALL/NORMAL/ACCIDENT") String mode,
         @Schema(description = "묶는 축 REQUEST(신청)/PARTNER(거래처)") Grain grain,
         @Schema(description = "명세 + 소계") List<Row> rows,
-        @Schema(description = "총 금액합계") long totalAmount
+        @Schema(description = "총 금액합계") long totalAmount,
+
+        @Schema(description = """
+                ‼️**작업비가 안 잡혀 목록에서 빠진 단독 상품**(상품코드 + 사유).
+
+                0원 행을 끼워 넣지 않는 대신 여기로 알린다 — 0원 줄은 담당자가
+                "작업비 0원 확정"으로 읽어서, 등록이 덜 된 것과 구분되지 않는다.
+
+                사유별로 **열어야 할 화면이 다르다** —
+                · `(자재 구성 없음)`        → 도서관리 > 세트구성 탭에서 자재 매칭
+                · `(단가 미등록)`           → 물류비용등록에서 작업구분 선택
+                · `(작업구분 단가가 전부 0)` → 작업구분 관리에서 단가 입력
+
+                비어 있으면 빠진 상품이 없다는 뜻이다.""")
+        List<String> missingRateProducts
 ) {
     /** 마지막 묶음 축. 레거시 '상세보기' 체크박스에 대응한다. */
     @Schema(name = "LogisCostGrain")

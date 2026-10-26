@@ -120,7 +120,14 @@ public class LogisCostDetailService {
         }
         rows.add(grand.toRow("TOTAL", "총 계"));
 
-        return new LogisCostDetailResponse(from, to, mode.name(), g, rows, grand.totalAmount);
+        // ★빠진 단독 상품을 사유와 함께 싣는다. 0원 행을 안 내보내는 대신 이걸로 알린다 —
+        //   아무 설명 없이 사라지면 담당자는 **빠진 줄이 있다는 것조차 모른다**.
+        //   ‼️시행코드 필터가 걸린 조회에는 단독 상품을 안 더하므로(위 참고) 목록도 비운다.
+        List<String> missing = (dtlCds == null || dtlCds.isEmpty())
+                ? standaloneLogisCostService.missingRateProducts(from, to)
+                : List.of();
+        return new LogisCostDetailResponse(from, to, mode.name(), g, rows, grand.totalAmount,
+                missing);
     }
 
     /**
