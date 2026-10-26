@@ -56,7 +56,8 @@ public record DuffLedgerResponse(
     @Schema(name = "DuffLedgerSummaryRow", description = "처리 구분별 합계 1행")
     public record SummaryRow(
             @Schema(description = """
-                    처리 구분('처리'·'비처리'). 총계 행은 **null** 이다 — 레거시 rollup 의
+                    처리 구분('처리'·'비처리'). **미지정이면 null**(총계 행도 null 이라
+                    `total` 로 가려 읽을 것). 총계 행은 **null** 이다 — 레거시 rollup 의
                     총계 행도 처리 칸이 비어 있다.
 
                     ‼️레거시엔 'SOLID' 구분이 하나 더 있었지만 <b>우리 모델엔 그 값이 없다</b>
@@ -94,7 +95,14 @@ public record DuffLedgerResponse(
                     둘 다 없으면 **비운다**. 빈 칸은 "BOM에 시행예정일을 넣어야 한다"는 신호다.""")
             String examMonth,
             @Schema(description = "학년(상품 마스터)") String grade,
-            @Schema(description = "처리 구분(처리/비처리). 매출등록의 성적처리 구분에서 온다") String procType,
+            @Schema(description = """
+                    처리 구분(처리/비처리). 매출등록의 성적처리 구분에서 온다.
+
+                    ‼️**입력된 경우에만 값이 있다. 미지정이면 null** — 화면은 비면 그 칸을 숨긴다.
+                    예전엔 미지정을 '비처리'로 찍었는데, 이관 자료는 그 칸이 전부 비어 있어
+                    실제 처리 여부와 무관하게 전건이 '비처리'로 나갔다.
+                    발주처가 정한 더프모 양식(8칸·RESULT 샘플 PDF)에도 처리 칸이 없다.""")
+            String procType,
             @Schema(description = "정가") Integer unitPrice,
             @Schema(description = "공급률(%)") Integer supplyRate,
             @Schema(description = "수량") long qty,

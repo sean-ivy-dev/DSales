@@ -357,7 +357,9 @@ public class ReceivableService {
                     str(r[2]), str(r[3]), proc,
                     intOrNull(r[5]), intOrNull(r[6]), qty, amt));
 
-            long[] acc = byProc.computeIfAbsent(proc, k -> new long[2]);
+            // ‼️TreeMap 은 null 키를 못 받는다. 미지정은 빈 문자열로 모아 두고
+            //   낼 때 다시 null 로 돌린다(아래 summary 조립부).
+            long[] acc = byProc.computeIfAbsent((proc == null) ? "" : proc, k -> new long[2]);
             acc[0] += qty;
             acc[1] += amt;
 
@@ -378,21 +380,44 @@ public class ReceivableService {
         }
 
         List<DuffLedgerResponse.SummaryRow> summary = new ArrayList<>();
-        byProc.forEach((proc, acc) ->
-                summary.add(new DuffLedgerResponse.SummaryRow(proc, false, acc[0], acc[1])));
+        byProc.forEach((proc, acc) -> summary.add(new DuffLedgerResponse.SummaryRow(
+                proc.isEmpty() ? null : proc, false, acc[0], acc[1])));
         // 총계는 **명세가 있을 때만** 붙인다. 빈 조회에 0원 총계만 찍히면
         // "0원어치 팔렸다"로 읽혀, 조건이 틀렸다는 사실이 묻힌다.
         if (!summary.isEmpty()) {
             summary.add(new DuffLedgerResponse.SummaryRow(null, true, totalQty, totalAmt));
         }
 
-        return new DuffLedgerResponse(partnerId, partnerCode, partnerName, partnerDsreCode, from, to,
+        // ‼️인자 순서는 DTO 선언 순서(code → dsreCode → name)를 그대로 따라야 한다.
+        //   셋 다 String 이라 어긋나도 **컴파일이 통과한다** — 실제로 name 과 dsreCode 를
+        //   바꿔 넣어 거래처명 자리에 숫자가 나갔다(프론트 실측 2026-10-26, 100곳 중 90곳).
+        return new DuffLedgerResponse(partnerId, partnerCode, partnerDsreCode, partnerName, from, to,
                 rows, summary, totalQty, totalAmt);
     }
 
-    /** 성적처리 구분 → 화면 표기. 미지정은 '비처리'(37p와 같은 규칙). */
+    /**
+     * 성적처리 구분 → 화면 표기. <b>입력된 경우에만</b> 값을 낸다 — 미지정이면 null.
+     *
+     * <p>‼️예전엔 미지정을 '비처리'로 찍었는데, 이관 자료는 그 칸이 **전부 비어 있어**
+     * 실제 처리 여부와 무관하게 전건이 '비처리'로 나갔다(프론트 실측 2026-10-26, 959줄 전부).
+     * 없는 사실을 지어내는 쪽이라 비운다 — 화면은 값이 없으면 그 칸을 숨긴다.
+     *
+     * <p>★발주처가 정한 더프모 양식(10/23 명세 8칸·RESULT 샘플 PDF)에 <b>처리 칸이 없다.</b>
+     * 레거시도 분류명에 처리/비처리/SOLID 글자가 있을 때만 칸을 뒀고,
+     * 2025년부터는 상품코드에 그 구분이 없다.
+     *
+     * <p>‼️<b>월별매출액명세서(37p)의 "미지정=비처리"는 그대로다.</b> 그 화면은 고객 양식에
+     * 성적처리/비처리 칸이 있어 집계 규칙이 맞다. 여기는 <b>표시</b>만 바꾼 것이고,
+     * 그쪽은 SQL 에서 직접 버킷을 나눠 이 메서드를 타지 않는다.
+     */
     private static String procLabel(String procType) {
-        return "GRADED".equals(procType) ? "처리" : "비처리";
+        if ("GRADED".equals(procType)) {
+            return "처리";
+        }
+        if ("UNGRADED".equals(procType)) {
+            return "비처리";
+        }
+        return null;   // 미지정 — 지어내지 않는다
     }
 
     private static LocalDate toLocalDate(Object o) {

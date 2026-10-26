@@ -98,6 +98,18 @@ public class StandaloneLogisCostService {
             long basicAmt = qty * rate.getBasic();
             long tradeAmt = qty * rate.getTrade();
 
+            long total = paperAmt + omrAmt + etcAmt + basicAmt + tradeAmt;
+            // ‼️**0원 행은 내보내지 않는다.** 단가가 등록돼 있어도 금액이 0이 되는 길이 둘 더 있다 —
+            //   ① 자재 구성(세트↔자재 매칭)이 비어 있어 소요수량이 0
+            //   ② 작업구분의 기본작업비·출고작업비가 0
+            //   실제로 '생명과학 SET'이 단가 50/50/50 인데 자재 0건이라 전부 0원으로 나갔다
+            //   (프론트 실측 2026-10-26, 2026-08 단독 7줄 전부 0원).
+            //   0원 행은 담당자가 **"작업비 0원 확정"으로 읽는다** — 등록이 덜 된 것과 구분되지 않는다.
+            //   빠진 상품은 missingRateProducts 가 사유와 함께 알려 준다.
+            if (total <= 0) {
+                continue;
+            }
+
             out.add(new LogisCostDetailRow(
                     null,                   // 신청일 — 기간 합계라 대표 날짜가 없다(DSRE 신청 축 없음)
                     0,                      // 신청번호 — 단독은 DSRE 신청이 없다
@@ -109,7 +121,7 @@ public class StandaloneLogisCostService {
                     paperQty, paperAmt, omrQty, omrAmt, etcQty + labelQty, etcAmt,
                     (int) qty,              // ★'인원' 자리에 출고수량
                     basicAmt, tradeAmt,
-                    paperAmt + omrAmt + etcAmt + basicAmt + tradeAmt,
+                    total,
                     "S",                    // 구분 — 단독은 사고(A)가 없다
                     false,                  // 취소 — 단독은 DSRE 발송취소 축이 없다
                     false));                // 자동계산분이다(수기 등록 아님)
@@ -117,7 +129,14 @@ public class StandaloneLogisCostService {
         return out;
     }
 
-    /** 단가가 없어 빠진 상품. 화면이 "등록이 필요하다"고 알릴 수 있게 따로 낸다. */
+    /**
+     * 작업비가 안 잡혀 빠진 상품 — 코드와 <b>사유</b>를 함께 낸다.
+     *
+     * <p>★사유를 가르는 이유: 담당자가 할 일이 다르다.
+     * "단가 미등록"은 물류비용등록 화면에서 작업구분을 고르면 되고,
+     * "자재 구성 없음"은 도서관리 세트구성 탭에서 자재를 매칭해야 한다.
+     * 한 덩이로 알리면 어느 화면을 열어야 하는지 모른다.
+     */
     @Transactional(readOnly = true)
     public List<String> missingRateProducts(LocalDate from, LocalDate to) {
         Map<String, Boolean> seen = new HashMap<>();
@@ -125,9 +144,17 @@ public class StandaloneLogisCostService {
         for (Object[] r : saleRepository.standaloneShippedQty(from, to)) {
             Long productId = ((Number) r[0]).longValue();
             String code = (String) r[1];
-            if (seen.putIfAbsent(code, true) == null
-                    && rateRepository.findByProductId(productId).isEmpty()) {
-                out.add(code);
+            if (seen.putIfAbsent(code, true) != null) {
+                continue;
+            }
+            var rate = rateRepository.findByProductId(productId).orElse(null);
+            if (rate == null) {
+                out.add(code + " (단가 미등록)");
+            } else if (materialBomRepository.findBySet(productId).isEmpty()) {
+                out.add(code + " (자재 구성 없음)");
+            } else if (rate.getPaper() + rate.getOmr() + rate.getEtc() + rate.getLabel()
+                    + rate.getBasic() + rate.getTrade() <= 0) {
+                out.add(code + " (작업구분 단가가 전부 0)");
             }
         }
         return out;

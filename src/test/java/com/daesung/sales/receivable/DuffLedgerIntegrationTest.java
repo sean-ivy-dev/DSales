@@ -141,7 +141,10 @@ class DuffLedgerIntegrationTest extends IntegrationTestSupport {
 
         assertThat(d.path("schoolName").asText()).isEqualTo("A고");
         assertThat(d.path("grade").asText()).as("도서명 파싱이 아니라 상품 마스터 학년").isEqualTo("3");
-        assertThat(d.path("procType").asText()).isIn("처리", "비처리");
+        // 처리 구분은 **입력된 건만** 값이 있다(미지정은 키가 빠진다 — NON_NULL).
+        if (d.hasNonNull("procType")) {
+            assertThat(d.path("procType").asText()).isIn("처리", "비처리");
+        }
         assertThat(d.path("examMonth").asText())
                 .as("BOM 시행예정일에서 온다(레거시는 도서명을 잘라 만들었다)")
                 .isEqualTo(YEAR + "-09");
@@ -184,11 +187,16 @@ class DuffLedgerIntegrationTest extends IntegrationTestSupport {
     void 처리구분() {
         long graded = detail().stream().filter(r -> "처리".equals(r.path("procType").asText()))
                 .mapToLong(r -> r.path("qty").asLong()).sum();
-        long ungraded = detail().stream().filter(r -> "비처리".equals(r.path("procType").asText()))
+        // ‼️**미지정은 비워 둔다.** 예전엔 '비처리'로 찍었는데, 이관 자료는 그 칸이 전부 비어 있어
+        //   실제 처리 여부와 무관하게 전건이 '비처리'로 나갔다(프론트 실측 2026-10-26).
+        //   NON_NULL 이라 값이 없으면 키 자체가 빠진다.
+        long unset = detail().stream().filter(r -> !r.hasNonNull("procType"))
                 .mapToLong(r -> r.path("qty").asLong()).sum();
 
         assertThat(graded).isEqualTo(17);    // 10 + 7
-        assertThat(ungraded).isEqualTo(5);   // 미지정 = 비처리
+        assertThat(unset).isEqualTo(5);      // 미지정 — '비처리'로 지어내지 않는다
+        assertThat(detail().stream().noneMatch(r -> "비처리".equals(r.path("procType").asText())))
+                .as("입력하지 않은 건을 '비처리'로 찍지 않는다").isTrue();
     }
 
     @Test
@@ -282,6 +290,30 @@ class DuffLedgerIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
+    @DisplayName("‼️거래처명 자리에 코드가 들어가지 않는다 — 인자 순서가 뒤바뀐 적이 있다")
+    void 거래처명과_코드가_안바뀐다() {
+        // DuffLedgerResponse 는 partnerCode·partnerDsreCode·partnerName 이 **전부 String** 이라
+        // 순서를 바꿔 넣어도 **컴파일이 통과한다**. 실제로 name 자리에 DSRE 코드가 들어가
+        // 거래처명이 숫자로 나갔다(프론트 실측 2026-10-26, 100곳 중 90곳).
+        // PDF 파일명·메일에 그대로 쓰이는 값이라 여기서 고정한다.
+        JsonNode d = data(ledger());
+
+        assertThat(d.path("partnerCode").asText()).isEqualTo("DFP" + SFX);
+        assertThat(d.path("partnerName").asText()).isEqualTo("더프거래처");
+        // 이름 자리에 코드가 들어가면 이 둘이 깨진다.
+        assertThat(d.path("partnerName").asText()).isNotEqualTo(d.path("partnerCode").asText());
+        assertThat(d.path("partnerName").asText()).doesNotMatch("\\d+");
+
+        // 전 거래처 경로도 같은 조립부를 쓴다 — 함께 본다.
+        for (JsonNode l : data(get("/closing/ar-ledger/duff/all"
+                + "?fromDate=" + YEAR + "-01-01&toDate=" + YEAR + "-12-31"))) {
+            assertThat(l.path("partnerName").asText())
+                    .as("전 거래처 경로에서도 이름 자리에 코드가 오면 안 된다")
+                    .doesNotMatch("\\d+");
+        }
+    }
+
+    @Test
     @DisplayName("★요약표 — 처리 구분별 합계 + 총계(레거시 rollup(처리))")
     void 요약표() {
         JsonNode s = data(ledger()).path("summary");
@@ -290,19 +322,20 @@ class DuffLedgerIntegrationTest extends IntegrationTestSupport {
         assertThat(s).hasSize(3);
 
         long 처리 = 0;
-        long 비처리 = 0;
+        long 미지정 = 0;
         JsonNode total = null;
         for (JsonNode r : s) {
             if (r.path("total").asBoolean()) {
                 total = r;
             } else if ("처리".equals(r.path("procType").asText())) {
                 처리 = r.path("qty").asLong();
-            } else if ("비처리".equals(r.path("procType").asText())) {
-                비처리 = r.path("qty").asLong();
+            } else if (!r.hasNonNull("procType")) {
+                미지정 = r.path("qty").asLong();
             }
         }
         assertThat(처리).isEqualTo(17);
-        assertThat(비처리).isEqualTo(5);
+        // 미지정도 한 줄로 모인다 — 다만 이름을 '비처리'로 지어내지 않는다.
+        assertThat(미지정).isEqualTo(5);
 
         assertThat(total).as("총계 행이 있다").isNotNull();
         assertThat(total.hasNonNull("procType")).as("총계 행의 처리 칸은 비어 있다").isFalse();
