@@ -1,6 +1,8 @@
 package com.daesung.sales.logistics.service;
 
 import com.daesung.sales.dsre.gateway.LogisCostDetailRow;
+import com.daesung.sales.logistics.dto.LogisCostDetailResponse.MissingProduct;
+import com.daesung.sales.logistics.dto.LogisCostDetailResponse.MissingReason;
 import com.daesung.sales.logistics.entity.ProductLogisRate;
 import com.daesung.sales.logistics.repository.ProductLogisRateRepository;
 import com.daesung.sales.material.entity.MaterialBom;
@@ -76,36 +78,15 @@ public class StandaloneLogisCostService {
                 continue;   // 단가 미등록 — 0원 행으로 끼워 넣지 않는다(위 주석 참고)
             }
 
-            // 자재 소요수량을 자재구분별로 모은다. 해설지는 시험지 쪽에 합친다.
-            long paperQty = 0;
-            long omrQty = 0;
-            long etcQty = 0;
-            long labelQty = 0;
-            for (MaterialBom b : materialBomRepository.findBySet(productId)) {
-                long need = (long) b.getQtyPerSet() * qty;
-                switch (b.getMaterial().getMaterialType()) {
-                    case EXAM_PAPER, ANSWER_SHEET -> paperQty += need;   // 해설지→시험지 단가
-                    case OMR -> omrQty += need;
-                    case LABEL -> labelQty += need;
-                    default -> etcQty += need;                           // 단행본·기타
-                }
-            }
-
-            long paperAmt = paperQty * rate.getPaper();
-            long omrAmt = omrQty * rate.getOmr();
-            // 라벨은 레거시 상세에도 별도 칸이 없어 '기타'에 합친다(금액은 라벨 단가로 계산).
-            long etcAmt = etcQty * rate.getEtc() + labelQty * rate.getLabel();
-            long basicAmt = qty * rate.getBasic();
-            long tradeAmt = qty * rate.getTrade();
-
-            long total = paperAmt + omrAmt + etcAmt + basicAmt + tradeAmt;
+            Breakdown b = breakdown(productId, rate, qty);
+            long total = b.total();
             // ‼️**0원 행은 내보내지 않는다.** 단가가 등록돼 있어도 금액이 0이 되는 길이 둘 더 있다 —
             //   ① 자재 구성(세트↔자재 매칭)이 비어 있어 소요수량이 0
             //   ② 작업구분의 기본작업비·출고작업비가 0
             //   실제로 '생명과학 SET'이 단가 50/50/50 인데 자재 0건이라 전부 0원으로 나갔다
             //   (프론트 실측 2026-10-26, 2026-08 단독 7줄 전부 0원).
             //   0원 행은 담당자가 **"작업비 0원 확정"으로 읽는다** — 등록이 덜 된 것과 구분되지 않는다.
-            //   빠진 상품은 missingRateProducts 가 사유와 함께 알려 준다.
+            //   빠진 상품은 missingProducts 가 사유와 함께 알려 준다.
             if (total <= 0) {
                 continue;
             }
@@ -117,10 +98,11 @@ public class StandaloneLogisCostService {
                     0, "(단독)",             // 시행코드·시행명 — DSRE 축이 없다
                     partnerCode, partnerName,
                     null, null, null,       // 지역·도시·학교 — 거래처 축으로만 집계한다
-                    paperQty + omrQty + etcQty + labelQty,
-                    paperQty, paperAmt, omrQty, omrAmt, etcQty + labelQty, etcAmt,
+                    b.paperQty() + b.omrQty() + b.etcQty() + b.labelQty(),
+                    b.paperQty(), b.paperAmt(), b.omrQty(), b.omrAmt(),
+                    b.etcQty() + b.labelQty(), b.etcAmt(),
                     (int) qty,              // ★'인원' 자리에 출고수량
-                    basicAmt, tradeAmt,
+                    b.basicAmt(), b.tradeAmt(),
                     total,
                     "S",                    // 구분 — 단독은 사고(A)가 없다
                     false,                  // 취소 — 단독은 DSRE 발송취소 축이 없다
@@ -136,27 +118,66 @@ public class StandaloneLogisCostService {
      * "단가 미등록"은 물류비용등록 화면에서 작업구분을 고르면 되고,
      * "자재 구성 없음"은 도서관리 세트구성 탭에서 자재를 매칭해야 한다.
      * 한 덩이로 알리면 어느 화면을 열어야 하는지 모른다.
+     *
+     * <p>‼️판정은 {@link #rows}의 "0원이면 뺀다"와 <b>같은 계산</b>으로 한다.
+     * 전에는 자재 구성이 없으면 무조건 목록에 올렸는데, 기본·출고 작업비가 있으면
+     * 그 상품은 행이 정상으로 나간다 — 나간 상품을 "빠졌다"고 알리고 있었다.
      */
     @Transactional(readOnly = true)
-    public List<String> missingRateProducts(LocalDate from, LocalDate to) {
+    public List<MissingProduct> missingProducts(LocalDate from, LocalDate to) {
         Map<String, Boolean> seen = new HashMap<>();
-        List<String> out = new ArrayList<>();
+        List<MissingProduct> out = new ArrayList<>();
         for (Object[] r : saleRepository.standaloneShippedQty(from, to)) {
             Long productId = ((Number) r[0]).longValue();
             String code = (String) r[1];
+            String name = (String) r[2];
             if (seen.putIfAbsent(code, true) != null) {
                 continue;
             }
             var rate = rateRepository.findByProductId(productId).orElse(null);
             if (rate == null) {
-                out.add(code + " (단가 미등록)");
-            } else if (materialBomRepository.findBySet(productId).isEmpty()) {
-                out.add(code + " (자재 구성 없음)");
-            } else if (rate.getPaper() + rate.getOmr() + rate.getEtc() + rate.getLabel()
-                    + rate.getBasic() + rate.getTrade() <= 0) {
-                out.add(code + " (작업구분 단가가 전부 0)");
+                out.add(new MissingProduct(code, name, MissingReason.NO_RATE));
+            } else if (breakdown(productId, rate, 1).total() <= 0) {
+                // 금액은 출고수량에 비례한다 — 1개에 0원이면 몇 개를 내도 0원이다.
+                MissingReason reason = materialBomRepository.findBySet(productId).isEmpty()
+                        ? MissingReason.NO_MATERIAL
+                        : MissingReason.ZERO_RATE;
+                out.add(new MissingProduct(code, name, reason));
             }
         }
         return out;
+    }
+
+    /**
+     * 출고수량 {@code qty}의 작업비 내역. {@link #rows}와 {@link #missingProducts}가
+     * 같은 계산을 쓰게 하려고 뽑았다 — 둘이 갈리면 "나간 행"과 "빠졌다는 목록"이 어긋난다.
+     */
+    private Breakdown breakdown(Long productId, ProductLogisRate rate, long qty) {
+        // 자재 소요수량을 자재구분별로 모은다. 해설지는 시험지 쪽에 합친다.
+        long paperQty = 0;
+        long omrQty = 0;
+        long etcQty = 0;
+        long labelQty = 0;
+        for (MaterialBom b : materialBomRepository.findBySet(productId)) {
+            long need = (long) b.getQtyPerSet() * qty;
+            switch (b.getMaterial().getMaterialType()) {
+                case EXAM_PAPER, ANSWER_SHEET -> paperQty += need;   // 해설지→시험지 단가
+                case OMR -> omrQty += need;
+                case LABEL -> labelQty += need;
+                default -> etcQty += need;                           // 단행본·기타
+            }
+        }
+        // 라벨은 레거시 상세에도 별도 칸이 없어 '기타'에 합친다(금액은 라벨 단가로 계산).
+        return new Breakdown(paperQty, omrQty, etcQty, labelQty,
+                paperQty * rate.getPaper(), omrQty * rate.getOmr(),
+                etcQty * rate.getEtc() + labelQty * rate.getLabel(),
+                qty * rate.getBasic(), qty * rate.getTrade());
+    }
+
+    private record Breakdown(long paperQty, long omrQty, long etcQty, long labelQty,
+                             long paperAmt, long omrAmt, long etcAmt, long basicAmt, long tradeAmt) {
+        long total() {
+            return paperAmt + omrAmt + etcAmt + basicAmt + tradeAmt;
+        }
     }
 }

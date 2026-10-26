@@ -2,6 +2,11 @@ package com.daesung.sales.logistics;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.daesung.sales.logistics.dto.LogisCostDetailResponse;
+import com.daesung.sales.logistics.dto.LogisCostDetailResponse.MissingProduct;
+import com.daesung.sales.logistics.dto.LogisCostDetailResponse.MissingRate;
+import com.daesung.sales.logistics.dto.LogisCostDetailResponse.MissingReason;
+import com.daesung.sales.logistics.dto.LogisCostDetailResponse.ReasonCount;
 import com.daesung.sales.support.IntegrationTestSupport;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.HashMap;
@@ -205,10 +210,65 @@ class StandaloneLogisCostIntegrationTest extends IntegrationTestSupport {
         assertThat(rowOf("SLD" + SFX)).as("0원 행을 끼워 넣지 않는다").isNull();
 
         // ★대신 사유가 나와야 한다 — 아무 설명 없이 사라지면 빠진 줄이 있다는 것조차 모른다.
-        List<String> missing = standaloneService.missingRateProducts(
-                java.time.LocalDate.parse("2090-03-01"), java.time.LocalDate.parse("2090-03-31"));
-        assertThat(missing).anyMatch(m -> m.startsWith("SLD" + SFX) && m.contains("자재 구성 없음"));
+        List<MissingProduct> missing = missing();
+        assertThat(missing).anyMatch(m -> m.productCode().equals("SLD" + SFX)
+                && m.reason() == MissingReason.NO_MATERIAL);
         // 단가 자체가 없는 상품은 다른 사유로 잡힌다 — 열어야 할 화면이 다르기 때문이다.
-        assertThat(missing).anyMatch(m -> m.startsWith("SLC" + SFX) && m.contains("단가 미등록"));
+        assertThat(missing).anyMatch(m -> m.productCode().equals("SLC" + SFX)
+                && m.reason() == MissingReason.NO_RATE);
+    }
+
+    @Test
+    @DisplayName("‼️자재가 없어도 노무비가 잡히면 행이 나가고, '빠졌다' 목록에는 없다")
+    void 자재없어도_노무비있으면_목록에_없음() {
+        // 전에는 자재 구성이 없으면 무조건 "자재 구성 없음"으로 올렸다 —
+        //   그런데 기본·출고 작업비가 있으면 그 상품은 행이 정상으로 나간다.
+        //   나간 상품을 빠졌다고 알리면 담당자는 할 필요 없는 매칭을 하러 간다.
+        Long p = product("SLE" + SFX, "노무비만상품", true);
+        rate(p);   // 기본 100 · 출고 200 이 있는 작업구분
+        Long sup = createId("/masters/clients",
+                Map.of("code", "SLS3" + SFX, "name", "인쇄3", "type", "NORMAL"));
+        Long pt = createId("/masters/clients",
+                Map.of("code", "SLP3" + SFX, "name", "노무비거래처", "type", "NORMAL"));
+        Long wh = createId("/masters/warehouses",
+                Map.of("code", "SLW3" + SFX, "name", "물류3", "type", "MAIN"));
+        assertThat(post("/stock/inbound", Map.of(
+                "processedDate", "2090-01-05", "supplierClientId", sup,
+                "destinationWarehouseId", wh,
+                "items", List.of(Map.of("productId", p, "unitCost", 100, "qty", 999))))
+                .path("success").asBoolean()).isTrue();
+        sell(pt, wh, p, 10);
+
+        var row = rowOf("SLE" + SFX);
+        assertThat(row).as("노무비가 있으니 행이 나간다").isNotNull();
+        assertThat(row.totalAmount()).isEqualTo(10L * (100 + 200));
+        assertThat(missing()).noneMatch(m -> m.productCode().equals("SLE" + SFX));
+    }
+
+    @Test
+    @DisplayName("빠진 상품은 전건 나열 대신 건수·사유별 건수·표본 10건으로 요약한다")
+    void 빠진상품_요약() {
+        // 운영 2026-09: 단가 마스터가 비어 400여 개가 걸렸다 — 전건 배열은 경고가 아니라 소음이다.
+        List<MissingProduct> all = new java.util.ArrayList<>();
+        for (int i = 0; i < 400; i++) {
+            all.add(new MissingProduct(String.format("P%03d", i), "상품" + i, MissingReason.NO_RATE));
+        }
+        all.add(new MissingProduct("Z999", "자재없는세트", MissingReason.NO_MATERIAL));
+
+        MissingRate s = MissingRate.of(all);
+        assertThat(s.total()).isEqualTo(401);
+        assertThat(s.reasons()).extracting(ReasonCount::reason, ReasonCount::count)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(MissingReason.NO_RATE, 400),
+                        org.assertj.core.groups.Tuple.tuple(MissingReason.NO_MATERIAL, 1));
+        assertThat(s.samples()).hasSize(LogisCostDetailResponse.MISSING_SAMPLE_LIMIT);
+        // ★1건짜리 사유가 400건에 묻히지 않는다 — 코드 순으로만 자르면 Z999 는 안 보인다.
+        assertThat(s.samples()).anyMatch(m -> m.productCode().equals("Z999"));
+
+        assertThat(MissingRate.of(List.of()).total()).isZero();
+    }
+
+    private List<MissingProduct> missing() {
+        return standaloneService.missingProducts(
+                java.time.LocalDate.parse("2090-03-01"), java.time.LocalDate.parse("2090-03-31"));
     }
 }

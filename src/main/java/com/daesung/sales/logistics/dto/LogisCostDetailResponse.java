@@ -28,19 +28,104 @@ public record LogisCostDetailResponse(
         @Schema(description = "총 금액합계") long totalAmount,
 
         @Schema(description = """
-                ‼️**작업비가 안 잡혀 목록에서 빠진 단독 상품**(상품코드 + 사유).
+                ‼️**작업비가 안 잡혀 목록에서 빠진 단독 상품** — 건수·사유별 건수·표본.
 
                 0원 행을 끼워 넣지 않는 대신 여기로 알린다 — 0원 줄은 담당자가
                 "작업비 0원 확정"으로 읽어서, 등록이 덜 된 것과 구분되지 않는다.
 
-                사유별로 **열어야 할 화면이 다르다** —
-                · `(자재 구성 없음)`        → 도서관리 > 세트구성 탭에서 자재 매칭
-                · `(단가 미등록)`           → 물류비용등록에서 작업구분 선택
-                · `(작업구분 단가가 전부 0)` → 작업구분 관리에서 단가 입력
+                ★전건을 나열하지 않는다. 단가 마스터가 비어 있으면 한 달에 수백 개가 걸려
+                경고가 아니라 소음이 된다(운영 2026-09: 400여 개). 화면은 사유별 한 줄
+                ("단가 미등록 341개")로 띄우고, 표본은 무엇이 걸렸는지 감을 잡는 용도다.
 
-                비어 있으면 빠진 상품이 없다는 뜻이다.""")
-        List<String> missingRateProducts
+                `total = 0`이면 빠진 상품이 없다는 뜻이다.""")
+        MissingRate missingRate
 ) {
+    /** 표본으로 싣는 최대 건수. */
+    public static final int MISSING_SAMPLE_LIMIT = 10;
+
+    /** 작업비가 0원이라 행에서 빠진 이유. 사유마다 담당자가 열어야 할 화면이 다르다. */
+    @Schema(name = "LogisCostMissingReason")
+    public enum MissingReason {
+        NO_RATE("단가 미등록", "물류비용등록 > 상품별 단가에서 작업구분 선택"),
+        NO_MATERIAL("자재 구성 없음", "도서관리 > 세트구성 탭에서 자재 매칭"),
+        ZERO_RATE("작업구분 단가가 0", "물류비용등록 > 작업구분 관리에서 단가 입력");
+
+        private final String label;
+        private final String action;
+
+        MissingReason(String label, String action) {
+            this.label = label;
+            this.action = action;
+        }
+
+        public String label() {
+            return label;
+        }
+
+        public String action() {
+            return action;
+        }
+    }
+
+    /** 빠진 상품 한 건. */
+    @Schema(name = "LogisCostMissingProduct")
+    public record MissingProduct(
+            @Schema(description = "상품코드") String productCode,
+            @Schema(description = "상품명") String productName,
+            @Schema(description = "사유") MissingReason reason
+    ) {
+    }
+
+    @Schema(name = "LogisCostMissingReasonCount")
+    public record ReasonCount(
+            @Schema(description = "사유 코드") MissingReason reason,
+            @Schema(description = "사유 표시명", example = "단가 미등록") String label,
+            @Schema(description = "담당자가 할 일", example = "물류비용등록 > 상품별 단가에서 작업구분 선택")
+            String action,
+            @Schema(description = "상품 수") int count
+    ) {
+    }
+
+    @Schema(name = "LogisCostMissingRate")
+    public record MissingRate(
+            @Schema(description = "빠진 상품 수(전체)") int total,
+            @Schema(description = "사유별 상품 수. 건수 많은 순") List<ReasonCount> reasons,
+            @Schema(description = "표본(최대 10건, 상품코드 순)") List<MissingProduct> samples
+    ) {
+        public static final MissingRate NONE = new MissingRate(0, List.of(), List.of());
+
+        public static MissingRate of(List<MissingProduct> all) {
+            if (all.isEmpty()) {
+                return NONE;
+            }
+            java.util.Map<MissingReason, Integer> byReason = new java.util.EnumMap<>(MissingReason.class);
+            for (MissingProduct m : all) {
+                byReason.merge(m.reason(), 1, Integer::sum);
+            }
+            List<ReasonCount> reasons = byReason.entrySet().stream()
+                    .sorted(java.util.Map.Entry.<MissingReason, Integer>comparingByValue().reversed())
+                    .map(e -> new ReasonCount(e.getKey(), e.getKey().label(), e.getKey().action(),
+                            e.getValue()))
+                    .toList();
+            // ★사유가 적은 쪽(예: 자재 구성 없음 1건)이 수백 건에 묻히지 않게,
+            //   사유마다 먼저 한 건씩 담고 남는 자리를 상품코드 순으로 채운다.
+            List<MissingProduct> sorted = all.stream()
+                    .sorted(java.util.Comparator.comparing(MissingProduct::productCode))
+                    .toList();
+            java.util.LinkedHashSet<MissingProduct> picked = new java.util.LinkedHashSet<>();
+            for (ReasonCount rc : reasons) {
+                sorted.stream().filter(m -> m.reason() == rc.reason()).findFirst().ifPresent(picked::add);
+            }
+            for (MissingProduct m : sorted) {
+                if (picked.size() >= MISSING_SAMPLE_LIMIT) {
+                    break;
+                }
+                picked.add(m);
+            }
+            return new MissingRate(all.size(), reasons, List.copyOf(picked));
+        }
+    }
+
     /** 마지막 묶음 축. 레거시 '상세보기' 체크박스에 대응한다. */
     @Schema(name = "LogisCostGrain")
     public enum Grain {
