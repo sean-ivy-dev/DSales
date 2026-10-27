@@ -350,7 +350,9 @@ public class OrderService {
                 req.schoolCode(), null, null, null, sl.memo());
         SalesEntryRequest entry = new SalesEntryRequest(
                 (sl.salesDate() != null) ? sl.salesDate() : LocalDate.now(),
-                sl.partnerId(), sl.warehouseId(), null, List.of(item));
+                sl.partnerId(), sl.warehouseId(), null,
+                null, null, null,     // 발송구분·수령인 — 이 경로는 아래 autoFillDelivery(DSRE 축)로 따로 채운다
+                List.of(item));
 
         SalesEntryResponse res = saleService.createEntries(entry);
         String no = res.items().isEmpty() ? null : res.items().get(0).salesNo();

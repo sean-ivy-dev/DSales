@@ -15,7 +15,12 @@ import java.util.List;
 @Schema(name = "DashboardOverviewResponse", description = "기본 통계 대시보드(19p)")
 public record DashboardOverviewResponse(
         @Schema(description = "기준 연도") int year,
-        @Schema(description = "기준 월") int month,
+        @Schema(description = "기준 월. quarter로 조회했으면 그 분기의 마지막 달(1분기→3 …)") int month,
+        @Schema(description = """
+                조회 단위(1~4분기). **월별로 조회했으면 null**(발주처 질의 2026-10-26 ③).
+                값이 있으면 `kpi`의 "당월" 자리가 **그 분기 3개월 합**이라는 뜻이다 —
+                필드명(monthNetSales 등)은 그대로지만 의미가 분기로 넓어진다.""")
+        Integer quarter,
         @Schema(description = "KPI 카드") Kpi kpi,
         @Schema(description = "제품별 목표대비(당해 누적, 목표 등록분만)") List<ProductTarget> productTargets,
         @Schema(description = "월별 누적 트렌드(1~12월)") List<TrendPoint> monthlyTrend,

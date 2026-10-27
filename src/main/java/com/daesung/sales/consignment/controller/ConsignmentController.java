@@ -71,8 +71,19 @@ public class ConsignmentController {
                     한 거래처가 여러 학교에 위탁으로 깔아 두면 거래처 단위 목록으로는
                     어느 학교 몫을 확정하는지 고를 수 없다.""",
                     example = "S001")
-            @RequestParam(required = false) String schoolCode) {
-        return ApiResponse.success(consignmentService.findPending(partnerId, schoolCode));
+            @RequestParam(required = false) String schoolCode,
+            @Parameter(description = """
+                    출고기간 시작(yyyy-MM-dd). 행마다 이미 담겨 있는 `tradeDate`(출고일) 기준으로
+                    거른다. 미지정 시 전체(발주처 질의 2026-10-26 ②-④).
+                    ‼️출고일이 없는 옛 미결(V62 이전)은 기간을 주면 제외된다.""")
+            @RequestParam(required = false)
+            @org.springframework.format.annotation.DateTimeFormat(
+                    iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate fromDate,
+            @Parameter(description = "출고기간 종료(yyyy-MM-dd). 미지정 시 전체")
+            @RequestParam(required = false)
+            @org.springframework.format.annotation.DateTimeFormat(
+                    iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate toDate) {
+        return ApiResponse.success(consignmentService.findPending(partnerId, schoolCode, fromDate, toDate));
     }
 
     @Operation(summary = "위탁 미결정산",

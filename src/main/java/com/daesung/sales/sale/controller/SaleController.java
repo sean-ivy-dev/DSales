@@ -894,8 +894,10 @@ public class SaleController {
             @Parameter(description = "학년 필터(도서 학년). 미지정=전체", example = "3")
             @RequestParam(required = false) String grade,
             @Parameter(description = "상품구분 필터. 미지정=전체", example = "교재")
-            @RequestParam(required = false) String productType) {
-        return ApiResponse.success(attendanceService.yearly(year, grade, productType));
+            @RequestParam(required = false) String productType,
+            @Parameter(description = "거래처 검색(코드·명 부분일치). 미지정=전체", example = "대성")
+            @RequestParam(required = false) String keyword) {
+        return ApiResponse.success(attendanceService.yearly(year, grade, productType, keyword));
     }
 
     @Operation(summary = "응시현황(연도별) 엑셀 다운로드")
@@ -903,7 +905,8 @@ public class SaleController {
     public org.springframework.http.ResponseEntity<byte[]> attendanceYearlyExport(
             @RequestParam int year,
             @RequestParam(required = false) String grade,
-            @RequestParam(required = false) String productType) {
+            @RequestParam(required = false) String productType,
+            @RequestParam(required = false) String keyword) {
         var cols = new java.util.ArrayList<com.daesung.sales.common.excel.ExcelExportUtil.Col>();
         cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("구분", "rowType"));
         cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("지역구분", "regionGroup"));
@@ -918,7 +921,7 @@ public class SaleController {
         }
         cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("합계[수량]", "totalQty"));
         cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("합계[매출]", "totalAmount"));
-        byte[] xlsx = excel.toXlsx("응시현황", cols, attendanceService.yearly(year, grade, productType).rows());
+        byte[] xlsx = excel.toXlsx("응시현황", cols, attendanceService.yearly(year, grade, productType, keyword).rows());
         return excel.asDownload(xlsx, "응시현황_연도별.xlsx");
     }
 

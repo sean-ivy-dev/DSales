@@ -1,5 +1,6 @@
 package com.daesung.sales.sale.dto;
 
+import com.daesung.sales.logistics.entity.DeliveryType;
 import com.daesung.sales.sale.entity.ProcType;
 import com.daesung.sales.salestype.entity.ShipmentType;
 import com.daesung.sales.sale.entity.PackType;
@@ -52,6 +53,28 @@ public record SalesEntryRequest(
                 매출만 서면 장부가 갈라진다. 그 경우 필요한 것은 창고를 비우는 게 아니라 이 값이다.""",
                 example = "false")
         Boolean onlySales,
+
+        @Schema(description = """
+                발송구분(COURIER=택배/FREIGHT=화물). 신규 주문(간단 폼)의 「택배 발송」 체크 대응
+                (발주처 질의 2026-10-26 ①, 정본 16p·26p).
+
+                <p>이 주문이 묶이는 발송 건(거래일자·거래처·학교·분류 단위, {@link #onlySales}
+                주석 참고)에 <b>비어 있을 때만</b> 채운다. 이미 값이 있으면 그대로 둔다 —
+                한 발송 건에 여러 주문이 묶일 수 있어, 나중 주문이 앞 주문의 값이나
+                물류가 손으로 고친 값을 덮으면 택배가 엉뚱한 사람에게 간다(DSRE 신청 경로
+                {@code autoFillDelivery}와 같은 정책).
+
+                <p>창고가 없거나(미출고 매출) 「매출만(배송X)」이면 발송 건 자체가 안 생겨
+                이 값도 적용되지 않는다.""",
+                example = "COURIER")
+        DeliveryType deliveryType,
+
+        @Schema(description = "수령인(담당자명) — 「택배 발송」 체크 시 함께 받는다. 발송구분과 같은 규칙으로 비어 있을 때만 채운다.",
+                example = "홍길동")
+        String receiverName,
+
+        @Schema(description = "수령인 연락처", example = "010-0000-0000")
+        String receiverPhone,
 
         @Schema(description = "매출 품목 목록", requiredMode = Schema.RequiredMode.REQUIRED)
         @NotEmpty @Valid List<Item> items

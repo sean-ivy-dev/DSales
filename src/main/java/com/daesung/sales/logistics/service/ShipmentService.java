@@ -130,6 +130,22 @@ public class ShipmentService {
                 .ifPresent(s -> s.fillDeliveryIfBlank(type, teacher, tel));
     }
 
+    /**
+     * 신규 주문(간단 폼)의 「택배 발송」 체크 → 발송구분·수령인 자동 입력
+     * (발주처 질의 2026-10-26 ①). {@link #autoFillDelivery}(DSRE 경로)와 같은 정책 —
+     * 비어 있을 때만 채운다({@link Shipment#fillDeliveryIfBlank} 참고).
+     *
+     * <p>호출부가 {@link #ensureFor}로 이미 확보한 발송 건을 그대로 넘긴다 — 여기서 다시
+     * 찾지 않는다. 같은 트랜잭션 안의 같은 건이라 재조회가 불필요하고, 영속 상태 엔티티를
+     * 그대로 고치는 편이 트랜잭션 커밋 시 flush로 반영돼 더 단순하다.
+     */
+    @Transactional
+    public void applyDeliveryIfBlank(Shipment shipment, DeliveryType type, String name, String phone) {
+        if (shipment != null) {
+            shipment.fillDeliveryIfBlank(type, name, phone);
+        }
+    }
+
     /** DSRE 배송구분(H/T) → 우리 발송구분. 모르는 값은 null(미지정) — 임의로 한쪽에 넣지 않는다. */
     private static DeliveryType deliveryTypeOf(String lgsGn) {
         if (lgsGn == null || lgsGn.isBlank()) {

@@ -30,10 +30,19 @@ public class AttendanceService {
     private final SaleRepository saleRepository;
 
     public AttendanceResponse yearly(int year, String grade, String productType) {
+        return yearly(year, grade, productType, null);
+    }
+
+    /**
+     * 응시현황(연도별) — <b>거래처 검색(keyword)</b> 포함.
+     * 근거: 발주처 질의 2026-10-26 ②-① "거래처 검색(keyword)" 요청.
+     * 거래처코드·거래처명 부분일치다(통합매출조회 등 다른 화면의 keyword 검색과 같은 규칙).
+     */
+    public AttendanceResponse yearly(int year, String grade, String productType, String keyword) {
         // 거래처별로 12개월 칸을 채운다(빈 달은 0).
         Map<String, Bucket> byPartner = new LinkedHashMap<>();
         for (AttendanceAgg a : saleRepository.attendanceYearly(year, blankToNull(grade),
-                blankToNull(productType))) {
+                blankToNull(productType), blankToNull(keyword))) {
             Bucket b = byPartner.computeIfAbsent(a.getPartnerCode(),
                     k -> new Bucket(regionGroup(a.getPartnerCode(), a.getCityName()),
                             a.getPartnerCode(), a.getPartnerName(), a.getCityName()));

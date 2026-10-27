@@ -156,7 +156,13 @@ public class SaleService {
             //   재고는 평소대로 빠진다 — 창고를 비우는 것과는 다른 축이다.
             if (r.salesCategory() != SalesCategory.RETURN && warehouse != null
                     && !Boolean.TRUE.equals(req.onlySales())) {
-                shipmentService.ensureFor(sale);
+                var shipment = shipmentService.ensureFor(sale);
+                // ★비어 있을 때만 채운다 — 발주처 질의 2026-10-26 ①. 자세한 이유는
+                //   ShipmentService.applyDeliveryIfBlank/Shipment.fillDeliveryIfBlank 주석 참고.
+                if (req.deliveryType() != null || req.receiverName() != null || req.receiverPhone() != null) {
+                    shipmentService.applyDeliveryIfBlank(shipment,
+                            req.deliveryType(), req.receiverName(), req.receiverPhone());
+                }
             }
 
             lines.add(new SalesEntryResponse.Line(salesNo, product.getId(), product.getCode(),

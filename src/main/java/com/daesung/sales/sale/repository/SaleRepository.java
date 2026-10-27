@@ -996,12 +996,15 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
                and year(s.salesDate) = :year
                and (:grade is null or b.grade = :grade)
                and (:productType is null or b.productType = :productType)
+               and (:keyword is null or p.code like concat('%', :keyword, '%')
+                                     or p.name like concat('%', :keyword, '%'))
              group by p.id, p.code, p.name, p.cityName, month(s.salesDate)
              order by p.code, month(s.salesDate)
             """)
     List<AttendanceAgg> attendanceYearly(@Param("year") int year,
                                          @Param("grade") String grade,
-                                         @Param("productType") String productType);
+                                         @Param("productType") String productType,
+                                         @Param("keyword") String keyword);
 
     /**
      * 응시현황(기간별, 18p) 원자료. 지역·거래처·학교·학년·연월·처리구분별 인원(수량).

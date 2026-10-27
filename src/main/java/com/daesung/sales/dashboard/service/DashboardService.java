@@ -149,9 +149,30 @@ public class DashboardService {
      */
     @Transactional(readOnly = true)
     public DashboardOverviewResponse overview(int year, int month) {
+        return overview(year, month, null);
+    }
+
+    /**
+     * 분기 단위 조회 포함(발주처 질의 2026-10-26 ③). quarter(1~4)를 주면 KPI의
+     * "당월" 자리가 <b>그 분기 3개월 합</b>으로 바뀐다 — 필드명은 그대로 두되(응답 스키마를
+     * 깨지 않으려고) 응답의 {@code quarter}에 조회 단위를 실어 화면이 "월/분기 중 뭘 보고
+     * 있는지" 구분할 수 있게 한다.
+     *
+     * <p>★<b>quarter가 있으면 month는 분기의 마지막 달로 강제된다</b>(1분기→3, 2분기→6 …).
+     * 누적(1월~기준월)·트렌드는 원래 로직 그대로 — 분기든 월이든 "그 달까지 누적"은 같은 의미다.
+     * 바뀌는 건 "당월" 한 칸이 1개월치냐 3개월치냐 뿐이다.
+     *
+     * @param quarter 1~4. null이면 기존과 동일(단일 월).
+     */
+    @Transactional(readOnly = true)
+    public DashboardOverviewResponse overview(int year, int month, Integer quarter) {
+        // 분기 모드면 그 분기의 시작월로 "당월" 합산 범위를 넓힌다. 끝은 항상 조회월(=분기 마지막달)이다.
+        int periodStartMonth = (quarter != null) ? quarter * 3 - 2 : month;
+
         LocalDate yearStart = LocalDate.of(year, 1, 1);
-        LocalDate monthStart = LocalDate.of(year, month, 1);
-        LocalDate monthEnd = monthStart.withDayOfMonth(monthStart.lengthOfMonth());
+        LocalDate monthStart = LocalDate.of(year, periodStartMonth, 1);
+        LocalDate monthEnd = LocalDate.of(year, month, 1);
+        monthEnd = monthEnd.withDayOfMonth(monthEnd.lengthOfMonth());
 
         // 월별 트렌드 — 20p가 쓰는 그 맵을 그대로 쓴다(스냅샷/실시간 폴백까지 공유).
         Map<Integer, Long> monthly = monthlyMap(year, TargetScope.COMPANY, null);
@@ -166,7 +187,11 @@ public class DashboardService {
                 cumulativeToMonth = running;
             }
         }
-        long monthNet = monthly.getOrDefault(month, 0L);
+        // 분기면 시작월~조회월 합, 월이면 그 한 달뿐 — periodStartMonth==month일 때 결과가 같다.
+        long monthNet = 0;
+        for (int m = periodStartMonth; m <= month; m++) {
+            monthNet += monthly.getOrDefault(m, 0L);
+        }
 
         // 누적(1월~기준월)을 한 번만 읽고 축별로 접는다 — 순매출 식이 한 벌뿐이라는 뜻이다.
         List<Object[]> breakdown = saleRepository.netSalesBreakdown(yearStart, monthEnd);
@@ -179,7 +204,7 @@ public class DashboardService {
         DashboardOverviewResponse.Share top = majors.stream()
                 .filter(x -> x.netSales() > 0).findFirst().orElse(null);
 
-        // 특약점 당월 순매출 — 거래처구분 축에서 뽑는다.
+        // 특약점 당월(분기) 순매출 — 거래처구분 축에서 뽑는다. 범위는 위 monthNet과 같은 기간.
         long dealerMonth = saleRepository.netSalesBreakdown(monthStart, monthEnd).stream()
                 .filter(r -> DEALER.equals(str(r[5])))
                 .mapToLong(r -> num(r[6])).sum();
@@ -201,7 +226,7 @@ public class DashboardService {
         // 제품별 차트를 이 값으로 묶어 달라는 요청(2026-09-17 피드백 화면11-3).
         List<DashboardOverviewResponse.Share> divisions = fold(breakdown, 9, 9);
 
-        return new DashboardOverviewResponse(year, month, kpi,
+        return new DashboardOverviewResponse(year, month, quarter, kpi,
                 productTargets(year, products), trend,
                 partners, products.stream().limit(5).toList(),
                 shipTypes, regions, warehouseStocks(), divisions);

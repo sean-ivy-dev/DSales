@@ -177,18 +177,30 @@ public class ConsignmentService {
     /** 거래처별 미결(잔여>0) 조회. */
     @Transactional(readOnly = true)
     public ConsignPendingResponse findPending(Long partnerId) {
-        return findPending(partnerId, null);
+        return findPending(partnerId, null, null, null);
+    }
+
+    /** 호환용 오버로드(학교코드까지). 기간 필터는 전체로 본다. */
+    public ConsignPendingResponse findPending(Long partnerId, String schoolCode) {
+        return findPending(partnerId, schoolCode, null, null);
     }
 
     /**
      * 미결 조회. 거래처를 비우면 전체, 학교코드를 주면 그 <b>세부거래처 몫만</b> 본다.
+     * fromDate·toDate를 주면 <b>출고일(tradeDate)</b> 기준으로 그 범위만 본다
+     * (발주처 질의 2026-10-26 ②-④).
      *
      * <p>★학교 축이 필요한 이유: 발주처 요구가 "위탁 미결 매출 확정 시에도 <b>세부거래처별로
      * 나누어 확정</b>"이다(검수피드백 p.12). 한 거래처가 여러 학교에 위탁으로 깔아 두면
      * 거래처 단위 목록으로는 어느 학교 몫을 확정하는지 고를 수 없다.
+     *
+     * <p>★기간 필터는 <b>출고일이 없는 미결(V62 이전 데이터)을 제외</b>한다 —
+     * 걸러야 할 기간이 있는데 날짜 자체가 없으면 그 건이 범위 안인지 알 수 없다.
+     * 기간 없이 조회하면(fromDate·toDate 둘 다 null) 지금처럼 전부 나온다.
      */
     @Transactional(readOnly = true)
-    public ConsignPendingResponse findPending(Long partnerId, String schoolCode) {
+    public ConsignPendingResponse findPending(Long partnerId, String schoolCode,
+                                              java.time.LocalDate fromDate, java.time.LocalDate toDate) {
         // ★거래처를 안 주면 전 거래처 미결을 본다(2026-10-08).
         //   화면이 전체 조회를 기간 데이터로 흉내 내고 있었다.
         Partner partner = (partnerId == null) ? null
@@ -207,6 +219,18 @@ public class ConsignmentService {
             if (schoolCode != null && !schoolCode.isBlank()
                     && !schoolCode.equals(co.getSchoolCode())) {
                 continue;
+            }
+            if (fromDate != null || toDate != null) {
+                java.time.LocalDate d = co.getTradeDate();
+                if (d == null) {
+                    continue;   // 출고일 없는 옛 데이터는 기간 조건을 못 따진다 — 제외
+                }
+                if (fromDate != null && d.isBefore(fromDate)) {
+                    continue;
+                }
+                if (toDate != null && d.isAfter(toDate)) {
+                    continue;
+                }
             }
             Product p = co.getProduct();
             lines.add(new ConsignPendingResponse.Line(

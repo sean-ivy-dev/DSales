@@ -95,12 +95,22 @@ public class DashboardController {
     public ApiResponse<DashboardOverviewResponse> overview(
             @Parameter(description = "기준 연도(미지정 시 올해)", example = "2026")
             @RequestParam(required = false) Integer year,
-            @Parameter(description = "기준 월 1~12(미지정 시 이번 달)", example = "6")
-            @RequestParam(required = false) Integer month) {
+            @Parameter(description = "기준 월 1~12(미지정 시 이번 달). **quarter를 주면 무시된다**")
+            @RequestParam(required = false) Integer month,
+            @Parameter(description = """
+                    분기 단위 조회(1~4). 주면 **월 대신 분기 3개월 합**으로 KPI를 본다
+                    (발주처 질의 2026-10-26 ③). month는 분기의 마지막 달로 자동 치환된다.""",
+                    example = "3")
+            @RequestParam(required = false) Integer quarter) {
+        if (quarter != null && (quarter < 1 || quarter > 4)) {
+            throw new com.daesung.sales.common.exception.BusinessException(
+                    com.daesung.sales.common.exception.ErrorCode.INVALID_INPUT,
+                    "분기는 1~4만 가능합니다: " + quarter);
+        }
         java.time.LocalDate now = java.time.LocalDate.now();
         int y = (year != null) ? year : now.getYear();
-        int m = (month != null) ? month : now.getMonthValue();
-        return ApiResponse.success(dashboardService.overview(y, m));
+        int m = (quarter != null) ? quarter * 3 : (month != null) ? month : now.getMonthValue();
+        return ApiResponse.success(dashboardService.overview(y, m, quarter));
     }
 
     @Operation(summary = "매출목표 목록",
