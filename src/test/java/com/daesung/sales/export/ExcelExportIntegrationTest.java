@@ -221,6 +221,13 @@ class ExcelExportIntegrationTest extends IntegrationTestSupport {
         assertHeader(arStatus, "미수금현황", "거래처명");
         assertFilled(arStatus, "미수금현황", 4);
 
+        // ★담보보기 전용 export(6단계) — 상품군 분해 칸은 없고 담보만기·담보내용이 있어야 한다.
+        //   이 둘은 응답 DTO엔 있었지만 지금까지 어느 엑셀에도 안 나가고 있었다.
+        var arStatusCollateral = read("/closing/ar-status/export/collateral?fromDate="
+                + YEAR + "-01-01&toDate=" + YEAR + "-12-31");
+        assertHeader(arStatusCollateral, "미수금현황(담보보기)", "거래처명", "담보만기", "담보내용");
+        assertFilled(arStatusCollateral, "미수금현황(담보보기)", 4);
+
         var arLedger = read("/closing/ar-ledger/export?partnerId=" + partner
                 + "&fromDate=" + YEAR + "-01-01&toDate=" + YEAR + "-12-31");
         assertHeader(arLedger, "외상매출장");

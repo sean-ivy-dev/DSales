@@ -258,6 +258,26 @@ public class ReceivableController {
         return excel.asDownload(xlsx, "미수금현황.xlsx");
     }
 
+    @Operation(summary = "미수금현황 — 담보보기 엑셀 다운로드",
+            description = """
+                    외상매출현황조회의 '담보보기' 모드 전용 양식(10/27 피드백 §7-C, PPT 16).
+                    위 /ar-status/export(매출상세 모드)와 **컬럼 구성이 다르다** — 상품군별
+                    수량·금액 분해가 빠지고 **담보만기·담보내용**이 대신 들어간다. 레거시가
+                    담보비율·담보만기 칸에 색을 칠해 구분하듯, 여기 `담보등급`이 그 판정값이다.""")
+    @GetMapping("/ar-status/export/collateral")
+    public ResponseEntity<byte[]> arStatusCollateralExport(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @RequestParam(required = false) Long partnerId) {
+        List<ArStatusResponse.Row> rows =
+                receivableService.arStatus(fromDate, toDate, partnerId, partnerId == null).rows();
+        // ★매출상세(arStatusRows)와 달리 **수동 평탄화가 필요 없다** — 담보보기 컬럼은 전부
+        //   Row의 단순 필드(리스트인 byCategory는 안 씀)라 record를 그대로 Jackson이 펼친다.
+        byte[] xlsx = excel.toXlsx("미수금현황(담보보기)", arStatusCollateralCols(), rows,
+                Heading.period("외상매출현황조회(담보보기)", fromDate, toDate));
+        return excel.asDownload(xlsx, "미수금현황_담보보기.xlsx");
+    }
+
     @Operation(summary = "외상매출장 조회(24p, 거래처 상세)",
             description = "단일 거래처의 기초이월 + 기간 내 매출/교사용/반품/수금 **도서 단위 명세** + 일자별 누계. "
                     + "기간 미지정 시 올해 1/1~오늘.")
@@ -303,6 +323,32 @@ public class ReceivableController {
                 new Col("담보금액", "assureAmount"), new Col("담보비율", "assureRatio"),
                 new Col("담보등급", "assureLevel")));
         return cols;
+    }
+
+    /**
+     * 외상매출현황 '담보보기' 전용 컬럼. 근거: 10/27 피드백 §7-C·PPT 16 —
+     * <pre>거래처명/사장명/이월금액/매출수량/매출금액/세액/교사용수량·금액/반품수량·금액/
+     * 입금액/잔액/담보금액/담보비율/담보만기/담보내용</pre>
+     *
+     * <p>★<b>{@link #arStatusCols()}(매출상세)와 교집합이 아니다.</b> 상품군별 분해(교재·
+     * 모의고사·기타·특강 수량·금액, 반품 상품군별)가 전부 빠지고, 대신 레거시 원본 14칸 중
+     * {@code arStatusCols()}에 빠져 있던 <b>담보만기·담보내용</b>이 들어간다 — 이 둘은
+     * 지금까지 응답 DTO엔 있었지만 어느 엑셀에도 안 나가고 있었다.
+     *
+     * <p>담보등급은 레거시 원문엔 없지만, 레거시가 담보비율·만기 칸에 색을 칠해 구분하는 것과
+     * 같은 역할(화면이 색을 입힐 판정값)이라 매출상세 export처럼 덤으로 둔다.
+     */
+    private static List<Col> arStatusCollateralCols() {
+        return List.of(
+                new Col("거래처코드", "partnerCode"), new Col("거래처명", "partnerName"),
+                new Col("사장명", "bossName"), new Col("이월", "opening"),
+                new Col("매출수량", "saleQty"), new Col("매출액", "saleAmount"), new Col("세액", "tax"),
+                new Col("교사용수량", "teacherQty"), new Col("교사용(증정포함)", "teacherAmount"),
+                new Col("반품수량", "returnQty"), new Col("반품액", "returnAmount"),
+                new Col("수금", "collected"), new Col("잔액", "balance"),
+                new Col("담보금액", "assureAmount"), new Col("담보비율", "assureRatio"),
+                new Col("담보만기", "assureExpiry"), new Col("담보내용", "assureNote"),
+                new Col("담보등급", "assureLevel"));
     }
 
     /**
