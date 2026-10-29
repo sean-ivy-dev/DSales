@@ -150,7 +150,8 @@ daesung:
   cors:
     # sales.d-dlab.link = 프론트 서비스 도메인. https/http 둘 다 둔다 —
     # 아직 API·프론트에 TLS가 안 붙은 구간이 있어 http로 뜨는 동안에도 붙어야 한다.
-    allowed-origins: "http://localhost:3000,http://localhost:5173,https://sales.d-dlab.link,http://sales.d-dlab.link"
+    # sales.dsdo.co.kr = 운영(대성 계정) 프론트(CloudFront). API 는 sales-api.dsdo.co.kr(ALB) — 2026-10 이전.
+    allowed-origins: "http://localhost:3000,http://localhost:5173,https://sales.d-dlab.link,http://sales.d-dlab.link,https://sales.dsdo.co.kr"
     # Amplify는 브랜치마다 서브도메인이 생긴다 → 앱 ID를 고정한 패턴으로 한 번에 허용.
     # (develop.d1z41nzmh4zrdi.amplifyapp.com 등)
     allowed-origin-patterns: "https://*.d1z41nzmh4zrdi.amplifyapp.com"

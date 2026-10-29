@@ -228,3 +228,123 @@ jobs:
             echo "!! 기동 검증 실패 — 컨테이너 로그:"
             docker logs --tail 100 dsales
             exit 1
+
+  # 3) 운영(대성 계정) 배포 — dssales-prod 안의 self-hosted runner 가 실행한다.
+  #
+  #   운영 서버는 사설망이라 GitHub 에서 SSH 로 들어갈 수 없다(외부 노출은 ALB·CloudFront 만).
+  #   그래서 서버 안의 runner 가 GitHub 에 먼저 붙어 이 작업을 받아 온다 — 인바운드 포트가 필요 없다.
+  #   흐름: 빌드 → ECR(external/dssales) push → 같은 서버에서 실행(8080, ALB 대상).
+  #
+  #   ‼️저장소 변수 PROD_DEPLOY_ENABLED=true 일 때만 돈다. 매출 데이터를 새 RDS 에 적재하기 전에
+  #     빈 DB 로 띄우면 Flyway 가 빈 스키마를 만들어 버려 이관과 엉킨다.
+  #   ‼️DB 비밀번호를 Secrets Manager 에서 읽지 않는다(서버 역할에 권한 없음) — aws 프로필을 쓰지 않고
+  #     기본 프로필 + SPRING_DATASOURCE_* 로 넘긴다. 값은 --env-file(권한 600)로만 넘겨 ps 에 안 남긴다.
+  deploy-prod:
+    needs: test
+    if: vars.PROD_DEPLOY_ENABLED == 'true'
+    runs-on: [self-hosted, dssales-prod]
+    env:
+      REGISTRY: 902734531372.dkr.ecr.ap-northeast-2.amazonaws.com
+      REPO: external/dssales
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 필수 시크릿 확인
+        env:
+          PROD_DB_HOST: ${{ secrets.PROD_DB_HOST }}
+          PROD_DB_USERNAME: ${{ secrets.PROD_DB_USERNAME }}
+          PROD_DB_PASSWORD: ${{ secrets.PROD_DB_PASSWORD }}
+          PROD_REDIS_HOST: ${{ secrets.PROD_REDIS_HOST }}
+          PROD_REDIS_PASSWORD: ${{ secrets.PROD_REDIS_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        run: |
+          missing=""
+          for v in PROD_DB_HOST PROD_DB_USERNAME PROD_DB_PASSWORD PROD_REDIS_HOST PROD_REDIS_PASSWORD JWT_SECRET; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then echo "!! GitHub Secret 미설정:$missing"; exit 1; fi
+
+      - name: 이미지 빌드 & ECR push
+        run: |
+          aws ecr get-login-password --region ap-northeast-2 | docker login --username AWS --password-stdin "$REGISTRY"
+          docker build -t "$REGISTRY/$REPO:${{ github.sha }}" -t "$REGISTRY/$REPO:latest" .
+          docker push "$REGISTRY/$REPO:${{ github.sha }}"
+          docker push "$REGISTRY/$REPO:latest"
+
+      - name: 컨테이너 교체 (8080)
+        env:
+          PROD_DB_HOST: ${{ secrets.PROD_DB_HOST }}
+          PROD_DB_USERNAME: ${{ secrets.PROD_DB_USERNAME }}
+          PROD_DB_PASSWORD: ${{ secrets.PROD_DB_PASSWORD }}
+          PROD_REDIS_HOST: ${{ secrets.PROD_REDIS_HOST }}
+          PROD_REDIS_PASSWORD: ${{ secrets.PROD_REDIS_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          DSRE_ENABLED: ${{ vars.DSRE_ENABLED || 'false' }}
+          DSRE_PASSWORD: ${{ secrets.DSRE_PASSWORD || 'dsre' }}
+          MAIL_ENABLED: ${{ vars.MAIL_ENABLED || 'false' }}
+          MAIL_HOST: ${{ vars.MAIL_HOST }}
+          MAIL_PORT: ${{ vars.MAIL_PORT || '465' }}
+          MAIL_SSL: ${{ vars.MAIL_SSL || 'true' }}
+          MAIL_STARTTLS: ${{ vars.MAIL_STARTTLS || 'false' }}
+          MAIL_SSL_TRUST: ${{ vars.MAIL_SSL_TRUST }}
+          MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+          MAIL_FROM: ${{ vars.MAIL_FROM }}
+        run: |
+          set -e
+          ENVF="$RUNNER_TEMP/dsales.env"
+          umask 077
+          cat > "$ENVF" <<ENV
+          SPRING_DATASOURCE_URL=jdbc:mysql://${PROD_DB_HOST}:3306/sales?characterEncoding=UTF-8&useUnicode=true&serverTimezone=Asia/Seoul
+          SPRING_DATASOURCE_USERNAME=${PROD_DB_USERNAME}
+          SPRING_DATASOURCE_PASSWORD=${PROD_DB_PASSWORD}
+          SPRING_DATA_REDIS_HOST=${PROD_REDIS_HOST}
+          SPRING_DATA_REDIS_PORT=6379
+          SPRING_DATA_REDIS_SSL_ENABLED=true
+          SPRING_DATA_REDIS_PASSWORD=${PROD_REDIS_PASSWORD}
+          SERVER_FORWARDHEADERSSTRATEGY=framework
+          DAESUNG_SECURITY_JWTSECRET=${JWT_SECRET}
+          DAESUNG_SECURITY_COOKIESECURE=true
+          DAESUNG_SECURITY_COOKIESAMESITE=Strict
+          DAESUNG_DSRE_ENABLED=${DSRE_ENABLED}
+          DAESUNG_DSRE_URL=jdbc:mysql://dsre-mariadb:3306/dsre2?characterEncoding=UTF-8&useUnicode=true
+          DAESUNG_DSRE_USERNAME=dsre
+          DAESUNG_DSRE_PASSWORD=${DSRE_PASSWORD}
+          MAIL_ENABLED=${MAIL_ENABLED}
+          MAIL_HOST=${MAIL_HOST}
+          MAIL_PORT=${MAIL_PORT}
+          MAIL_USERNAME=${MAIL_USERNAME}
+          MAIL_PASSWORD=${MAIL_PASSWORD}
+          MAIL_FROM=${MAIL_FROM}
+          MAIL_SSL=${MAIL_SSL}
+          MAIL_STARTTLS=${MAIL_STARTTLS}
+          MAIL_SSL_TRUST=${MAIL_SSL_TRUST}
+          JAVA_TOOL_OPTIONS=-Xmx1536m -XX:+ExitOnOutOfMemoryError
+          ENV
+          docker network create dsales-net 2>/dev/null || true
+          docker stop dsales 2>/dev/null || true
+          docker rm dsales 2>/dev/null || true
+          # 앞 줄 들여쓰기(heredoc)가 값에 섞이지 않게 걷어낸다.
+          sed -i 's/^[[:space:]]*//' "$ENVF"
+          docker run -d --name dsales --restart unless-stopped -p 8080:8080 \
+            --network dsales-net --env-file "$ENVF" \
+            --log-driver=json-file --log-opt max-size=50m --log-opt max-file=3 \
+            "$REGISTRY/$REPO:${{ github.sha }}"
+          rm -f "$ENVF"
+          # 되돌리기용으로 최근 이미지 5개만 남긴다.
+          docker images "$REGISTRY/$REPO" --format '{{.Tag}}' | grep -v latest | tail -n +6 \
+            | xargs -r -I{} docker rmi "$REGISTRY/$REPO:{}" || true
+
+      - name: 기동 검증 (health)
+        run: |
+          for i in $(seq 1 30); do
+            body=$(curl -s -m 10 http://localhost:8080/actuator/health || true)
+            case "$body" in
+              *'"status":"UP"'*) echo "health OK: $body"; exit 0 ;;
+            esac
+            echo "waiting for health... ($i/30) $body"
+            sleep 10
+          done
+          echo "!! 기동 검증 실패 — 컨테이너 로그:"
+          docker logs --tail 100 dsales
+          exit 1
