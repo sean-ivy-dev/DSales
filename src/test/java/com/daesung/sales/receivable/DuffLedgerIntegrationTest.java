@@ -183,20 +183,17 @@ class DuffLedgerIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("처리/비처리는 성적처리 구분에서 온다 — 분류명 문자열이 아니다")
-    void 처리구분() {
-        long graded = detail().stream().filter(r -> "처리".equals(r.path("procType").asText()))
-                .mapToLong(r -> r.path("qty").asLong()).sum();
-        // ‼️**미지정은 비워 둔다.** 예전엔 '비처리'로 찍었는데, 이관 자료는 그 칸이 전부 비어 있어
-        //   실제 처리 여부와 무관하게 전건이 '비처리'로 나갔다(프론트 실측 2026-10-26).
-        //   NON_NULL 이라 값이 없으면 키 자체가 빠진다.
-        long unset = detail().stream().filter(r -> !r.hasNonNull("procType"))
-                .mapToLong(r -> r.path("qty").asLong()).sum();
-
-        assertThat(graded).isEqualTo(17);    // 10 + 7
-        assertThat(unset).isEqualTo(5);      // 미지정 — '비처리'로 지어내지 않는다
-        assertThat(detail().stream().noneMatch(r -> "비처리".equals(r.path("procType").asText())))
-                .as("입력하지 않은 건을 '비처리'로 찍지 않는다").isTrue();
+    @DisplayName("★명세행에 '처리' 칸은 없다 — 발주처 양식 8칸(10/27 피드백 §7-B)")
+    void 명세행_처리칸_없음() {
+        // 10/27 피드백 §7-B "테스트 버전에서 추가된 '처리' 컬럼은 뺀다".
+        // 발주처 양식은 일자·학교(원)명·시행월·학년·정가·공급률·수량·금액 8칸이고
+        // 실물 PDF(RESULT_*.pdf)에도 처리 칸이 없다.
+        assertThat(detail()).isNotEmpty();
+        for (JsonNode r : detail()) {
+            assertThat(r.has("procType")).as("명세행에 처리 칸이 남아 있다: %s", r).isFalse();
+        }
+        // ‼️처리 구분 자체가 없어진 건 아니다 — **요약표**가 그대로 들고 있다(아래 `요약표` 테스트).
+        assertThat(data(ledger()).path("summary")).as("요약표는 그대로다").isNotEmpty();
     }
 
     @Test

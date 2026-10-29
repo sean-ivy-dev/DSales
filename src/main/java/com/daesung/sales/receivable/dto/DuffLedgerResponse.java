@@ -39,6 +39,11 @@ public record DuffLedgerResponse(
         @Schema(description = "거래처명") String partnerName,
         @Schema(description = "조회 시작일") LocalDate fromDate,
         @Schema(description = "조회 종료일") LocalDate toDate,
+
+        // ★제목·하단은 일반 외상매출장(§7-A)과 같은 양식이다(10/27 피드백 §7-B "제목·하단: 7-A와 같다").
+        //   실물 PDF(RESULT_*.pdf) 하단도 "(주)대성학력개발연구소 / 입금계좌 : 신한은행 …"로 같다.
+        @Schema(description = "공급자명(인쇄물 하단 왼쪽)") String supplierName,
+        @Schema(description = "입금계좌 안내 문구(인쇄물 하단 오른쪽)") String bankAccount,
         @Schema(description = "명세 + 소계(학교(원) 계 · 월 계)") List<Row> rows,
 
         @Schema(description = """
@@ -95,14 +100,10 @@ public record DuffLedgerResponse(
                     둘 다 없으면 **비운다**. 빈 칸은 "BOM에 시행예정일을 넣어야 한다"는 신호다.""")
             String examMonth,
             @Schema(description = "학년(상품 마스터)") String grade,
-            @Schema(description = """
-                    처리 구분(처리/비처리). 매출등록의 성적처리 구분에서 온다.
-
-                    ‼️**입력된 경우에만 값이 있다. 미지정이면 null** — 화면은 비면 그 칸을 숨긴다.
-                    예전엔 미지정을 '비처리'로 찍었는데, 이관 자료는 그 칸이 전부 비어 있어
-                    실제 처리 여부와 무관하게 전건이 '비처리'로 나갔다.
-                    발주처가 정한 더프모 양식(8칸·RESULT 샘플 PDF)에도 처리 칸이 없다.""")
-            String procType,
+            // ‼️'처리' 칸은 뺐다(10/27 피드백 §7-B "테스트 버전에서 추가된 '처리' 컬럼은 뺀다").
+            //   발주처 양식은 8칸(일자·학교(원)명·시행월·학년·정가·공급률·수량·금액)이고
+            //   실물 PDF(RESULT_*.pdf)에도 그 칸이 없다. 처리 구분별 집계는 **요약표**
+            //   (`Summary.procType`)에 그대로 남아 있다 — 거긴 레거시도 따로 내는 블록이다.
             @Schema(description = "정가") Integer unitPrice,
             @Schema(description = "공급률(%)") Integer supplyRate,
             @Schema(description = "수량") long qty,
@@ -111,7 +112,7 @@ public record DuffLedgerResponse(
         /** 소계 행 — 수량·금액과 표시명만 채운다(레거시도 나머지 칸을 비운다). */
         public static Row subtotal(String rowType, String label, String schoolName,
                                    long qty, long amount) {
-            return new Row(rowType, label, null, schoolName, null, null, null, null, null, qty, amount);
+            return new Row(rowType, label, null, schoolName, null, null, null, null, qty, amount);
         }
     }
 }

@@ -358,9 +358,11 @@ public class ReceivableService {
                 monthAmt = 0;
             }
 
+            // ‼️처리 구분은 **명세행에서는 빠졌다**(§7-B). 다만 아래 요약표는 처리 구분별로
+            //   내야 하므로 집계용으로는 그대로 읽는다.
             String proc = procLabel(str(r[4]));
             rows.add(new DuffLedgerResponse.Row("DETAIL", null, date, school,
-                    str(r[2]), str(r[3]), proc,
+                    str(r[2]), str(r[3]),
                     intOrNull(r[5]), intOrNull(r[6]), qty, amt));
 
             // ‼️TreeMap 은 null 키를 못 받는다. 미지정은 빈 문자열로 모아 두고
@@ -398,6 +400,7 @@ public class ReceivableService {
         //   셋 다 String 이라 어긋나도 **컴파일이 통과한다** — 실제로 name 과 dsreCode 를
         //   바꿔 넣어 거래처명 자리에 숫자가 나갔다(프론트 실측 2026-10-26, 100곳 중 90곳).
         return new DuffLedgerResponse(partnerId, partnerCode, partnerDsreCode, partnerName, from, to,
+                supplierProperties.name(), supplierProperties.bankAccount(),
                 rows, summary, totalQty, totalAmt);
     }
 

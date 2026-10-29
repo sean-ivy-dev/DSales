@@ -305,7 +305,14 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
      * <p>소계(학교 계·월 계)는 서비스에서 조립한다. 반환 Object[]:
      * [salesDate, schoolName, <b>examMonth(문자열 yyyy-MM)</b>, grade, procType,
      *  unitPrice, supplyRate, qty, amount,
-     *  <b>partnerId, partnerCode, partnerName, partnerDsreCode</b>].
+     *  <b>partnerId, partnerCode, partnerName, partnerDsreCode, schoolCode</b>].
+     *
+     * <p>★<b>정렬은 학교명이 아니라 학교코드순</b>이다(10/27 피드백 §7-B "레거시는 학교·학원명
+     * 가나다순이 아니다. 기존 소스에서 정렬 기준을 확인해 같게 적용한다").
+     * 레거시 원문({@code 외상매출장조회.vb:672}) —
+     * {@code ORDER BY 거래년월, isnull(schCode,99999), grouping(schCode), …, 시행월, 학년, 처리}.
+     * 학교코드가 빈 건을 뒤로 보내는 것도 레거시의 {@code isnull(schCode,99999)}와 같은 뜻이다.
+     * 실물 PDF({@code RESULT_*.pdf})의 줄 순서가 날짜순도 가나다순도 아닌 이유가 이것이다.
      */
     @Query(value = """
             SELECT s.sales_date, COALESCE(s.school_name, ''),
@@ -322,7 +329,7 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
                    ) AS exam_month,
                    COALESCE(p.grade, ''), COALESCE(s.proc_type, ''),
                    s.unit_price, s.supply_rate, s.qty, COALESCE(s.supply_amount, 0),
-                   s.partner_id, pt.code, pt.name, pt.dsre_code
+                   s.partner_id, pt.code, pt.name, pt.dsre_code, COALESCE(s.school_code, '')
             FROM sales s
               JOIN products p ON p.id = s.product_id
               JOIN partners pt ON pt.id = s.partner_id
@@ -334,7 +341,8 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
               AND s.sales_date BETWEEN :fromDate AND :toDate
             ORDER BY pt.code, s.partner_id,
                      EXTRACT(YEAR FROM s.sales_date), EXTRACT(MONTH FROM s.sales_date),
-                     COALESCE(s.school_name, ''), exam_month, p.grade, s.proc_type, s.id
+                     CASE WHEN COALESCE(s.school_code,'') = '' THEN 1 ELSE 0 END, s.school_code,
+                     exam_month, p.grade, s.proc_type, s.id
             """, nativeQuery = true)
     List<Object[]> duffLedgerLines(@Param("partnerId") Long partnerId,
                                    @Param("fromDate") LocalDate fromDate,
