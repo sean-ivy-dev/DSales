@@ -137,6 +137,17 @@ public record SaleResponse(
         String productName = s.getProduct().getName();
         int qty = (!couponCount && productName != null && productName.contains("쿠폰"))
                 ? 0 : s.getQty();
+        // ★반품은 수량·금액을 음수로 내려준다(10/27 피드백 §3-2) — 서버는 합계를 직접
+        //   계산하지 않고 화면이 행을 그대로 더하므로, 음수로 줘야 합산 시 자동으로 상쇄된다.
+        //   저장(Sale)은 항상 양수+salesCategory 구분 방식을 그대로 유지한다 — 이 변환은
+        //   응답(조회) 전용이고, 재고·재무 계산 등 다른 로직은 전혀 건드리지 않는다.
+        boolean isReturn = s.getSalesCategory() == SalesCategory.RETURN;
+        if (isReturn) {
+            qty = -qty;
+        }
+        Long supplyAmount = isReturn ? negate(s.getSupplyAmount()) : s.getSupplyAmount();
+        Long tax = isReturn ? negate(s.getTax()) : s.getTax();
+        Long totalAmount = isReturn ? negate(s.getTotalAmount()) : s.getTotalAmount();
         return new SaleResponse(
                 s.getId(), s.getSalesNo(), s.getSalesDate(),
                 s.getPartner().getId(), s.getPartner().getCode(), s.getPartner().getName(),
@@ -157,12 +168,16 @@ public record SaleResponse(
                 (s.getSalesCategory() == null) ? null : TradeClass.of(s.getSalesCategory()).label(),
                 s.getSalesCategory(),
                 s.getUnitPrice(), s.getSupplyRate(), s.getDiscountAmount(), qty,
-                s.getSupplyAmount(), s.getTax(), s.getTotalAmount(),
+                supplyAmount, tax, totalAmount,
                 s.isCanceled(),
                 (s.getWarehouse() == null) ? null : s.getWarehouse().getId(),
                 (s.getWarehouse() == null) ? null : s.getWarehouse().getName(),
                 salesChannel,
                 s.getEntryNo(), s.getEntrySeq(), s.isAmountOverridden(),
                 s.getMemo());
+    }
+
+    private static Long negate(Long v) {
+        return (v == null) ? null : -v;
     }
 }

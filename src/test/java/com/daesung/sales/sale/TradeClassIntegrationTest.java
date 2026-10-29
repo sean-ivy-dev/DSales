@@ -75,7 +75,9 @@ class TradeClassIntegrationTest extends IntegrationTestSupport {
         assertThat(rows("&" + RANGE + "&tradeClass=SALES")).hasSize(1);
         assertThat(rows("&" + RANGE + "&tradeClass=SALES").get(0).path("qty").asInt()).isEqualTo(20);
         assertThat(rows("&" + RANGE + "&tradeClass=FREE").get(0).path("qty").asInt()).isEqualTo(5);
-        assertThat(rows("&" + RANGE + "&tradeClass=RETURN").get(0).path("qty").asInt()).isEqualTo(3);
+        // ★반품은 음수로 내려온다(10/27 피드백 §3-2) — 합계 행이 그냥 더하기만 해도
+        //   반품이 자동 상쇄되게 하려는 것. 저장(Sale.qty)은 여전히 양수 3이다.
+        assertThat(rows("&" + RANGE + "&tradeClass=RETURN").get(0).path("qty").asInt()).isEqualTo(-3);
     }
 
     @Test

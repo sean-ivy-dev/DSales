@@ -95,6 +95,9 @@ public class SaleService {
         for (SalesEntryRequest.Item item : req.items()) {
             resolved.add(resolve(item, partner));
         }
+        // ★특강 여부 캐시(10/27 피드백 §3-4·4-12) — 세부구분 코드마다 한 번만 조회한다.
+        //   같은 코드가 요청 안에 여러 번 나올 수 있어 매 아이템 조회는 불필요한 N+1이다.
+        Map<String, Boolean> specialLectureCache = new HashMap<>();
         assertWarehouseWhenStockMoves(req, warehouse);
         List<SalesEntryResponse.Warning> warnings = collectReturnWarnings(partner.getId(), resolved);
 
@@ -154,8 +157,16 @@ public class SaleService {
             // ★「매출만(배송X)」이면 작업지시를 만들지 않는다 — 레거시 CheckBox_OnlySales 가
             //   하던 일이 정확히 이것이다(UC_TabPages.vb:749, sendData INSERT 건너뜀).
             //   재고는 평소대로 빠진다 — 창고를 비우는 것과는 다른 축이다.
+            // ★특강도 작업지시를 만들지 않는다(10/27 피드백 §3-4·4-12) — 레거시에서 특강은
+            //   작업요청서·출고/반품 조회에 안 나오고 통합 매출 조회에만 기록된다.
+            //   재고는 매출만(배송X)과 같은 축으로, 평소대로 빠진다.
+            boolean isSpecialLecture = specialLectureCache.computeIfAbsent(product.getSalesDivision(),
+                    code -> (code != null)
+                            && salesDivisionRepository.findByCode(code)
+                                    .map(d -> d.getMajorCategory() == com.daesung.sales.product.entity.MajorCategory.SPECIAL_LECTURE)
+                                    .orElse(false));
             if (r.salesCategory() != SalesCategory.RETURN && warehouse != null
-                    && !Boolean.TRUE.equals(req.onlySales())) {
+                    && !Boolean.TRUE.equals(req.onlySales()) && !isSpecialLecture) {
                 var shipment = shipmentService.ensureFor(sale);
                 // ★비어 있을 때만 채운다 — 발주처 질의 2026-10-26 ①. 자세한 이유는
                 //   ShipmentService.applyDeliveryIfBlank/Shipment.fillDeliveryIfBlank 주석 참고.
@@ -163,6 +174,10 @@ public class SaleService {
                     shipmentService.applyDeliveryIfBlank(shipment,
                             req.deliveryType(), req.receiverName(), req.receiverPhone());
                 }
+                // ★명시적 지정·담당자정보 적용을 끝낸 뒤 기본값을 확정한다(10/27 피드백 §8-6).
+                //   담당자정보가 있으면 택배, 그 외엔 화물 — 위 if문을 안 탄 경우(셋 다 null)도
+                //   포함해 항상 호출해야 "기본은 화물"이 실제로 적용된다.
+                shipmentService.decideDeliveryTypeIfBlank(shipment);
             }
 
             lines.add(new SalesEntryResponse.Line(salesNo, product.getId(), product.getCode(),

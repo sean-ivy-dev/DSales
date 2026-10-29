@@ -123,11 +123,15 @@ class ReturnCaseSplitIntegrationTest extends IntegrationTestSupport {
             }
         }
         assertThat(ret).as("Case1 반품 매출 라인이 있어야: %s", sales).isNotNull();
-        assertThat(ret.path("qty").asInt()).isEqualTo(10);
+        // ★10/27 피드백 §3-2 — 반품은 음수로 내려온다(저장은 여전히 양수 10,
+        //   qty=-10/supplyAmount=-70000은 /sales 응답(조회) 전용 변환이다). 합계가
+        //   반품을 그냥 더하기만 해도 자동 상쇄되므로, 이 테스트 제목 "마이너스로 남는다"가
+        //   이제 그대로 값에 드러난다.
+        assertThat(ret.path("qty").asInt()).isEqualTo(-10);
         // 정가·공급률을 안 줬으므로 마지막 위탁정산 매출(10000·70%)을 따라간다
         assertThat(ret.path("unitPrice").asInt()).isEqualTo(10000);
         assertThat(ret.path("supplyRate").asInt()).isEqualTo(70);
-        assertThat(ret.path("supplyAmount").asLong()).as("10000 × 70% × 10").isEqualTo(70_000);
+        assertThat(ret.path("supplyAmount").asLong()).as("-(10000 × 70% × 10)").isEqualTo(-70_000);
     }
 
     @Test
