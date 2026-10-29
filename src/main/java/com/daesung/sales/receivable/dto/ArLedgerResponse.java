@@ -21,9 +21,22 @@ import java.util.List;
 @Schema(name = "ArLedgerResponse", description = "외상매출장(도서 단위 명세)")
 public record ArLedgerResponse(
         @Schema(description = "거래처 id") Long partnerId,
-        @Schema(description = "거래처명") String partnerName,
+        @Schema(description = """
+                거래처코드. 10/27 피드백 §7-A "기본 표시 항목: 조회기준일, 거래처명,
+                **거래처코드**, (주)대성학력개발연구소, 입금계좌".
+                ‼️<b>행(컬럼)에서는 뺐다</b> — 거래처 하나를 보는 장부라 매 줄에 같은 코드가
+                반복될 뿐이다. 제목 줄에 한 번만 쓴다(레거시 인쇄물: `10003 ─ 강남 하람도서`).""")
+        String partnerCode,
+        @Schema(description = "거래처명 — 제목에 쓴다(`외상매출장(거래처명)`)") String partnerName,
         @Schema(description = "조회 시작일") LocalDate fromDate,
         @Schema(description = "조회 종료일") LocalDate toDate,
+
+        @Schema(description = "공급자명(인쇄물 하단 왼쪽). 예: 주식회사 대성학력개발연구소")
+        String supplierName,
+        @Schema(description = """
+                입금계좌 안내 문구(인쇄물 하단 오른쪽). 예: `신한은행 140-006-456354`.
+                설정 `daesung.supplier.bank-account` 값이며, 계좌가 바뀌면 설정만 고친다.""")
+        String bankAccount,
         @Schema(description = "기초이월(시작일 직전까지 잔액)") long opening,
         @Schema(description = "기말잔액(누계 마지막)") long closing,
         @Schema(description = "명세 라인(일자순)") List<Line> lines
@@ -44,10 +57,12 @@ public record ArLedgerResponse(
             @Schema(description = "집계행 표시명('이월 금액'·'일 계'·'월 계'·'누 계'). 명세행은 null")
             String label,
             @Schema(description = "거래일자") LocalDate date,
-            @Schema(description = "구분(매출/교사용/증정/반품/수금)") String kind,
             @Schema(description = "전표번호(매출번호 또는 수금번호)") String refNo,
             @Schema(description = "분류코드") String catCode,
-            @Schema(description = "분류명") String catName,
+            @Schema(description = """
+                    분류명. ‼️<b>수금 행은 여기에 수금 방법</b>을 적는다(`현금`·`어음`…) —
+                    레거시 인쇄물이 그렇다(10/27 피드백 §7-A "수금 행: 분류명 칸에 수금 방법").""")
+            String catName,
             @Schema(description = "도서코드") String productCode,
             @Schema(description = """
                     도서명. 레거시처럼 회차·학교를 함께 붙인다 —
@@ -75,13 +90,17 @@ public record ArLedgerResponse(
             @Schema(description = "누계(러닝밸런스)") long balance
     ) {
 
-        /** 명세행. */
-        public static Line detail(LocalDate date, String kind, String refNo, String catCode,
+        /**
+         * 명세행. ★<b>한 행에 매출·교사용·반품이 함께 들어갈 수 있다</b>(10/27 피드백 §7-A
+         * "같은 도서의 매출·교사용·반품은 한 행의 컬럼으로"). 예전엔 전표 하나가 행 하나라
+         * 같은 날 같은 책인데도 교사용만 있는 줄이 따로 생겼다.
+         */
+        public static Line detail(LocalDate date, String refNo, String catCode,
                                   String catName, String productCode, String productName,
                                   Integer supplyRate, Long saleQty, Long saleAmount, Long tax,
                                   Long teacherQty, Long teacherAmount, Long returnQty,
                                   Long returnAmount, Long collectAmount, long amount, long balance) {
-            return new Line("DETAIL", null, date, kind, refNo, catCode, catName,
+            return new Line("DETAIL", null, date, refNo, catCode, catName,
                     productCode, productName, supplyRate, saleQty, saleAmount, tax,
                     teacherQty, teacherAmount, returnQty, returnAmount, collectAmount,
                     amount, balance);
@@ -96,7 +115,7 @@ public record ArLedgerResponse(
                                      Long teacherQty, Long teacherAmount,
                                      Long returnQty, Long returnAmount,
                                      Long collectAmount, long balance) {
-            return new Line(rowType, label, date, null, null, null, null, null, null, null,
+            return new Line(rowType, label, date, null, null, null, null, null, null,
                     saleQty, saleAmount, tax, teacherQty, teacherAmount,
                     returnQty, returnAmount, collectAmount, 0L, balance);
         }

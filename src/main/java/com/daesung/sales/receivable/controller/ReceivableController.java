@@ -439,8 +439,9 @@ public class ReceivableController {
         var lines = searching
                 ? r.lines().stream().filter(l -> "DETAIL".equals(l.rowType())).toList()
                 : r.lines();
-        return ApiResponse.success(new ArLedgerResponse(r.partnerId(), r.partnerName(),
-                r.fromDate(), r.toDate(), r.opening(), r.closing(),
+        return ApiResponse.success(new ArLedgerResponse(r.partnerId(), r.partnerCode(), r.partnerName(),
+                r.fromDate(), r.toDate(), r.supplierName(), r.bankAccount(),
+                r.opening(), r.closing(),
                 Keywords.filter(lines, keyword,
                         x -> new Object[]{x.refNo(), x.catCode(), x.catName(),
                                 x.productCode(), x.productName()})));

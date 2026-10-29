@@ -60,6 +60,8 @@ public class ReceivableService {
     private final PartnerRepository partnerRepository;
     private final PeriodLockService periodLockService;
     private final com.daesung.sales.common.audit.CurrentAuditor currentAuditor;
+    /** 외상매출장 인쇄물 하단(회사명·입금계좌)에 쓴다 — 10/27 피드백 §7-A. */
+    private final com.daesung.sales.closing.config.SupplierProperties supplierProperties;
 
     /** 수금 등록. 수금번호(C) 채번. 어음정보는 유형=어음일 때만 저장(엔티티에서 처리). */
     @Transactional
@@ -880,9 +882,14 @@ public class ReceivableService {
         record Entry(LocalDate date, int ord, ArLedgerResponse.Line line, long amount) {}
         List<Entry> entries = new ArrayList<>();
 
+        // ★같은 날·같은 도서의 매출·교사용·반품은 **한 행**으로 합친다(10/27 피드백 §7-A
+        //   "같은 도서의 매출·교사용·반품은 한 행의 컬럼으로. 값이 없는 행은 만들지 않는다").
+        //   예전엔 전표 하나가 행 하나라, 같은 날 같은 책인데 교사용만 있는 빈 줄이 따로 생겼다.
+        //   묶는 키는 **일자 + 도서명표기 + 공급률**이다 — 도서명표기에 회차·학교가 들어 있어
+        //   (bookLabel) 같은 책이라도 회차·학교가 다르면 레거시 인쇄물처럼 줄이 갈린다.
+        Map<String, long[]> merged = new LinkedHashMap<>();   // [매출수량,매출액,세액,교사용수량,교사용액,반품수량,반품액,채권증감]
+        Map<String, Sale> firstOf = new LinkedHashMap<>();
         for (Sale s : saleRepository.findLedgerLines(partnerId, from, to)) {
-            long supply = nz(s.getSupplyAmount());
-            long tax = nz(s.getTax());
             long total = nz(s.getTotalAmount());
             SalesCategory cat = s.getSalesCategory();
             boolean isReturn = cat == SalesCategory.RETURN;
@@ -892,22 +899,53 @@ public class ReceivableService {
                     && s.getSupplyRate() != null && s.getSupplyRate() != 0;
             boolean isSale = cat == SalesCategory.SALE;
 
-            long amount = isReturn ? -total : (isSale || isTeacher ? total : 0L);
+            String key = s.getSalesDate() + "|" + bookLabel(s) + "|" + s.getSupplyRate();
+            long[] v = merged.computeIfAbsent(key, k -> new long[8]);
+            firstOf.putIfAbsent(key, s);
+            if (isSale) {
+                v[0] += s.getQty();
+                v[1] += nz(s.getSupplyAmount());
+                v[2] += nz(s.getTax());
+                v[7] += total;
+            } else if (isTeacher) {
+                v[3] += s.getQty();
+                v[4] += total;
+                v[7] += total;
+            } else if (isReturn) {
+                v[5] -= s.getQty();
+                v[6] -= total;
+                v[7] -= total;
+            }
+        }
+        for (Map.Entry<String, long[]> e : merged.entrySet()) {
+            Sale s = firstOf.get(e.getKey());
+            long[] v = e.getValue();
+            // ★칸이 전부 0인 묶음은 행을 만들지 않는다(10/27 피드백 §7-A "값이 없는 행은
+            //   만들지 않는다"). 실제로 걸리는 건 **증정**(공급률 0 무가)이다 — 매출도
+            //   교사용도 반품도 아니라 채권에 아무 영향이 없어, 예전엔 모든 칸이 빈 줄로 나갔다.
+            if (v[0] == 0 && v[1] == 0 && v[2] == 0 && v[3] == 0 && v[4] == 0
+                    && v[5] == 0 && v[6] == 0) {
+                continue;
+            }
+            // 값이 0인 칸은 null로 내려 빈 칸으로 보이게 한다(레거시 인쇄물이 그렇다).
             entries.add(new Entry(s.getSalesDate(), 0, ArLedgerResponse.Line.detail(
-                    s.getSalesDate(), saleKind(s), s.getSalesNo(),
+                    s.getSalesDate(), s.getSalesNo(),
                     s.getProduct().getCatCode(), s.getProduct().getCatName(),
                     s.getProduct().getCode(), bookLabel(s),
                     s.getSupplyRate(),
-                    isSale ? (long) s.getQty() : null, isSale ? supply : null, isSale ? tax : null,
-                    isTeacher ? (long) s.getQty() : null, isTeacher ? total : null,
-                    isReturn ? -(long) s.getQty() : null, isReturn ? -total : null,
-                    null, amount, 0L), amount));
+                    zeroToNull(v[0]), zeroToNull(v[1]), zeroToNull(v[2]),
+                    zeroToNull(v[3]), zeroToNull(v[4]),
+                    zeroToNull(v[5]), zeroToNull(v[6]),
+                    null, v[7], 0L), v[7]));
         }
 
         for (Collection c : collectionRepository.findLedgerLines(partnerId, from, to)) {
+            // ★수금 방법은 **분류명 칸**에 쓴다(10/27 피드백 §7-A "수금 행: 분류명 칸에
+            //   수금 방법(현금 등)을 표시한다"). 예전엔 도서명 칸에 "수금(현금)"으로 넣었는데,
+            //   레거시 인쇄물(SALES_*.pdf)은 분류명 자리에 "현금" 한 단어만 찍는다.
             entries.add(new Entry(c.getCollDate(), 1, ArLedgerResponse.Line.detail(
-                    c.getCollDate(), "수금", c.getCollectionNo(),
-                    null, null, null, collLabel(c.getCollType()), null,
+                    c.getCollDate(), c.getCollectionNo(),
+                    null, collLabel(c.getCollType()), null, null, null,
                     null, null, null, null, null, null, null,
                     c.getCollAmt(), -c.getCollAmt(), 0L), -c.getCollAmt()));
         }
@@ -961,7 +999,7 @@ public class ReceivableService {
             running += e.amount();
             ArLedgerResponse.Line l = e.line();
             // 누계는 정렬이 끝난 뒤에야 정해지므로 여기서 채운다.
-            lines.add(ArLedgerResponse.Line.detail(l.date(), l.kind(), l.refNo(),
+            lines.add(ArLedgerResponse.Line.detail(l.date(), l.refNo(),
                     l.catCode(), l.catName(), l.productCode(), l.productName(), l.supplyRate(),
                     l.saleQty(), l.saleAmount(), l.tax(),
                     l.teacherQty(), l.teacherAmount(), l.returnQty(), l.returnAmount(),
@@ -975,7 +1013,9 @@ public class ReceivableService {
             lines.add(agg("MONTH_SUBTOTAL", "월 계", curDay, month, running));
             lines.add(agg("RUNNING_TOTAL", "누 계", curDay, run, running));
         }
-        return new ArLedgerResponse(partner.getId(), partner.getName(), from, to, opening, running, lines);
+        return new ArLedgerResponse(partner.getId(), partner.getCode(), partner.getName(), from, to,
+                supplierProperties.name(), supplierProperties.bankAccount(),
+                opening, running, lines);
     }
 
     /**
@@ -1036,23 +1076,28 @@ public class ReceivableService {
         return carry + gen - coll;
     }
 
-    private static String saleKind(Sale s) {
-        if (s.getSalesCategory() == SalesCategory.RETURN) {
-            return "반품";
-        }
-        if (s.getSalesCategory() == SalesCategory.SALE) {
-            return "매출";
-        }
-        return (s.getShipmentType() == ShipmentType.TEACHER_USE) ? "교사용" : "증정";
-    }
+    // ‼️saleKind(Sale)는 지웠다 — 외상매출장의 '구분' 칸이 10/27 피드백 §7-A("제외: 구분")로
+    //   빠지면서 유일한 호출부가 사라졌다. 구분은 이제 **칸의 위치**로 드러난다
+    //   (매출수량 칸이 차면 매출, 교사용수량 칸이 차면 교사용…). 되살릴 일이 생기면
+    //   git 이력에서 꺼낼 것 — 빈 메서드로 남겨 두면 정적분석이 매번 지적한다.
 
+    /**
+     * 수금 방법 표기 — 외상매출장 <b>분류명 칸</b>에 그대로 들어간다.
+     * 레거시 인쇄물({@code SALES_*.pdf})이 "현금" 한 단어로 찍어서 그 표기를 따른다
+     * (예전엔 "수금(현금)"이었다 — 칸 이름이 이미 분류명이라 '수금'을 겹쳐 쓸 이유가 없다).
+     */
     private static String collLabel(CollectionType t) {
         return switch (t) {
-            case CASH -> "수금(현금)";
-            case PROMISSORY -> "수금(어음)";
-            case PREPAY -> "수금(선수금)";
-            case REPLACE -> "수금(대체)";
+            case CASH -> "현금";
+            case PROMISSORY -> "어음";
+            case PREPAY -> "선수금";
+            case REPLACE -> "대체";
         };
+    }
+
+    /** 집계 0은 빈 칸으로 보낸다 — 레거시 인쇄물이 값 없는 칸을 비워 둔다. */
+    private static Long zeroToNull(long v) {
+        return (v == 0L) ? null : v;
     }
 
     // ── 매핑 헬퍼 ───────────────────────────────────────────────

@@ -136,7 +136,9 @@ class ReceivableDashboardIntegrationTest extends IntegrationTestSupport {
                 sale = l;
             } else if (l.hasNonNull("teacherQty")) {
                 teacher = l;
-            } else if ("증정".equals(l.path("kind").asText())) {
+            } else {
+                // 매출·교사용·반품 어느 칸도 안 찬 행 = 증정(공급률 0 무가)뿐이었다.
+                // 10/27 피드백 §7-A로 **그런 빈 행은 아예 만들지 않게** 바뀌었다.
                 gift = l;
             }
         }
@@ -219,9 +221,11 @@ class ReceivableDashboardIntegrationTest extends IntegrationTestSupport {
         assertThat(teacher.path("teacherQty").asLong()).isEqualTo(2);
         assertThat(teacher.hasNonNull("saleQty")).as("한 행에는 그 구분 칸만 찬다").isFalse();
 
-        // ‼️증정(공급률 0)은 교사용이 아니다 — 합치면 교사용 수량이 부풀려진다
-        assertThat(gift).isNotNull();
-        assertThat(gift.hasNonNull("teacherQty")).isFalse();
+        // ‼️증정(공급률 0)은 교사용이 아니다 — 합치면 교사용 수량이 부풀려진다.
+        //   ★10/27 피드백 §7-A("값이 없는 행은 만들지 않는다")로 **행 자체가 사라졌다** —
+        //   증정은 매출·교사용·반품 어느 칸도 안 채워 빈 줄로만 나갔기 때문이다.
+        //   교사용 수량이 안 부풀려진다는 성질은 위 teacherQty=2 검증이 그대로 지킨다.
+        assertThat(gift).as("빈 행(증정)은 더 이상 만들지 않는다").isNull();
     }
 
     @Test

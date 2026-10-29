@@ -20,7 +20,19 @@ public record SupplierProperties(
         String addr,
         String bizStatus,
         String bizItem,
-        String tel
+        String tel,
+
+        /**
+         * 입금계좌 안내 문구. 외상매출장 인쇄물·PDF 하단 오른쪽에 그대로 찍힌다
+         * (10/27 피드백 §7-A "하단 오른쪽: 입금계좌 안내 문구").
+         *
+         * <p>근거: 특약점 배포용 실물 PDF({@code SALES_10003_강남 하람도서_*.pdf}) 하단 —
+         * 왼쪽 "(주)대성학력개발연구소", 오른쪽 "입금계좌 : 신한은행 140-006-456354".
+         *
+         * <p>⚠️<b>계좌번호는 PM 확인 대상</b>이다 — 위 PDF 캡처에서 읽은 값이라
+         * 현재 쓰는 계좌와 다를 수 있다. 다르면 이 설정만 고치면 된다.
+         */
+        String bankAccount
 ) {
 
     /** 계산서를 발행하려면 최소한 이 둘은 있어야 한다. */
