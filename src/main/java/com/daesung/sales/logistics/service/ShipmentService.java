@@ -146,6 +146,18 @@ public class ShipmentService {
         }
     }
 
+    /**
+     * 발송구분 기본값 확정(10/27 피드백 §8-6) — 명시적 지정·담당자정보 적용을 **전부 마친 뒤**
+     * 호출해야 한다. 그래도 비어 있으면 담당자정보 유무로 택배/화물을 가른다
+     * ({@link Shipment#decideDeliveryTypeIfBlank} 참고).
+     */
+    @Transactional
+    public void decideDeliveryTypeIfBlank(Shipment shipment) {
+        if (shipment != null) {
+            shipment.decideDeliveryTypeIfBlank();
+        }
+    }
+
     /** DSRE 배송구분(H/T) → 우리 발송구분. 모르는 값은 null(미지정) — 임의로 한쪽에 넣지 않는다. */
     private static DeliveryType deliveryTypeOf(String lgsGn) {
         if (lgsGn == null || lgsGn.isBlank()) {

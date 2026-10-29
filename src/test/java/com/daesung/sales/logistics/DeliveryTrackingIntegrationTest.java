@@ -119,12 +119,14 @@ class DeliveryTrackingIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("기본값이 없다 — 고르지 않은 건은 미지정으로 남는다")
-    void 기본값_없음() {
-        // 발송구분을 한 번도 안 준 건
+    @DisplayName("기본은 화물이다 — 담당자정보 없이 고르지 않은 건은 화물로 채워진다(10/27 피드백 §8-6)")
+    void 기본값_화물() {
+        // ★이전엔 "자동 기본값 없음"이 정책이었다(정본이 미해결로 남겼던 지점).
+        //   10/27 피드백이 "기본은 화물"로 명시적으로 뒤집었다 — 담당자정보(수령인명·연락처)
+        //   없이 발송구분을 한 번도 안 준 건은 이제 등록 시점에 FREIGHT로 채워진다.
         JsonNode o = orderById(freightShipment);
-        assertThat(o.hasNonNull("deliveryType"))
-                .as("정본이 자동 기본값 여부를 미해결로 남겨, 임의로 채우지 않는다").isFalse();
+        assertThat(o.path("deliveryType").asText()).isEqualTo("FREIGHT");
+        assertThat(o.path("deliveryTypeName").asText()).isEqualTo("화물");
     }
 
     @Test

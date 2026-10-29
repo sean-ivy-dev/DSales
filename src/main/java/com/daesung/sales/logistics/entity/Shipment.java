@@ -284,6 +284,26 @@ public class Shipment extends BaseEntity {
         return changed;
     }
 
+    /**
+     * 발송구분이 아직 없으면 규칙대로 정한다(10/27 피드백 §8-6·작업지침5).
+     * 우선순위: ① 이미 값이 있으면 그대로 둔다(명시적 지정이 여기서 이미 반영됐다 —
+     * {@link #fillDeliveryIfBlank}를 먼저 호출한 뒤에 이 메서드를 호출하는 것이 전제다).
+     * ② 담당자정보(수령인명·연락처)가 있으면 택배. ③ 그 외에는 화물(기본값).
+     *
+     * <p>★<b>생성 시점({@link #of})이 아니라 등록 흐름의 맨 끝에서 호출해야 한다.</b>
+     * 생성할 때 바로 화물을 채우면, 뒤이어 담당자정보가 들어와도
+     * {@link #fillDeliveryIfBlank}의 "비어있을 때만 채운다" 조건이 이미 거짓이 되어
+     * "담당자정보가 있으면 택배"가 영영 못 먹는다 — 그래서 기본값을 둘로 쪼갰다.
+     */
+    public void decideDeliveryTypeIfBlank() {
+        if (this.deliveryType != null) {
+            return;
+        }
+        this.deliveryType = (!isBlank(this.receiverName) || !isBlank(this.receiverPhone))
+                ? DeliveryType.COURIER
+                : DeliveryType.FREIGHT;
+    }
+
     private static boolean isBlank(String v) {
         return v == null || v.isBlank();
     }
