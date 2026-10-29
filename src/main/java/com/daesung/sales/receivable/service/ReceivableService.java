@@ -525,6 +525,21 @@ public class ReceivableService {
      */
     @Transactional(readOnly = true)
     public ArStatusResponse arStatus(LocalDate fromDate, LocalDate toDate, Long partnerId) {
+        return arStatus(fromDate, toDate, partnerId, false);
+    }
+
+    /**
+     * @param excludePurchasers 매입처 행·합계 제외(10/27 피드백 §7-C) — <b>이 화면(외상매출현황조회)
+     *     전용</b>이다. {@link #arLedgerAll}·{@link #arLedgerAllPage}는 외상매출장(24p)이 매입처
+     *     원장도 필요해 계속 {@code false}로 부른다 — 화면이 다르면 같은 메서드라도 기준이 다를 수 있다.
+     *     ‼️레거시 대성교재 화면도 매입처 **행 자체는 보였다**(ROLLUP 소계) — 다만 두 그룹을 합친
+     *     진짜 합계행은 화면에 내기 전에 지워버렸다(외상매출현황조회.vb:798 "'마지막 합계 삭제").
+     *     그래서 사용자가 봤던 "합계"는 사실 매출처 소계였다 — 9월 기준 2,403,280,543원이
+     *     그 숫자다. 10/27 피드백은 "행도 아예 빼라"로 한 걸음 더 나간 것(법인 분리 예정).
+     */
+    @Transactional(readOnly = true)
+    public ArStatusResponse arStatus(LocalDate fromDate, LocalDate toDate, Long partnerId,
+                                     boolean excludePurchasers) {
         LocalDate from = (fromDate != null) ? fromDate : LocalDate.now().withDayOfYear(1);
         LocalDate to = (toDate != null) ? toDate : LocalDate.now();
 
@@ -598,6 +613,7 @@ public class ReceivableService {
         long tSaleQty = 0, tRetQty = 0;
         List<ArStatusResponse.Row> purchaseRows = new ArrayList<>();
         List<ArStatusResponse.Row> salesRows = new ArrayList<>();
+        List<List<ArStatusResponse.CategoryBreakdown>> totalCatLists = new ArrayList<>();
         for (Long pid : ids) {
             Partner p = partners.get(pid);
             if (p == null) {
@@ -625,6 +641,12 @@ public class ReceivableService {
             // 기간 안에 매입(입고)이 있으면 매입처. 기간 밖 매입만 있는 곳도 매입처로 본다
             // (이월에 그 매입이 녹아 있어서, 매출처로 묶으면 소계가 설명되지 않는다).
             boolean isPurchaser = purchased != 0 || purchasedQty != 0 || priorPur[1] != 0;
+            // ★매입처는 행째로 뺀다(10/27 피드백 §7-C "구분이 '매입처'인 행은 모두 뺀다").
+            //   법인을 분리해 쓸 예정(리브커넥스·대성교재)이라, 이 법인 장부에 남의 잔액이 섞이면 안 된다.
+            //   합계 잔액이 30,374,190,444원으로 나오던 원인이 이것이다(레거시 2,403,280,543원).
+            if (excludePurchasers && isPurchaser) {
+                continue;
+            }
             String kind = isPurchaser ? PARTNER_KIND_PURCHASE : PARTNER_KIND_SALES;
             ArStatusResponse.Row row = new ArStatusResponse.Row(pid, p.getCode(), p.getName(), p.getBossName(),
                     kind, opening, s[6], s[1], s[7], s[2], s[3], s[0], purchasedQty, purchased,
@@ -633,6 +655,9 @@ public class ReceivableService {
                     assureAmount, ratio, p.getAssureExpiry(), p.getAssureNote(), level);
             rows.add(row);
             (isPurchaser ? purchaseRows : salesRows).add(row);
+            // 합계행의 상품군 칸은 **합계에 든 거래처만** 더한다 — 행을 뺐는데 상품군 합은
+            // 그대로면 "매출 4분류 합 ≠ 매출금액"이 되고, 그러면 어느 쪽이 틀렸는지 알 수 없다.
+            totalCatLists.add(byCat.getOrDefault(pid, List.of()));
 
             tOpen += opening; tSale += s[1]; tRet += s[2]; tTax += s[3]; tGen += s[0];
             tColl += collected; tBal += balance; tTeacher += s[4]; tTeacherQty += s[5];
@@ -643,7 +668,7 @@ public class ReceivableService {
         ArStatusResponse.Row total = new ArStatusResponse.Row(null, "합계", null, null, null,
                 tOpen, tSaleQty, tSale, tRetQty, tRet, tTax, tGen, tPurchaseQty, tPurchase,
                 tColl, tBal, tTeacher, tTeacherQty,
-                sumCategories(byCat.values()),
+                sumCategories(totalCatLists),
                 null, null, null, null, null);
         // ★이월 스냅샷이 없는 연도는 **없다고 말한다**. 예전엔 조용히 0으로 나가서,
         //   이월이 안 잡힌 채 "잔액이 맞다"고 읽혔다(프론트 실측: 부산지사 2025 미수 3,646만 원 누락).
@@ -989,6 +1014,19 @@ public class ReceivableService {
     /** getOrDefault 기본값 공유 — 루프마다 새 배열을 만들지 않는다. 읽기 전용으로만 쓴다. */
     private static final long[] EMPTY2 = new long[2];
 
+    /** [매출수량, 매출액, 반품수량, 반품액] 기본값. */
+    private static final long[] EMPTY4 = new long[4];
+
+    /**
+     * 외상매출현황(매출상세) 표시 분류 <b>4칸 — 칸 순서까지 이것이 정본</b>.
+     * 근거: 재무팀 실파일 {@code 외상매출현황조회_20260930(매출상세 컬럼확인용).xlsx} 헤더
+     * (수량(교재)·매출(교재)·수량(모의고사)·매출(모의고사)·수량(기타)·매출(기타)·수량(특강)·매출(특강))
+     * + 10/27 피드백 §7-C.
+     */
+    private static final List<MajorCategory> DISPLAY_CATEGORIES = List.of(
+            MajorCategory.TEXTBOOK, MajorCategory.MOCK_EXAM,
+            MajorCategory.ETC, MajorCategory.SPECIAL_LECTURE);
+
     /**
      * 매입처·매출처 소계행. 레거시 대성교재 화면의 GROUPING 소계와 같은 자리다
      * (외상매출현황조회.vb:650 — 매입처 소계 / 매출처 소계 / 합계 3단).
@@ -1041,13 +1079,40 @@ public class ReceivableService {
      * (빼면 상품군 합이 전체 매출과 안 맞고, 그러면 어느 쪽이 틀렸는지 알 수 없다).
      */
     private static Map<Long, List<ArStatusResponse.CategoryBreakdown>> toCategoryMap(List<Object[]> rows) {
-        Map<Long, List<ArStatusResponse.CategoryBreakdown>> m = new LinkedHashMap<>();
+        // partnerId → (표시분류 → [매출수량, 매출액, 반품수량, 반품액])
+        Map<Long, Map<MajorCategory, long[]>> acc = new LinkedHashMap<>();
         for (Object[] r : rows) {
-            m.computeIfAbsent(num(r[0]), k -> new ArrayList<>()).add(breakdown(
-                    str(r[1]), num(r[2]), num(r[3]), num(r[4]), num(r[5])));
+            MajorCategory raw = parseCategory(str(r[1]));
+            Map<MajorCategory, long[]> m = acc.computeIfAbsent(num(r[0]), k -> new LinkedHashMap<>());
+            // ★매출과 반품이 **다른 칸으로 갈 수 있다** — 모의고사 매출은 모의고사 칸이지만
+            //   모의고사 반품은 기타 칸이다(반품은 2분류). 그래서 한 행을 두 번 더한다.
+            long[] sv = m.computeIfAbsent(saleBucket(raw), k -> new long[4]);
+            sv[0] += num(r[2]);
+            sv[1] += num(r[3]);
+            long[] rv = m.computeIfAbsent(returnBucket(raw), k -> new long[4]);
+            rv[2] += num(r[4]);
+            rv[3] += num(r[5]);
         }
-        m.values().forEach(list -> list.sort(Comparator.comparingInt(ReceivableService::categoryOrder)));
-        return m;
+        Map<Long, List<ArStatusResponse.CategoryBreakdown>> out = new LinkedHashMap<>();
+        acc.forEach((pid, m) -> out.put(pid, fixedBreakdowns(m)));
+        return out;
+    }
+
+    /**
+     * 표시 분류 <b>4칸 고정</b>(교재·모의고사·기타·특강). 근거: 10/27 피드백 §7-C + 재무팀 실파일
+     * {@code 외상매출현황조회_20260930(매출상세 컬럼확인용).xlsx}(24칸).
+     *
+     * <p>안 팔린 분류도 0으로 깐다 — 그 달에 없던 분류가 통째로 빠지면 달마다 칸 수가 달라져
+     * 재무팀이 파일을 겹쳐 볼 수 없다.
+     */
+    private static List<ArStatusResponse.CategoryBreakdown> fixedBreakdowns(
+            Map<MajorCategory, long[]> acc) {
+        List<ArStatusResponse.CategoryBreakdown> out = new ArrayList<>();
+        for (MajorCategory c : DISPLAY_CATEGORIES) {
+            long[] v = acc.getOrDefault(c, EMPTY4);
+            out.add(new ArStatusResponse.CategoryBreakdown(c, c.label(), v[0], v[1], v[2], v[3]));
+        }
+        return out;
     }
 
     /** 합계행의 상품군 칸 — 거래처별 분해를 대분류 단위로 합친다. */
@@ -1070,23 +1135,50 @@ public class ReceivableService {
         return out;
     }
 
-    private static ArStatusResponse.CategoryBreakdown breakdown(String rawCode, long saleQty,
-                                                               long saleAmt, long retQty, long retAmt) {
-        MajorCategory code = null;
-        if (rawCode != null && !rawCode.isBlank()) {
-            try {
-                code = MajorCategory.valueOf(rawCode);
-            } catch (IllegalArgumentException ignored) {
-                code = null;   // 우리가 모르는 값이 DB에 있어도 행을 버리지 않는다(합이 어긋난다)
-            }
+    /** 대분류 코드 문자열 → enum. 모르는 값·빈 값은 null(미분류) — 행을 버리지 않는다(합이 어긋난다). */
+    private static MajorCategory parseCategory(String rawCode) {
+        if (rawCode == null || rawCode.isBlank()) {
+            return null;
         }
-        String name = (code != null) ? code.label() : "미분류";
-        return new ArStatusResponse.CategoryBreakdown(code, name, saleQty, saleAmt, retQty, retAmt);
+        try {
+            return MajorCategory.valueOf(rawCode);
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
-    /** 미분류는 항상 맨 뒤. 그 외는 enum 선언순. */
+    /**
+     * <b>매출</b> 표시 분류 — 교재·모의고사·특강은 그대로, 나머지(기타고사·기타·미분류·IC)는 기타로 합친다.
+     * 근거: 10/27 피드백 §7-C "기존 '기타'에는 상품 대분류의 기타고사와 기타가 합쳐져 표시됩니다".
+     *
+     * <p>★미분류도 기타로 들어간다 — 피드백이 "현재는 6분류(기타고사·미분류 추가)"를 4분류로
+     * 되돌리라 했고, 인쇄에서도 "미분류 수량·금액 칸을 뺀다"고 했다. 칸을 지우고 숫자를
+     * 버리면 상품군 합이 매출금액과 안 맞으므로, <b>버리지 않고 기타로 합친다</b>.
+     * (미분류가 왜 생기는지·어디로 편입할지는 별도 회신 과제 — 11단계.)
+     *
+     * <p>IC는 레거시에서도 기타고사와 함께 묶여 있었다({@link MajorCategory#IC} 주석 참고).
+     */
+    private static MajorCategory saleBucket(MajorCategory raw) {
+        if (raw == MajorCategory.TEXTBOOK || raw == MajorCategory.MOCK_EXAM
+                || raw == MajorCategory.SPECIAL_LECTURE) {
+            return raw;
+        }
+        return MajorCategory.ETC;
+    }
+
+    /**
+     * <b>반품</b> 표시 분류 — 교재만 따로, 나머지는 전부 기타.
+     * 근거: 10/27 피드백 §7-C "반품은 교재·기타 2분류" + 실파일 24칸에 반품 칸이
+     * `반품수량(교재)·반품수량(기타)` 둘뿐이다(모의고사·특강 반품 칸이 아예 없다).
+     */
+    private static MajorCategory returnBucket(MajorCategory raw) {
+        return (raw == MajorCategory.TEXTBOOK) ? MajorCategory.TEXTBOOK : MajorCategory.ETC;
+    }
+
+    /** 표시 순서는 {@link #DISPLAY_CATEGORIES}(실파일 칸 순서)다 — enum 선언순이 아니다. */
     private static int categoryOrder(ArStatusResponse.CategoryBreakdown c) {
-        return (c.majorCategory() == null) ? Integer.MAX_VALUE : c.majorCategory().ordinal();
+        int idx = DISPLAY_CATEGORIES.indexOf(c.majorCategory());
+        return (idx < 0) ? Integer.MAX_VALUE : idx;
     }
 
     private static Map<Long, long[]> toSalesMap(List<Object[]> rows) {

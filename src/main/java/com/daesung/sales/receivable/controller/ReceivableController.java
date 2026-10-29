@@ -229,7 +229,14 @@ public class ReceivableController {
             @Parameter(description = "거래처 id 필터") @RequestParam(required = false) Long partnerId,
             @Parameter(description = "키워드 — 코드·명칭을 함께 훑는다(부분일치)")
             @RequestParam(required = false) String keyword) {
-        ArStatusResponse r = receivableService.arStatus(fromDate, toDate, partnerId);
+        // ★매입처 제외(10/27 피드백 §7-C) — 이 화면 **목록**에선 '매입처' 행을 아예 빼고,
+        //   합계 잔액에도 넣지 않는다. 법인 분리(리브커넥스·대성교재) 예정이라
+        //   이 법인 장부에 남의 잔액이 섞이면 안 된다.
+        //   ★단 **거래처를 하나 지정해 들어온 조회는 그대로 답한다**(partnerId != null).
+        //     지정한 거래처가 매입처면 빈 화면이 돌아오는데, 그러면 담당자는 필터가
+        //     고장 난 줄 안다 — "목록에서 빼라"와 "특정 거래처를 물었을 때 숨겨라"는 다르다.
+        //     ⚠️이 경계는 발주처 확인 대상(피드백 문구는 목록 기준으로만 말한다).
+        ArStatusResponse r = receivableService.arStatus(fromDate, toDate, partnerId, partnerId == null);
         // ‼️합계·소계는 그대로 둔다 — 걸러진 것만의 합으로 바꾸면 "전체 잔액"이 아니게 된다.
         return ApiResponse.success(new ArStatusResponse(r.fromDate(), r.toDate(),
                 Keywords.filter(r.rows(), keyword,
@@ -243,7 +250,9 @@ public class ReceivableController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
             @RequestParam(required = false) Long partnerId) {
-        List<ArStatusResponse.Row> rows = receivableService.arStatus(fromDate, toDate, partnerId).rows();
+        // 매입처 제외는 조회와 **같은 기준**이다 — 화면과 엑셀의 합계가 갈리면 둘 다 못 믿는다.
+        List<ArStatusResponse.Row> rows =
+                receivableService.arStatus(fromDate, toDate, partnerId, partnerId == null).rows();
         byte[] xlsx = excel.toXlsx("미수금현황", arStatusCols(), arStatusRows(rows),
                 Heading.period("외상매출현황조회", fromDate, toDate));
         return excel.asDownload(xlsx, "미수금현황.xlsx");
@@ -277,11 +286,11 @@ public class ReceivableController {
         cols.add(new Col("교사용수량", "teacherQty"));
         cols.add(new Col("교사용(증정포함)", "teacherAmount"));
         cols.add(new Col("반품수량", "returnQty"));
-        for (MajorCategory c : arCategories()) {
+        for (MajorCategory c : arReturnCategories()) {
             cols.add(new Col("반품수량(" + c.label() + ")", "returnQty_" + c.name()));
         }
         cols.add(new Col("반품액", "returnAmount"));
-        for (MajorCategory c : arCategories()) {
+        for (MajorCategory c : arReturnCategories()) {
             cols.add(new Col("반품금액(" + c.label() + ")", "returnAmount_" + c.name()));
         }
         cols.addAll(List.of(
@@ -296,15 +305,26 @@ public class ReceivableController {
         return cols;
     }
 
-    /** 엑셀에 낼 상품군 — 화면에서 숨기는 IC는 뺀다(미사용 확정이라 늘 0이다). */
+    /**
+     * 엑셀에 낼 <b>매출</b> 상품군 — 4칸 고정(교재·모의고사·기타·특강).
+     * 근거: 10/27 피드백 §7-C + 재무팀 실파일 24칸.
+     *
+     * <p>‼️예전엔 {@code MajorCategory.values()} 중 visible 전부(5칸)를 깔아
+     * 기타고사 칸이 따로 나갔고, 대분류를 못 붙인 매출은 어느 칸에도 안 들어갔다.
+     * 지금은 서비스가 기타고사·미분류·IC를 <b>기타로 합쳐</b> 4칸으로만 내려준다.
+     */
     private static List<MajorCategory> arCategories() {
-        List<MajorCategory> out = new ArrayList<>();
-        for (MajorCategory c : MajorCategory.values()) {
-            if (c.visible()) {
-                out.add(c);
-            }
-        }
-        return out;
+        return List.of(MajorCategory.TEXTBOOK, MajorCategory.MOCK_EXAM,
+                MajorCategory.ETC, MajorCategory.SPECIAL_LECTURE);
+    }
+
+    /**
+     * 엑셀에 낼 <b>반품</b> 상품군 — 2칸(교재·기타).
+     * 근거: 10/27 피드백 §7-C "반품은 교재·기타 2분류" — 실파일에도 반품 칸은
+     * `반품수량(교재)·반품수량(기타)` 둘뿐이고 모의고사·특강 반품 칸이 없다.
+     */
+    private static List<MajorCategory> arReturnCategories() {
+        return List.of(MajorCategory.TEXTBOOK, MajorCategory.ETC);
     }
 
     /**

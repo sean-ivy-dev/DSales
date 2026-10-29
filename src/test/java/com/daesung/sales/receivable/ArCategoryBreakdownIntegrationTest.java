@@ -20,7 +20,11 @@ import org.junit.jupiter.api.TestInstance;
  *
  * <p>★<b>상품군 합은 전체와 맞아야 한다.</b> 대분류를 못 붙인 매출(세부구분 미지정)을
  * 빼 버리면 합이 전체보다 작아지는데, 그러면 담당자는 어느 쪽이 틀렸는지 알 수 없다.
- * 그래서 미분류도 한 칸으로 남기고, 이 테스트가 합이 맞는지 고정한다.
+ * 그래서 미분류도 버리지 않고 <b>기타 칸에 합쳐</b> 두고, 이 테스트가 합이 맞는지 고정한다.
+ *
+ * <p>★<b>4분류 고정</b>(10/27 피드백 §7-C) — 매출은 교재·모의고사·기타·특강 4칸,
+ * 반품은 교재·기타 2칸이다. 기타고사·미분류·IC는 모두 기타로 합친다.
+ * 예전엔 미분류를 별도 칸으로 남겨 6칸이 나갔다(그때 테스트가 그걸 고정하고 있었다).
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @DisplayName("외상매출현황 상품군별 분해")
@@ -142,14 +146,34 @@ class ArCategoryBreakdownIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("세부구분 없는 매출은 '미분류'로 남는다 — 버리지 않는다")
-    void 미분류도_남는다() {
-        JsonNode unclassified = category(myRow(), "미분류");
+    @DisplayName("★세부구분 없는 매출은 '기타'로 합친다 — 버리지도, 미분류 칸으로 내지도 않는다")
+    void 미분류는_기타로_합친다() {
+        JsonNode row = myRow();
 
-        assertThat(unclassified).as("미분류 칸이 있어야").isNotNull();
-        assertThat(unclassified.path("saleQty").asLong()).isEqualTo(7);
-        // ‼️전역 JsonInclude.NON_NULL 이라 null 필드는 **키 자체가 빠진다** — isNull() 로는 못 잡는다.
-        assertThat(unclassified.hasNonNull("majorCategory")).as("대분류 코드는 비어 있다").isFalse();
+        assertThat(category(row, "미분류")).as("미분류 칸은 더 이상 없다(§7-C)").isNull();
+        // 세부구분 없는 7부가 기타 칸에 들어가 있다.
+        assertThat(category(row, "기타").path("saleQty").asLong()).isEqualTo(7);
+    }
+
+    @Test
+    @DisplayName("★칸은 4개로 고정 — 교재·모의고사·기타·특강(기타고사 칸은 없다)")
+    void 분류칸_4개_고정() {
+        JsonNode row = myRow();
+
+        List<String> names = new java.util.ArrayList<>();
+        row.path("byCategory").forEach(c -> names.add(c.path("majorName").asText()));
+
+        assertThat(names).containsExactly("교재", "모의고사", "기타", "특강");
+    }
+
+    @Test
+    @DisplayName("★반품은 교재·기타 2칸만 움직인다 — 모의고사·특강 반품 칸은 없다(0)")
+    void 반품은_2분류() {
+        JsonNode row = myRow();
+
+        assertThat(category(row, "교재").path("returnQty").asLong()).isEqualTo(20);
+        assertThat(category(row, "모의고사").path("returnQty").asLong()).isZero();
+        assertThat(category(row, "특강").path("returnQty").asLong()).isZero();
     }
 
     @Test

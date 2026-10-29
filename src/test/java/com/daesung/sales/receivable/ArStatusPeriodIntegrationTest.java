@@ -261,9 +261,18 @@ class ArStatusPeriodIntegrationTest extends IntegrationTestSupport {
         assertThat(row.path("balance").asLong()).isEqualTo(-500_000);  // 매입 없이 수금만 → 음수
     }
 
+    /**
+     * ★<b>10/27 피드백 §7-C로 뒤집힌 테스트다.</b> 예전엔 "매입처 행이 목록에 서고,
+     * 매입처 소계 + 매출처 소계 = 합계"를 고정했다(레거시 대성교재 GROUPING 자리).
+     * 지금은 <b>목록에서 매입처를 아예 뺀다</b> — 법인 분리(리브커넥스·대성교재) 예정이라
+     * 이 법인 합계에 남의 잔액이 섞이면 안 된다(합계 잔액이 30,374,190,444원으로
+     * 나오던 원인. 레거시가 보여 주던 값은 2,403,280,543원 = 매출처 소계였다).
+     *
+     * <p>매입처 판정 자체(입고 유무)·매입액 칸은 그대로다 — 거래처를 지정해 물으면 답한다.
+     */
     @Test
-    @DisplayName("매입처/매출처 구분과 소계 — 레거시 대성교재 화면의 GROUPING 자리")
-    void 매입처_매출처_소계() {
+    @DisplayName("★매입처는 목록에서 빠진다 — 지정해 물으면 매입액·구분은 그대로 답한다")
+    void 매입처_목록에서_제외() {
         // 매입(입고)이 있으면 매입처. ‼️레거시의 `거래처코드 첫 글자 A` 규칙은 쓰지 않는다 —
         // 두 법인을 한 DB에 합친 뒤에는 A 거래처 대부분이 매출처다(실측 425곳 중 267곳).
         // ★매입처를 이 테스트 안에서 만든다 — 다른 테스트가 만든 것에 기대면 실행 순서에 묶인다.
@@ -277,22 +286,26 @@ class ArStatusPeriodIntegrationTest extends IntegrationTestSupport {
 
         JsonNode d = data(get("/closing/ar-status?fromDate=" + YEAR + "-01-01&toDate=" + YEAR + "-12-31"));
 
-        JsonNode buyRow = null;
         for (JsonNode r : d.path("rows")) {
+            assertThat(r.path("partnerId").asLong())
+                    .as("매입처는 목록에 없어야: %s", r).isNotEqualTo(buyFrom);
+        }
+        // 매입처가 없으니 합계도 매출처만의 합이다 — 둘이 갈리면 어느 쪽이 '합계'인지 알 수 없다.
+        assertThat(d.path("total").path("balance").asLong())
+                .isEqualTo(d.path("salesSubtotal").path("balance").asLong());
+
+        // 거래처를 지정해 물으면 그 매입처를 그대로 답한다(판정·매입액 칸은 살아 있다).
+        JsonNode buyRow = null;
+        for (JsonNode r : data(get("/closing/ar-status?fromDate=" + YEAR + "-01-01&toDate="
+                + YEAR + "-12-31&partnerId=" + buyFrom)).path("rows")) {
             if (r.hasNonNull("partnerId") && r.path("partnerId").asLong() == buyFrom) {
                 buyRow = r;
             }
         }
-        assertThat(buyRow).as("방금 만든 매입처가 목록에 선다").isNotNull();
+        assertThat(buyRow).as("지정 조회엔 선다").isNotNull();
         assertThat(buyRow.path("purchaseAmount").asLong()).isEqualTo(120_000);
         assertThat(buyRow.path("partnerKind").asText()).isEqualTo("PURCHASE");
         assertThat(buyRow.path("purchaseQty").asLong()).as("입고수량도 보인다").isPositive();
-
-        // 소계 둘을 더하면 합계가 된다 — 갈라 놓고 합이 안 맞으면 둘 다 못 믿는다.
-        long sub = d.path("purchaseSubtotal").path("balance").asLong()
-                + d.path("salesSubtotal").path("balance").asLong();
-        assertThat(sub).isEqualTo(d.path("total").path("balance").asLong());
-        assertThat(d.path("purchaseSubtotal").path("partnerCode").asText()).isEqualTo("매입처 소계");
     }
 
     @Test
