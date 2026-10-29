@@ -681,8 +681,66 @@ public class ReceivableService {
             warnings.add(openingYear + "년 이월 스냅샷이 없습니다. 이월이 0으로 계산되어 "
                     + "전년 미수금이 잔액에 빠져 있습니다 — 마감관리에서 이월을 먼저 생성하세요.");
         }
-        return new ArStatusResponse(from, to, rows, total,
+        // ★소계 구간(10/27 피드백 §7-C "레거시 6구간, 지금은 2구간") — 화면 조회일 때만 끼워 넣는다.
+        //   arLedgerAll 류의 내부 재사용(excludePurchasers=false)은 partnerId만 뽑아 쓰므로
+        //   끼워 넣어도 무해하지만, 그 목적엔 필요 없는 가짜 행이라 똑같이 걸러 둔다.
+        List<ArStatusResponse.Row> displayRows = excludePurchasers ? interspersePrefixSubtotals(rows) : rows;
+        return new ArStatusResponse(from, to, displayRows, total,
                 subtotal("매입처 소계", purchaseRows), subtotal("매출처 소계", salesRows), warnings);
+    }
+
+    /**
+     * 거래처코드 첫 글자가 바뀔 때마다 "소 계" 행을 끼워 넣는다. 근거: 레거시 실DB(DSLab.bak·
+     * DSTxtBook.bak 복원) 재현 — {@code 외상매출현황조회.vb:337-350}(Refresh_DataGridView,
+     * 대성학력개발연구소 기본 화면)이 거래처코드순 루프에서 <b>첫 글자가 바뀔 때마다</b>
+     * "소 계" 행을 추가하는 control-break 패턴이었다. 고정된 6개 분류표가 아니라,
+     * <b>그 조회 시점에 실제로 존재하는 접두어 종류만큼</b> 소계가 생기는 구조다.
+     *
+     * <p>★<b>'A'는 한 번 더 쪼갠다</b> — 레거시 원문 주석 "인터넷 서점 별도 계산 위한 코드
+     * 추가"({@code :343-347}): 코드 앞 4자리가 "A30C"보다 사전식으로 뒤면(인터넷서점 코드대)
+     * 별도 그룹("#")으로 뗀다.
+     *
+     * <p>★★<b>"6"은 레거시가 연구소·대성교재를 분리 운영하던 시절, 연구소 화면 하나만 본
+     * 숫자다.</b> 9월 실데이터로 재현하면 — 연구소(DSLab)만 174명 기준 6구간(A·#·D·E·G·H),
+     * 법인 통합(DSLab+DSTxtBook, 273명 — 라이브 "전체 273건"과 일치) 기준으론 대성교재
+     * 소속 대형서점(B, 교보문고·영풍문고 등)이 더해져 **7구간**이 된다. 우리는 법인 통합이
+     * 확정(§1 단일법인 가정)이라 억지로 6에 맞추지 않고 그대로 둔다 — 발주처에 "7로 나오는
+     * 이유가 법인 통합 때문"이라고 설명하고 넘어간다.
+     *
+     * @param sorted 거래처코드순으로 이미 정렬된 행(매입처는 이미 빠진 상태)
+     */
+    private static List<ArStatusResponse.Row> interspersePrefixSubtotals(List<ArStatusResponse.Row> sorted) {
+        if (sorted.isEmpty()) {
+            return sorted;
+        }
+        List<ArStatusResponse.Row> out = new ArrayList<>();
+        List<ArStatusResponse.Row> group = new ArrayList<>();
+        String prevKey = null;
+        for (ArStatusResponse.Row r : sorted) {
+            String key = subtotalGroupKey(r.partnerCode());
+            if (prevKey != null && !key.equals(prevKey)) {
+                out.add(subtotal("소 계", group));
+                group = new ArrayList<>();
+            }
+            out.add(r);
+            group.add(r);
+            prevKey = key;
+        }
+        out.add(subtotal("소 계", group));
+        return out;
+    }
+
+    /** 소계 구간 키 — 거래처코드 첫 글자. 'A'만 "A30C" 기준으로 한 번 더 쪼갠다(레거시 그대로). */
+    private static String subtotalGroupKey(String code) {
+        if (code == null || code.isEmpty()) {
+            return "";
+        }
+        char first = code.charAt(0);
+        if (first != 'A') {
+            return String.valueOf(first);
+        }
+        String c4 = code.length() >= 4 ? code.substring(0, 4) : code;
+        return c4.compareToIgnoreCase("A30C") > 0 ? "#" : "A";
     }
 
     /**
