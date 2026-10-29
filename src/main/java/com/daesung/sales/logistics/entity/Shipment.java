@@ -94,8 +94,9 @@ public class Shipment extends BaseEntity {
 
     /**
      * 발송구분(택배/화물). 근거: 정본 26p 클라이언트 정정 2026-07-25.
-     * ⚠️기본값을 두지 않는다 — 정본이 "자동 기본값이 있는지"를 미해결로 남겼다.
-     * 임의로 정하면 물류가 고르지 않은 건까지 한쪽으로 발송된 것처럼 보인다.
+     * 생성 시점엔 null로 둔다 — {@link #decideDeliveryTypeIfBlank()}가 명시적 지정·
+     * 담당자정보 적용을 끝낸 뒤 기본값(화물, 담당자정보 있으면 택배)을 확정한다
+     * (10/27 피드백 §8-6 — "기본값 미해결"이 뒤집혔다).
      */
     @Enumerated(EnumType.STRING)
     @Column(name = "delivery_type", length = 10)
@@ -159,6 +160,14 @@ public class Shipment extends BaseEntity {
         s.schoolName = schoolName;
         s.memo = memo;
         return s;
+    }
+
+    /**
+     * 거래순번(10/27 피드백 §3-6·8-2) — "거래처별로 매일 1번부터". 생성 시 1회만
+     * 호출한다(필드 기본값 1에 멈춰 있던 걸 실제 채번으로 대체).
+     */
+    public void assignTradeSeq(int seq) {
+        this.tradeSeq = seq;
     }
 
     /** 작업요청서 출력 처리. 재출력해도 최초 시각을 덮지 않는다 — '언제 처음 지시가 나갔나'가 기록의 의미다. */

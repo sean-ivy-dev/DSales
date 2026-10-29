@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 import com.daesung.sales.audit.entity.StatusEntityType;
 import com.daesung.sales.audit.service.StatusHistoryService;
 import com.daesung.sales.common.audit.CurrentAuditor;
+import com.daesung.sales.common.sequence.SequenceService;
 import com.daesung.sales.dsre.gateway.DsreGateway;
 import com.daesung.sales.dsre.gateway.DsreShipResult;
 import com.daesung.sales.dsre.gateway.DsreShipResult.Outcome;
@@ -52,6 +53,7 @@ class ShipmentDsreSyncTest {
     @Mock private ShipmentRepository shipmentRepository;
     @Mock private StatusHistoryService statusHistoryService;
     @Mock private CurrentAuditor currentAuditor;
+    @Mock private SequenceService sequenceService;
     @Mock private ObjectProvider<DsreGateway> provider;
     @Mock private DsreGateway gw;
 
@@ -61,7 +63,8 @@ class ShipmentDsreSyncTest {
     void setUp() {
         when(provider.getIfAvailable()).thenReturn(gw);
         when(currentAuditor.username()).thenReturn("logi01");
-        service = new ShipmentService(shipmentRepository, statusHistoryService, currentAuditor, provider);
+        service = new ShipmentService(shipmentRepository, statusHistoryService, currentAuditor,
+                sequenceService, provider);
     }
 
     private Shipment shipment(long id, LocalDate sent) {

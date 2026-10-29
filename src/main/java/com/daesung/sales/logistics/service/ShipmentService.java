@@ -5,6 +5,7 @@ import com.daesung.sales.audit.service.StatusHistoryService;
 import com.daesung.sales.common.audit.CurrentAuditor;
 import com.daesung.sales.common.exception.BusinessException;
 import com.daesung.sales.common.exception.ErrorCode;
+import com.daesung.sales.common.sequence.SequenceService;
 import com.daesung.sales.common.tx.AfterRollback;
 import com.daesung.sales.dsre.gateway.DsreGateway;
 import com.daesung.sales.dsre.gateway.DsreShipResult;
@@ -47,6 +48,7 @@ public class ShipmentService {
     private final ShipmentRepository shipmentRepository;
     private final StatusHistoryService statusHistoryService;
     private final CurrentAuditor currentAuditor;
+    private final SequenceService sequenceService;
     /** DSRE 연동이 꺼져 있으면(daesung.dsre.enabled=false) 비어 있다 — 그땐 우리 발송일만 다룬다. */
     private final ObjectProvider<DsreGateway> dsreGateway;
 
@@ -64,9 +66,17 @@ public class ShipmentService {
         String tradeClass = sale.getProduct().getSalesDivision();
         return shipmentRepository.findKey(sale.getSalesDate(), sale.getPartner().getId(),
                         sale.getSchoolCode(), tradeClass)
-                .orElseGet(() -> shipmentRepository.save(Shipment.of(
-                        tradeClass, sale.getSalesDate(), sale.getPartner(),
-                        sale.getSchoolCode(), sale.getSchoolName(), null)));
+                .orElseGet(() -> {
+                    Shipment s = Shipment.of(tradeClass, sale.getSalesDate(), sale.getPartner(),
+                            sale.getSchoolCode(), sale.getSchoolName(), null);
+                    s.assignTradeSeq(nextTradeSeq(sale.getPartner().getId(), sale.getSalesDate()));
+                    return shipmentRepository.save(s);
+                });
+    }
+
+    /** 거래순번 채번(10/27 피드백 §3-6·8-2) — 거래처×거래일자 범위에서 1부터. */
+    private int nextTradeSeq(Long partnerId, LocalDate tradeDate) {
+        return (int) sequenceService.nextInScope(SequenceService.SEQ_TRADE, partnerId + ":" + tradeDate);
     }
 
     /** status_history 의 발송 상태축 이름. */
@@ -313,8 +323,11 @@ public class ShipmentService {
     public Shipment ensureForConsignment(java.time.LocalDate tradeDate, Partner partner,
                                          String schoolCode, String schoolName, String tradeClass) {
         return shipmentRepository.findKey(tradeDate, partner.getId(), schoolCode, tradeClass)
-                .orElseGet(() -> shipmentRepository.save(
-                        Shipment.of(tradeClass, tradeDate, partner, schoolCode, schoolName, null)));
+                .orElseGet(() -> {
+                    Shipment s = Shipment.of(tradeClass, tradeDate, partner, schoolCode, schoolName, null);
+                    s.assignTradeSeq(nextTradeSeq(partner.getId(), tradeDate));
+                    return shipmentRepository.save(s);
+                });
     }
 
     /**

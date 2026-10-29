@@ -42,6 +42,13 @@ public class SequenceService {
     /** 세트 조립·해체 전표(BW-). 이고와 같은 이유. */
     public static final String SEQ_BOMWORK = "seq_bomwork_no";
 
+    /**
+     * 거래순번(10/27 피드백 §3-6·8-2) — {@code Shipment.tradeSeq}. "거래처별로 매일
+     * 1번부터"라 스코프는 {@code partnerId + ":" + 거래일자}. {@link #nextInScope}로
+     * 발송(Shipment) 신규 생성 시 1회만 매긴다(기존엔 필드 기본값 1에서 멈춰 있었다).
+     */
+    public static final String SEQ_TRADE = "seq_trade_no";
+
     private final SequenceRepository repository;
 
     /** 다음 순번(원자적). */
