@@ -93,8 +93,12 @@ public class ReceivableService {
     public List<CollectionResponse> registerCollections(
             com.daesung.sales.receivable.dto.CollectionBatchRequest req) {
         // 전표코드는 **첫 줄의 수금일자**로 한 번만 만든다 — 한 입금의 날짜다.
-        String voucherNo = "V-" + req.lines().get(0).collDate().format(YYYYMMDD) + "-"
-                + sequenceService.next(SequenceService.SEQ_COLLECTION_VOUCHER);
+        // ★순번은 그 수금일자 안에서만 1부터 센다(10/27 피드백 §6-1) — 예전엔 전역 누적이라
+        //   "V-20261026-2"의 2가 그날 두 번째가 아니라 전체 누적 두 번째였다.
+        java.time.LocalDate collDate = req.lines().get(0).collDate();
+        String voucherNo = "V-" + collDate.format(YYYYMMDD) + "-"
+                + sequenceService.nextInScope(SequenceService.SEQ_COLLECTION_VOUCHER,
+                        collDate.format(YYYYMMDD));
 
         List<CollectionResponse> out = new ArrayList<>(req.lines().size());
         for (CollectionRequest line : req.lines()) {

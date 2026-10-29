@@ -54,4 +54,21 @@ public class SequenceService {
         Long val = repository.current(seqName);
         return (val == null) ? 0L : val;
     }
+
+    /**
+     * 범위(scope)별로 1부터 리셋되는 순번(10/27 피드백 §6-1·§3-6·8-2 — "그 수금일자 안에서만
+     * 1,2,3…", "거래처별로 매일 1번부터"). 키를 {@code prefix + ":" + scope}로 동적 생성해
+     * {@link SequenceRepository#upsertBump}를 쓴다 — {@link #next(String)}과 달리 미리
+     * 행을 심어 둘 필요가 없다(스코프가 매일·매 거래처마다 새로 생기기 때문).
+     *
+     * @param prefix 고정 접두어(이 클래스의 {@code SEQ_*} 상수 중 하나를 쓴다)
+     * @param scope  그 안에서 1부터 세는 범위(예: 날짜, 또는 "거래처id:날짜")
+     */
+    @Transactional(propagation = Propagation.REQUIRED)
+    public long nextInScope(String prefix, String scope) {
+        String key = prefix + ":" + scope;
+        repository.upsertBump(key);
+        Long val = repository.current(key);
+        return (val == null) ? 0L : val;
+    }
 }
