@@ -49,6 +49,28 @@ public class SequenceService {
      */
     public static final String SEQ_TRADE = "seq_trade_no";
 
+    /**
+     * 자재코드(10/27 피드백 §11-3 — "직접 입력하지 않고 자동으로 끌어와 채운다").
+     *
+     * <p>★규칙은 <b>DSRE와 같은 순수 숫자 순번</b>이다. 피드백이 "기존 매출프로그램과 DSRE의
+     * 자재코드 체계를 확인해 <b>같은 규칙으로 맞춘다</b>"고 했고, DSRE
+     * {@code tbl_materials_info.MAT_CD}가 {@code int auto_increment}(운영 실값 1~12,334)라
+     * 그 규칙이 곧 "그냥 순번"이다. 자재의 성격은 코드가 아니라 {@code DTL_CD}(시행)·
+     * {@code MAT_GN}(구분) 컬럼과 자재명에 있다 — 우리도 구분을 코드에 담지 않는다.
+     *
+     * <p>‼️대신 {@link #MATERIAL_CODE_BASE}만큼 <b>대역을 띄운다</b>. 발주처 회신 #2로 자재가
+     * 두 갈래(DSRE 병행분=그쪽 MAT_CD / 단독분=우리 채번)가 됐고, 1번부터 쓰면 같은 번호가
+     * 서로 다른 자재를 가리킨다. DSRE 연간 증가량 실측 평균 ~1,500건(최고 2,943건/2023년)이라
+     * 10만에 닿기까지 30~58년이다.
+     */
+    public static final String SEQ_MATERIAL = "seq_material_no";
+
+    /**
+     * 자재코드 시작 대역. 우리 자재는 {@code 100001}부터 — "10만 이상이면 우리가 매긴 자재"가
+     * 판별 규칙이 된다. 바꾸면 기존 코드와 새 코드가 섞이니 <b>한 번 정하면 바꾸지 않는다</b>.
+     */
+    public static final long MATERIAL_CODE_BASE = 100_000L;
+
     private final SequenceRepository repository;
 
     /** 다음 순번(원자적). */

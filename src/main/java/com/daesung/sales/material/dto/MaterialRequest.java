@@ -8,9 +8,14 @@ import jakarta.validation.constraints.NotNull;
 /** 자재 등록·수정 요청(33p 세트구성 탭의 자재 마스터). */
 public record MaterialRequest(
 
-        @Schema(description = "자재코드. 수정 시에는 무시된다(BOM 매칭이 참조하는 식별자)",
-                example = "11161", requiredMode = Schema.RequiredMode.REQUIRED)
-        @NotBlank String code,
+        @Schema(description = """
+                자재코드. ‼️**보내도 무시된다** — 서버가 자동으로 매긴다(10/27 피드백 §11-3 확정,
+                "직접 입력하지 않고 자동으로 끌어와 채운다"). **10만 번대 순수 숫자**(첫 자재 `100001`)로,
+                DSRE 자재코드(`MAT_CD`, 1~12,334)와 같은 규칙에 대역만 띄운 것이다.
+                등록 응답의 `code`에 생성된 값이 담겨 나온다. 생성 후에는 바뀌지 않는다(BOM 매칭이 참조).
+                화면에서는 입력란을 없애고 저장 후 받은 값을 보여주면 된다.""",
+                example = "100001", requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+        String code,
 
         @Schema(description = """
                 자재명. 상품명·시즌·회차 등 **콘텐츠를 특정할 수 있게** 등록한다.

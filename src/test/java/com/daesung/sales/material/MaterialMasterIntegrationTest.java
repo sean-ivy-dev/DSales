@@ -34,6 +34,9 @@ class MaterialMasterIntegrationTest extends IntegrationTestSupport {
     private Long round2;
     private Long omr;
     private Long paper1;
+    /** ★자재코드는 **서버가 매긴다**(V102) — 보낸 코드가 아니라 응답에서 받아 둔다. */
+    private String omrCode;
+    private String paper1Code;
 
     @BeforeAll
     void seed() {
@@ -48,38 +51,49 @@ class MaterialMasterIntegrationTest extends IntegrationTestSupport {
         round2 = createId("/masters/products", Map.of("code", "RD2" + SFX, "name", "2회",
                 "contentType", "SELF", "price", 10000, "supplyRate", 70));
 
-        omr = data(post("/masters/materials", Map.of("code", "OMR" + SFX,
-                "name", "국어 OMR", "materialType", "OMR"))).path("id").asLong();
-        paper1 = data(post("/masters/materials", Map.of("code", "PP1" + SFX,
-                "name", "국어 시즌1_01회", "materialType", "EXAM_PAPER"))).path("id").asLong();
+        JsonNode omrRes = data(post("/masters/materials", Map.of(
+                "name", "국어 OMR" + SFX, "materialType", "OMR")));
+        omr = omrRes.path("id").asLong();
+        omrCode = omrRes.path("code").asText();
+        JsonNode paperRes = data(post("/masters/materials", Map.of(
+                "name", "국어 시즌1_01회" + SFX, "materialType", "EXAM_PAPER")));
+        paper1 = paperRes.path("id").asLong();
+        paper1Code = paperRes.path("code").asText();
     }
 
     @Test
     @Order(1)
     @DisplayName("자재 등록·조회 — 해설지는 단가 키가 시험지로 접힌다")
     void 자재등록() {
-        JsonNode ans = data(post("/masters/materials", Map.of("code", "ANS" + SFX,
-                "name", "국어 시즌1_01회_정답및해설", "materialType", "ANSWER_SHEET")));
+        JsonNode ans = data(post("/masters/materials", Map.of(
+                "name", "국어 시즌1_01회_정답및해설" + SFX, "materialType", "ANSWER_SHEET")));
 
         assertThat(ans.path("materialTypeName").asText()).isEqualTo("해설지");
         // ‼️핵심: 해설지 단가는 신설하지 않는다 — 시험지 단가를 쓴다(발주처 확정)
         assertThat(ans.path("rateKey").asText()).as("해설지 → 시험지 단가").isEqualTo("EXAM_PAPER");
 
         assertThat(codesOf(data(get("/masters/materials?materialType=OMR"))))
-                .contains("OMR" + SFX)
-                .doesNotContain("PP1" + SFX);
+                .contains(omrCode)
+                .doesNotContain(paper1Code);
         assertThat(codesOf(data(get("/masters/materials?keyword=국어 시즌1_01회"))))
-                .contains("PP1" + SFX);
+                .contains(paper1Code);
     }
 
     @Test
     @Order(2)
-    @DisplayName("같은 자재코드는 두 번 등록되지 않는다")
-    void 코드중복() {
-        JsonNode r = post("/masters/materials", Map.of("code", "OMR" + SFX,
-                "name", "중복", "materialType", "OMR"));
-        assertThat(r.path("success").asBoolean()).isFalse();
-        assertThat(r.path("error").path("code").asText()).isEqualTo("INVALID_INPUT");
+    @DisplayName("★자재코드는 서버가 매긴다 — 보낸 코드는 무시되고 중복이 생기지 않는다")
+    void 코드는_서버가_매긴다() {
+        // 예전엔 "같은 코드 재등록 거부"를 고정했으나, 10/27 피드백 §11-3으로 담당자 직접 입력이
+        // 폐지돼 **중복이 애초에 불가능**해졌다. 그래서 새 규칙 쪽을 고정한다.
+        JsonNode a = data(post("/masters/materials", Map.of(
+                "code", omrCode, "name", "보낸코드무시A" + SFX, "materialType", "OMR")));
+        JsonNode b = data(post("/masters/materials", Map.of(
+                "code", omrCode, "name", "보낸코드무시B" + SFX, "materialType", "OMR")));
+
+        assertThat(a.path("code").asText()).as("보낸 코드를 그대로 쓰지 않는다").isNotEqualTo(omrCode);
+        assertThat(b.path("code").asText()).isNotEqualTo(omrCode);
+        assertThat(a.path("code").asText()).as("두 건이 서로 다른 코드를 받는다")
+                .isNotEqualTo(b.path("code").asText());
     }
 
     @Test

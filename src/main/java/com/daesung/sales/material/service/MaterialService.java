@@ -3,6 +3,7 @@ package com.daesung.sales.material.service;
 import com.daesung.sales.common.audit.CurrentAuditor;
 import com.daesung.sales.common.exception.BusinessException;
 import com.daesung.sales.common.exception.ErrorCode;
+import com.daesung.sales.common.sequence.SequenceService;
 import com.daesung.sales.material.dto.MaterialRequest;
 import com.daesung.sales.material.dto.MaterialResponse;
 import com.daesung.sales.material.entity.Material;
@@ -21,8 +22,12 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class MaterialService {
 
+    /** 생성한 코드가 이미 있을 때 다음 번호로 넘어가는 횟수 상한(과거 수기 등록분 대비). */
+    private static final int CODE_RETRY_LIMIT = 50;
+
     private final MaterialRepository materialRepository;
     private final CurrentAuditor currentAuditor;
+    private final SequenceService sequenceService;
 
     @Transactional(readOnly = true)
     public List<MaterialResponse> search(MaterialType type, Boolean useYn, String keyword) {
@@ -34,15 +39,33 @@ public class MaterialService {
 
     @Transactional
     public MaterialResponse create(MaterialRequest req) {
-        if (materialRepository.existsByCode(req.code())) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT,
-                    "이미 있는 자재코드입니다: " + req.code());
-        }
-        Material m = Material.create(req.code(), req.name(), req.materialType(), req.memo());
+        Material m = Material.create(nextCode(), req.name(), req.materialType(), req.memo());
         if (Boolean.FALSE.equals(req.useYn())) {
             m.update(null, null, false, req.memo());
         }
         return MaterialResponse.from(materialRepository.save(m));
+    }
+
+    /**
+     * 자재코드를 서버가 매긴다(10/27 피드백 §11-3 — 담당자 직접 입력 폐지).
+     *
+     * <p>★<b>DSRE와 같은 규칙(순수 숫자 순번)</b>에 대역만 띄운다 —
+     * {@link SequenceService#MATERIAL_CODE_BASE} + 순번이라 첫 자재가 {@code 100001}이다.
+     * 왜 이 규칙인지는 {@link SequenceService#SEQ_MATERIAL} 주석과 {@code V102} 참고.
+     *
+     * <p>생성값이라 중복은 원칙적으로 생기지 않지만, 과거 수기 등록분이 우연히 10만 대역
+     * 숫자일 수 있어 그때만 다음 번호로 넘어간다(채번은 단조증가라 몇 칸이면 벗어난다).
+     */
+    private String nextCode() {
+        for (int i = 0; i < CODE_RETRY_LIMIT; i++) {
+            String code = String.valueOf(
+                    SequenceService.MATERIAL_CODE_BASE + sequenceService.next(SequenceService.SEQ_MATERIAL));
+            if (!materialRepository.existsByCode(code)) {
+                return code;
+            }
+        }
+        throw new BusinessException(ErrorCode.INTERNAL_ERROR,
+                "자재코드를 매기지 못했습니다 — 이미 쓰이는 코드가 연속 " + CODE_RETRY_LIMIT + "건입니다");
     }
 
     @Transactional
