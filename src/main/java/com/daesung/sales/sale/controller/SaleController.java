@@ -23,6 +23,7 @@ import com.daesung.sales.sale.entity.SalesType;
 import com.daesung.sales.sale.dto.SalesUploadResponse;
 import com.daesung.sales.sale.dto.SalesSummaryResponse;
 import com.daesung.sales.sale.dto.TransactionStatementResponse;
+import com.daesung.sales.sale.dto.UnclassifiedSalesResponse;
 import com.daesung.sales.sale.dto.YoyComparisonResponse;
 import com.daesung.sales.sale.service.SaleReportService;
 import com.daesung.sales.sale.service.SaleService;
@@ -762,6 +763,47 @@ public class SaleController {
             @Parameter(description = "분류코드 필터(미지정=전체)") @RequestParam(required = false) String catCode,
             @Parameter(description = "상품 id 필터(미지정=전체)") @RequestParam(required = false) Long productId) {
         return ApiResponse.success(saleReportService.bookInout(from, to, catCode, productId));
+    }
+
+    @Operation(summary = "미분류 매출 상품 목록(이관 검증)",
+            description = """
+                    대분류가 안 붙은 매출을 **상품 단위로, 매출 큰 순서로** 돌려준다.
+                    근거: 10/27 검수 피드백 §7-C 하단 5번 — "데이터 이관 때 매핑되지 않는
+                    누락 건은 반드시 목록으로 뽑아 확인한다".
+
+                    · 대분류는 `매출 → 상품.세부구분 → 세부구분 마스터.대분류` 로 이어진다.
+                      이 사슬이 끊긴 매출이 외상매출현황·매출액정리에서 '미분류'로 모인다.
+                    · 끊긴 이유를 함께 준다 — `EMPTY`(상품에 세부구분이 비어 있다) /
+                      `UNKNOWN`(값은 있는데 세부구분 마스터에 없다). **고치는 방법이 다르다.**
+                    · 미분류 **비율(%)**도 함께 낸다. 목록 길이만으로는 심각도를 알 수 없다 —
+                      한 번도 안 팔린 상품 100개보다 많이 팔린 상품 1개가 장부를 더 흔든다.""")
+    @GetMapping("/unclassified")
+    public ApiResponse<UnclassifiedSalesResponse> unclassified(
+            @Parameter(description = "시작일(yyyy-MM-dd)", required = true) @RequestParam(name = "fromDate")
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @Parameter(description = "종료일(yyyy-MM-dd)", required = true) @RequestParam(name = "toDate")
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return ApiResponse.success(saleReportService.unclassifiedSales(from, to));
+    }
+
+    @Operation(summary = "미분류 매출 상품 목록 엑셀",
+            description = "위 목록을 그대로 내려받는다. 담당자가 도서관리에서 하나씩 채워야 하는 작업 목록이다.")
+    @GetMapping("/unclassified/export")
+    public ResponseEntity<byte[]> unclassifiedExport(
+            @RequestParam(name = "fromDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(name = "toDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        var r = saleReportService.unclassifiedSales(from, to);
+        byte[] xlsx = excel.toXlsx("미분류매출", List.of(
+                        new Col("도서코드", "productCode"), new Col("도서명", "productName"),
+                        new Col("분류코드", "catCode"), new Col("분류명", "catName"),
+                        new Col("세부구분(현재값)", "salesDivision"), new Col("사유", "reason"),
+                        new Col("매출수량", "saleQty"), new Col("매출액", "saleAmount"),
+                        new Col("마지막매출일", "lastSalesDate")),
+                r.rows(),
+                Heading.period("미분류 매출 상품 목록", from, to,
+                        "미분류 " + String.format("%,d", r.amount()) + "원 / 전체 "
+                                + String.format("%,d", r.totalAmount()) + "원 (" + r.ratio() + "%)"));
+        return excel.asDownload(xlsx, "미분류매출.xlsx");
     }
 
     @Operation(summary = "거래처별 매출대비표(전년 동기간)",

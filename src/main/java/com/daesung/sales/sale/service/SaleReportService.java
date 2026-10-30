@@ -25,6 +25,7 @@ import com.daesung.sales.sale.dto.SalesStatementRow;
 import com.daesung.sales.sale.dto.SalesSummaryResponse;
 import com.daesung.sales.sale.dto.SalesSummaryRow;
 import com.daesung.sales.sale.dto.TransactionStatementResponse;
+import com.daesung.sales.sale.dto.UnclassifiedSalesResponse;
 import com.daesung.sales.sale.dto.YoyComparisonResponse;
 import com.daesung.sales.sale.entity.Sale;
 import com.daesung.sales.sale.repository.SaleRepository;
@@ -422,6 +423,38 @@ public class SaleReportService {
 
     private static long num(Object o) {
         return (o == null) ? 0L : ((Number) o).longValue();
+    }
+
+    /**
+     * 미분류 매출 — 상품별 목록(10/27 피드백 §7-C 하단 5번 "이관 때 매핑되지 않는 누락 건은
+     * 반드시 목록으로 뽑아 확인한다").
+     *
+     * <p>대분류는 {@code 매출 → 상품.세부구분 → 세부구분 마스터.대분류} 로 이어지는데,
+     * 이 사슬이 끊긴 매출은 상품군 칸 어디에도 안 들어가고 '미분류'로 남는다.
+     * 그 끊긴 자리를 <b>상품 단위로, 매출 큰 순서로</b> 돌려준다 —
+     * 담당자가 도서관리에서 하나씩 채워야 하는 작업 목록이다.
+     *
+     * <p>비율을 함께 내는 이유: 목록 길이만으로는 심각도를 알 수 없다. 한 번도 안 팔린
+     * 상품 100개보다 많이 팔린 상품 1개가 장부를 더 많이 흔든다.
+     */
+    @Transactional(readOnly = true)
+    public UnclassifiedSalesResponse unclassifiedSales(LocalDate from, LocalDate to) {
+        List<UnclassifiedSalesResponse.Row> rows = new ArrayList<>();
+        long unclassified = 0;
+        for (Object[] r : saleRepository.unclassifiedProducts(from, to)) {
+            long amount = num(r[8]);
+            unclassified += amount;
+            rows.add(new UnclassifiedSalesResponse.Row(
+                    (r[0] == null) ? null : ((Number) r[0]).longValue(),
+                    (String) r[1], (String) r[2], (String) r[3], (String) r[4],
+                    (String) r[5], (String) r[6],
+                    num(r[7]), amount,
+                    (r[9] == null) ? null : ((java.sql.Date) r[9]).toLocalDate()));
+        }
+        long total = saleRepository.sumSaleAmount(from, to);
+        double ratio = (total == 0) ? 0.0
+                : Math.round((double) unclassified / total * 100 * 10) / 10.0;
+        return new UnclassifiedSalesResponse(from, to, total, unclassified, ratio, rows);
     }
 
     /**

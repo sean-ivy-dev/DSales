@@ -348,6 +348,53 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
                                    @Param("fromDate") LocalDate fromDate,
                                    @Param("toDate") LocalDate toDate);
 
+    /**
+     * <b>미분류 매출 — 상품별 목록</b>(10/27 피드백 §7-C 하단 5번
+     * "데이터 이관 때 매핑되지 않는 누락 건은 반드시 목록으로 뽑아 확인한다").
+     *
+     * <p>대분류는 {@code sales → products.sales_division → sales_divisions.major_category} 로
+     * 이어진다. 이 사슬이 끊기면 그 매출은 상품군 칸 어디에도 안 들어가고 '미분류'가 된다.
+     * 끊기는 경우는 둘이다 —
+     * <ul>
+     *   <li>{@code EMPTY}: 상품에 세부구분이 비어 있다(이관 때 안 채워진 경우)</li>
+     *   <li>{@code UNKNOWN}: 세부구분 값이 있는데 세부구분 마스터에 없다(오타·폐지된 값)</li>
+     * </ul>
+     *
+     * <p>★<b>매출이 큰 순서로 돌려준다.</b> 담당자가 하나씩 채워야 하는 목록이라
+     * 어느 상품부터 손대야 장부가 빨리 맞는지가 먼저 보여야 한다.
+     *
+     * <p>반환 Object[]: [productId, code, name, catCode, catName, salesDivision, reason,
+     * saleQty, saleAmount, lastSalesDate].
+     */
+    @Query(value = """
+            SELECT p.id, p.code, p.name, p.cat_code, p.cat_name,
+                   COALESCE(p.sales_division, ''),
+                   CASE WHEN COALESCE(p.sales_division,'') = '' THEN 'EMPTY' ELSE 'UNKNOWN' END,
+                   COALESCE(SUM(CASE WHEN s.sales_category='SALE' THEN s.qty ELSE 0 END),0),
+                   COALESCE(SUM(CASE WHEN s.sales_category='SALE' THEN s.supply_amount ELSE 0 END),0),
+                   MAX(s.sales_date)
+            FROM sales s
+              JOIN products p ON p.id = s.product_id
+              LEFT JOIN sales_divisions d ON d.code = p.sales_division
+            WHERE s.deleted_at IS NULL AND s.canceled = false
+              AND s.sales_date BETWEEN :fromDate AND :toDate
+              AND d.major_category IS NULL
+            GROUP BY p.id, p.code, p.name, p.cat_code, p.cat_name, p.sales_division
+            ORDER BY 9 DESC, p.code
+            """, nativeQuery = true)
+    List<Object[]> unclassifiedProducts(@Param("fromDate") LocalDate fromDate,
+                                        @Param("toDate") LocalDate toDate);
+
+    /** 기간 전체 매출액(공급가, 취소·삭제 제외) — 미분류 비율의 분모. */
+    @Query(value = """
+            SELECT COALESCE(SUM(s.supply_amount), 0)
+            FROM sales s
+            WHERE s.deleted_at IS NULL AND s.canceled = false
+              AND s.sales_category = 'SALE'
+              AND s.sales_date BETWEEN :fromDate AND :toDate
+            """, nativeQuery = true)
+    long sumSaleAmount(@Param("fromDate") LocalDate fromDate, @Param("toDate") LocalDate toDate);
+
     /** 매출일괄등록 멱등: 이미 등록된 소스키인지. */
     boolean existsByBulkImportKey(String bulkImportKey);
 
