@@ -55,7 +55,13 @@ public class MaterialController {
     }
 
     @Operation(summary = "자재 등록",
-            description = "자재구분을 정확히 선택할 것 — **물류 작업비 단가를 고르는 키**다(발주처 강조).")
+            description = """
+                    자재구분을 정확히 선택할 것 — **물류 작업비 단가를 고르는 키**다(발주처 강조).
+
+                    ★**자재코드는 보내지 않는다** — 서버가 `100001`부터 자동으로 매긴다
+                    (10/27 피드백 §11-3 확정, PPT23 "자재코드는 자동으로 생성 필요").
+                    화면에서 입력란을 없애고, 등록 응답의 `code`를 보여 주면 된다.
+                    옛 화면이 `code`를 보내도 오류는 나지 않는다(무시된다).""")
     @PostMapping("/materials")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<MaterialResponse> create(@Valid @RequestBody MaterialRequest req) {
