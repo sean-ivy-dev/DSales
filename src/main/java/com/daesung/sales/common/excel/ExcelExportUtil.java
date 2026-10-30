@@ -128,12 +128,37 @@ public class ExcelExportUtil {
      * 근거: '엑셀 형식은 드라이브 파일 참고'(재무팀).
      */
     public byte[] toXlsx(String sheetName, List<Col> cols, List<?> rows) {
-        return toXlsx(sheetName, cols, rows, null, null);
+        return toXlsx(sheetName, cols, rows, null, (Subtotal) null);
     }
 
     /** 제목·조회기준 2행을 붙인 xlsx(재무팀 실파일 형식). */
     public byte[] toXlsx(String sheetName, List<Col> cols, List<?> rows, Heading heading) {
-        return toXlsx(sheetName, cols, rows, heading, null);
+        return toXlsx(sheetName, cols, rows, heading, (Subtotal) null);
+    }
+
+    /**
+     * 집계행에 <b>색</b>을 입힌 xlsx(10/27 피드백 §7-6 "일 계·누 계·월 계, 학교(원) 계를
+     * 색으로 구분한다"). {@code aggregate}가 참을 돌려주는 행은 회색 배경 + 굵은 글씨가 된다.
+     *
+     * <p>판정은 <b>평탄화된 맵</b>으로 받는다 — 행이 record든 Map이든 같은 방식으로 쓰이고,
+     * 컬럼에 안 실은 필드(예: {@code rowType})로도 가를 수 있다.
+     */
+    public byte[] toXlsx(String sheetName, List<Col> cols, List<?> rows, Heading heading,
+                         java.util.function.Predicate<Map<String, Object>> aggregate) {
+        List<Map<String, Object>> maps = new ArrayList<>();
+        for (Object r : rows) {
+            maps.add(om.convertValue(r, MAP_TYPE));
+        }
+        List<String> headers = cols.stream().map(Col::header).toList();
+        List<BodyRow> body = maps.stream()
+                .map(m -> new BodyRow(cols.stream().map(c -> resolve(m, c.field())).toList(),
+                        aggregate != null && aggregate.test(m)))
+                .toList();
+        return write(sheetName, headers, body, heading);
+    }
+
+    /** 본문 한 줄 + 그 줄이 집계행인지. 집계행은 색·굵은 글씨로 구분한다(§7-6). */
+    private record BodyRow(List<Object> values, boolean aggregate) {
     }
 
     /**
@@ -149,8 +174,9 @@ public class ExcelExportUtil {
             maps.add(om.convertValue(r, MAP_TYPE));
         }
         List<String> headers = cols.stream().map(Col::header).toList();
-        List<List<Object>> body = (subtotal == null)
-                ? maps.stream().map(m -> cols.stream().map(c -> resolve(m, c.field())).toList()).toList()
+        List<BodyRow> body = (subtotal == null)
+                ? maps.stream().map(m -> new BodyRow(
+                        cols.stream().map(c -> resolve(m, c.field())).toList(), false)).toList()
                 : withSubtotals(cols, maps, subtotal);
         return write(sheetName, headers, body, heading);
     }
@@ -159,9 +185,9 @@ public class ExcelExportUtil {
      * 본문 + 분류 소계 + 총계 행렬. 숫자 합계는 {@code sumKeys} 컬럼에만 찍고
      * 나머지 칸은 비운다 — 코드·이름 칸에 합계가 찍히면 데이터처럼 읽힌다.
      */
-    private List<List<Object>> withSubtotals(List<Col> cols, List<Map<String, Object>> maps,
-                                             Subtotal spec) {
-        List<List<Object>> out = new ArrayList<>();
+    private List<BodyRow> withSubtotals(List<Col> cols, List<Map<String, Object>> maps,
+                                        Subtotal spec) {
+        List<BodyRow> out = new ArrayList<>();
         Map<String, java.math.BigDecimal> groupSum = new java.util.LinkedHashMap<>();
         Map<String, java.math.BigDecimal> grandSum = new java.util.LinkedHashMap<>();
         Object curGroup = null;
@@ -171,7 +197,7 @@ public class ExcelExportUtil {
         for (Map<String, Object> m : maps) {
             Object g = m.get(spec.groupBy());
             if (open && !java.util.Objects.equals(g, curGroup)) {
-                out.add(totalRow(cols, spec, curLabel + " 소 계", groupSum));
+                out.add(new BodyRow(totalRow(cols, spec, curLabel + " 소 계", groupSum), true));
                 groupSum.clear();
                 open = false;
             }
@@ -180,7 +206,7 @@ public class ExcelExportUtil {
                 curLabel = String.valueOf(m.getOrDefault(spec.labelKey(), ""));
                 open = true;
             }
-            out.add(cols.stream().map(c -> resolve(m, c.field())).toList());
+            out.add(new BodyRow(cols.stream().map(c -> resolve(m, c.field())).toList(), false));
             for (String k : spec.sumKeys()) {
                 java.math.BigDecimal v = decimalOf(m.get(k));
                 groupSum.merge(k, v, java.math.BigDecimal::add);
@@ -188,10 +214,10 @@ public class ExcelExportUtil {
             }
         }
         if (open) {
-            out.add(totalRow(cols, spec, curLabel + " 소 계", groupSum));
+            out.add(new BodyRow(totalRow(cols, spec, curLabel + " 소 계", groupSum), true));
         }
         // 본문이 비어도 총계는 낸다 — 빈 파일과 "0으로 집계됐다"는 다른 말이다.
-        out.add(totalRow(cols, spec, "총 계", grandSum));
+        out.add(new BodyRow(totalRow(cols, spec, "총 계", grandSum), true));
         return out;
     }
 
@@ -231,38 +257,45 @@ public class ExcelExportUtil {
         }
         List<String> cols = new ArrayList<>(columns);
         return write(sheetName, cols, maps.stream()
-                .map(m -> cols.stream().map(m::get).toList())
+                .map(m -> new BodyRow(cols.stream().map(m::get).toList(), false))
                 .toList(), null);
     }
 
+    /**
+     * 칸 너비 상한(문자 수). 10/27 피드백 §7-A "불필요하게 넓은 칸 — 내용에 맞춰 줄인다".
+     * 담보내용(주소)처럼 긴 글이 들어가는 칸이 {@code autoSizeColumn} 그대로면 화면을 밀어낸다.
+     */
+    private static final int MAX_COL_CHARS = 40;
+
+    /** 칸 너비 하한 — 헤더 글자가 잘리지 않을 만큼. */
+    private static final int MIN_COL_CHARS = 6;
+
     /** 헤더 + 값 행렬 → xlsx byte[](공용 엔진). */
-    private byte[] write(String sheetName, List<String> headers, List<List<Object>> rows,
+    private byte[] write(String sheetName, List<String> headers, List<BodyRow> rows,
                          Heading heading) {
         try (Workbook wb = new XSSFWorkbook()) {
             Sheet sheet = wb.createSheet((sheetName == null || sheetName.isBlank()) ? "Sheet1" : sheetName);
 
-            CellStyle headerStyle = wb.createCellStyle();
+            // ★표에 검은색 테두리를 두른다(§7-6 "표에는 검은색 테두리를 그려 칸을 구분한다").
+            CellStyle headerStyle = bordered(wb);
             Font bold = wb.createFont();
             bold.setBold(true);
             headerStyle.setFont(bold);
+            headerStyle.setFillForegroundColor(org.apache.poi.ss.usermodel.IndexedColors.GREY_25_PERCENT.getIndex());
+            headerStyle.setFillPattern(org.apache.poi.ss.usermodel.FillPatternType.SOLID_FOREGROUND);
 
-            // 제목·조회기준 2행(있을 때만). 재무팀 실파일이 전부 이 구조라
-            // 파일만 받아도 무엇을 언제 기준으로 뽑았는지 알 수 있어야 한다.
-            int headerRow = 0;
-            if (heading != null) {
-                CellStyle titleStyle = wb.createCellStyle();
-                Font titleFont = wb.createFont();
-                titleFont.setBold(true);
-                titleFont.setFontHeightInPoints((short) 14);
-                titleStyle.setFont(titleFont);
+            CellStyle dataStyle = bordered(wb);
 
-                Cell t = sheet.createRow(headerRow++).createCell(0);
-                t.setCellValue(heading.title());
-                t.setCellStyle(titleStyle);
-                if (heading.criteria() != null && !heading.criteria().isBlank()) {
-                    sheet.createRow(headerRow++).createCell(0).setCellValue(heading.criteria());
-                }
-            }
+            // ★집계행(일 계·누 계·월 계·학교(원) 계·소 계·총 계)은 색으로 구분한다(§7-6).
+            CellStyle aggStyle = bordered(wb);
+            aggStyle.setFont(bold);
+            aggStyle.setFillForegroundColor(org.apache.poi.ss.usermodel.IndexedColors.GREY_40_PERCENT.getIndex());
+            aggStyle.setFillPattern(org.apache.poi.ss.usermodel.FillPatternType.SOLID_FOREGROUND);
+
+            // ‼️제목·조회기준 2행은 **맨 마지막에** 쓴다. 먼저 쓰면 그 긴 문구가 A열에 들어가
+            //   autoSizeColumn 이 A열을 그 길이에 맞춰 버린다(실측: 날짜 칸이 26.5자로 부풀었다).
+            int headerRow = (heading == null) ? 0
+                    : (heading.criteria() == null || heading.criteria().isBlank()) ? 1 : 2;
 
             Row header = sheet.createRow(headerRow);
             for (int c = 0; c < headers.size(); c++) {
@@ -272,14 +305,38 @@ public class ExcelExportUtil {
             }
 
             int rowIdx = headerRow + 1;
-            for (List<Object> r : rows) {
+            for (BodyRow r : rows) {
                 Row row = sheet.createRow(rowIdx++);
+                CellStyle style = r.aggregate() ? aggStyle : dataStyle;
                 for (int c = 0; c < headers.size(); c++) {
-                    setCell(row.createCell(c), c < r.size() ? r.get(c) : null);
+                    Cell cell = row.createCell(c);
+                    setCell(cell, c < r.values().size() ? r.values().get(c) : null);
+                    cell.setCellStyle(style);
                 }
             }
+
+            // 너비는 **본문 기준**으로 잡고 상·하한으로 조인다(제목 2행을 아직 안 썼으므로 안 섞인다).
             for (int c = 0; c < headers.size(); c++) {
                 sheet.autoSizeColumn(c);
+                int chars = sheet.getColumnWidth(c) / 256;
+                sheet.setColumnWidth(c, Math.clamp(chars, MIN_COL_CHARS, MAX_COL_CHARS) * 256);
+            }
+
+            // 제목·조회기준(있을 때만). 재무팀 실파일이 전부 이 구조라
+            // 파일만 받아도 무엇을 언제 기준으로 뽑았는지 알 수 있어야 한다.
+            if (heading != null) {
+                CellStyle titleStyle = wb.createCellStyle();
+                Font titleFont = wb.createFont();
+                titleFont.setBold(true);
+                titleFont.setFontHeightInPoints((short) 14);
+                titleStyle.setFont(titleFont);
+
+                Cell t = sheet.createRow(0).createCell(0);
+                t.setCellValue(heading.title());
+                t.setCellStyle(titleStyle);
+                if (heading.criteria() != null && !heading.criteria().isBlank()) {
+                    sheet.createRow(1).createCell(0).setCellValue(heading.criteria());
+                }
             }
 
             ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -288,6 +345,16 @@ public class ExcelExportUtil {
         } catch (Exception e) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR, "엑셀 생성 실패: " + e.getMessage());
         }
+    }
+
+    /** 네 변에 얇은 검은 테두리를 두른 기본 스타일(§7-6). */
+    private static CellStyle bordered(Workbook wb) {
+        CellStyle s = wb.createCellStyle();
+        s.setBorderTop(org.apache.poi.ss.usermodel.BorderStyle.THIN);
+        s.setBorderBottom(org.apache.poi.ss.usermodel.BorderStyle.THIN);
+        s.setBorderLeft(org.apache.poi.ss.usermodel.BorderStyle.THIN);
+        s.setBorderRight(org.apache.poi.ss.usermodel.BorderStyle.THIN);
+        return s;
     }
 
     private void setCell(Cell cell, Object v) {

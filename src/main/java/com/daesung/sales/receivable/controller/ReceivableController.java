@@ -594,19 +594,57 @@ public class ReceivableController {
             @RequestParam Long partnerId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate) {
+        // ★레거시 13칸 그대로(10/27 피드백 §7-A + 실물 PDF `SALES_*.pdf`).
+        //   ‼️집계·구분·전표번호·분류코드·도서코드는 뺐다 — 피드백이 "제외: 구분, 거래처코드,
+        //   거래처명"이라 했고, 나머지도 레거시 인쇄물에 없는 칸이다. 특히 '구분'은 7단계에서
+        //   DTO 필드가 사라져 **빈 칸으로 나가고 있었다**.
         List<Col> cols = List.of(
-                new Col("일자", "date"), new Col("집계", "label"),
-                new Col("구분", "kind"), new Col("전표번호", "refNo"),
-                new Col("분류코드", "catCode"), new Col("분류명", "catName"),
-                new Col("도서코드", "productCode"), new Col("도서명", "productName"),
-                new Col("공급률", "supplyRate"),
+                new Col("일자", "date"), new Col("분류명", "catName"), new Col("도서명", "productName"),
+                new Col("공급(%)", "supplyRate"),
                 new Col("매출수량", "saleQty"), new Col("매출금액", "saleAmount"), new Col("세액", "tax"),
                 new Col("교사용수량", "teacherQty"), new Col("교사용금액", "teacherAmount"),
                 new Col("반품수량", "returnQty"), new Col("반품금액", "returnAmount"),
                 new Col("수금액", "collectAmount"), new Col("잔액", "balance"));
-        byte[] xlsx = excel.toXlsx("외상매출장", cols, receivableService.arLedger(partnerId, fromDate, toDate).lines(),
-                Heading.period("외상매출장조회", fromDate, toDate));
+        var led = receivableService.arLedger(partnerId, fromDate, toDate);
+        byte[] xlsx = excel.toXlsx("외상매출장", cols, arLedgerRows(led.lines()),
+                // 제목은 "외상매출장(거래처명)"(§7-A). 거래처코드는 조회기준 줄에 붙인다 —
+                // 인쇄물 제목 줄이 `10003 ─ 강남 하람도서` 꼴이라 둘 다 필요하다.
+                Heading.period("외상매출장(" + led.partnerName() + ")", fromDate, toDate,
+                        "거래처코드 : " + led.partnerCode()),
+                m -> !"DETAIL".equals(m.get("rowType")));
         return excel.asDownload(xlsx, "외상매출장.xlsx");
+    }
+
+    /**
+     * 외상매출장 엑셀 행 — <b>집계행의 라벨을 첫 칸(일자)에 넣는다</b>.
+     * 근거: 10/27 피드백 §7-B "월 계는 **첫 번째 열(일자 칸)**에 표시한다. 지금은 두 번째 열에
+     * 나온다" + 실물 PDF({@code SALES_*.pdf})가 '일계·월계·누계'를 맨 왼쪽에 찍는다.
+     *
+     * <p>{@code rowType}은 컬럼으로 내보내지 않지만 맵에 담는다 — 엑셀 엔진이 집계행에
+     * 색을 입힐 때 그 값으로 판정한다(§7-6).
+     */
+    private static List<Map<String, Object>> arLedgerRows(List<ArLedgerResponse.Line> lines) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (ArLedgerResponse.Line l : lines) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("rowType", l.rowType());
+            m.put("date", (l.label() != null) ? l.label()
+                    : (l.date() == null ? null : l.date().toString()));
+            m.put("catName", l.catName());
+            m.put("productName", l.productName());
+            m.put("supplyRate", l.supplyRate());
+            m.put("saleQty", l.saleQty());
+            m.put("saleAmount", l.saleAmount());
+            m.put("tax", l.tax());
+            m.put("teacherQty", l.teacherQty());
+            m.put("teacherAmount", l.teacherAmount());
+            m.put("returnQty", l.returnQty());
+            m.put("returnAmount", l.returnAmount());
+            m.put("collectAmount", l.collectAmount());
+            m.put("balance", l.balance());
+            out.add(m);
+        }
+        return out;
     }
 
     @Operation(summary = "외상매출장 이메일 전송(20p)",
