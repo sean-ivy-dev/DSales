@@ -108,6 +108,11 @@ public class SaleService {
         //   묶음번호 하나를 먼저 뽑고, 줄마다 1,2,3… 을 붙인다.
         String entryNo = entryNumberService.next(req.salesDate());
         int entrySeq = 0;
+        // ★거래순번은 **등록 한 번에 한 번만** 뽑는다(10/27 명세 §3-6 "하루에 5번 주문하면 1~5").
+        //   예전엔 발송(작업요청서)이 생길 때마다 뽑아, 같은 날 같은 학교면 발송이 한 건에
+        //   합쳐지면서 순번도 1개뿐이었다(프론트 B-2② 지적). 여기서 한 번 정해
+        //   이 묶음의 모든 줄과 그 줄이 만든 발송이 **같은 번호**를 쓴다.
+        int tradeSeq = shipmentService.nextTradeSeq(req.partnerId(), req.salesDate());
         List<SalesEntryResponse.Line> lines = new ArrayList<>();
 
         for (ResolvedItem r : resolved) {
@@ -138,6 +143,7 @@ public class SaleService {
             sale.applyUploadDetail(item.schoolCode(), item.schoolName(), item.round());   // 학교·회차(12p)
             sale.applyPackType(item.packType());   // 포장구분(회차별 작업현황 집계축)
             sale.applyEntry(entryNo, ++entrySeq);  // 등록 묶음·순번(B-4)
+            sale.applyTradeSeq(tradeSeq);          // 거래순번(주문 단위, §3-6)
             saleRepository.save(sale);
 
             // 재고 반영(한 트랜잭션): 출고유형 → 부호/이벤트유형. 위탁·취소는 이 API 불가.
@@ -274,6 +280,9 @@ public class SaleService {
         // 반품입고도 한 번에 여러 줄이 들어간다 — 묶음번호·순번을 붙인다(프론트 실측 2026-10-16 B-2).
         String entryNo = entryNumberService.next(req.returnDate());
         int entrySeq = 0;
+        // 반품입고도 등록 한 번이 거래 한 건이다 — 같은 규칙으로 거래순번을 붙인다.
+        // (반품은 발송을 만들지 않지만, 조회 조건 "거래처+일자+거래순번"이 매출 줄을 본다)
+        int tradeSeq = shipmentService.nextTradeSeq(req.partnerId(), req.returnDate());
         List<SalesEntryResponse.Line> lines = new ArrayList<>();
         List<SalesEntryResponse.Warning> warnings = new ArrayList<>();
 
@@ -311,6 +320,7 @@ public class SaleService {
                 sale.linkSourceOut(item.sourceOutNo());
             }
             sale.applyEntry(entryNo, ++entrySeq);
+            sale.applyTradeSeq(tradeSeq);
             saleRepository.save(sale);
 
             // 물류창고 재고 +복구(한 트랜잭션). 재고 미관리 상품(모의고사 등)은 이벤트 없음.
@@ -762,6 +772,7 @@ public class SaleService {
                                              List<String> partnerSchools,
                                              List<String> salesChannels,
                                              String keyword,
+                                             Integer tradeSeq,
                                              boolean couponCount,
                                              boolean includeCanceled, Pageable pageable) {
         List<SalesCategory> categories = salesCategories;
@@ -814,7 +825,7 @@ public class SaleService {
                 MultiSelect.isAny(salesChannels),
                 hasUnclassifiedChannel(salesChannels),
                 MultiSelect.orPlaceholder(namedChannels(salesChannels), "\u0000"),
-                kw, includeCanceled, pageable);
+                kw, tradeSeq, includeCanceled, pageable);
         // ★학교/학원 구분은 매출 원장에 없다 — 학교 마스터에서 붙인다.
         //   페이지 안의 학교코드만 모아 **한 번에** 조회한다(행마다 조회하면 N+1이다).
         //   ‼️마스터에 없는 코드는 그냥 null 로 둔다. 거기서 막으면 과거 매출이 조회에서 사라진다.

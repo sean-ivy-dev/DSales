@@ -66,17 +66,29 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             """)
     List<Object[]> findReqCdsOf(@Param("shipmentIds") java.util.Collection<Long> shipmentIds);
 
-    /** 같은 (일자·거래처·학교·분류)의 발송 건. 매출을 여러 번 등록해도 한 건에 묶는다. */
+    /**
+     * 발송 묶음 키 — (일자·거래처·학교·분류·<b>주문</b>).
+     *
+     * <p>★{@code entryNo}(주문 식별자 = 매출등록번호)가 키에 들어간다. 10/27 명세 §8-2
+     * "출고 등록을 하면 <b>주문 단위</b>로 작업요청서에 보이게 한다" — 즉
+     * <b>등록이 다르면 작업요청서도 갈려야</b> 한다. 예전엔 이 값이 없어 같은 날 같은
+     * 학교로 다섯 번 주문해도 한 건에 합쳐졌고, 거래순번도 1개뿐이었다(프론트 B-2② 지적).
+     *
+     * <p>{@code entryNo} 가 null 이면 예전처럼 (일자·거래처·학교·분류)로만 묶인다 —
+     * 위탁출고가 그 경우다(출고번호가 품목마다 생겨 주문 식별자로 못 쓴다).
+     */
     @Query("""
             select s from Shipment s
              where s.tradeDate = :tradeDate and s.partner.id = :partnerId
                and ((:schoolCode is null and s.schoolCode is null) or s.schoolCode = :schoolCode)
                and ((:tradeClass is null and s.tradeClass is null) or s.tradeClass = :tradeClass)
+               and ((:entryNo is null and s.entryNo is null) or s.entryNo = :entryNo)
             """)
     Optional<Shipment> findKey(@Param("tradeDate") LocalDate tradeDate,
                                @Param("partnerId") Long partnerId,
                                @Param("schoolCode") String schoolCode,
-                               @Param("tradeClass") String tradeClass);
+                               @Param("tradeClass") String tradeClass,
+                               @Param("entryNo") String entryNo);
 
     /**
      * 기간·조건 조회. printed: true=출력분만, false=미출력분만, null=전체

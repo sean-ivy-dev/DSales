@@ -86,6 +86,13 @@ public record SaleResponse(
         String entryNo,
         @Schema(description = "그 묶음 안의 등록 순번(1부터). 담당자가 친 순서다") Integer entrySeq,
         @Schema(description = """
+                거래순번 — 그 거래처의 그 날 **몇 번째 주문**인가(10/27 명세 §3-6, 1부터).
+                `entrySeq`(묶음 **안**의 줄 번호)와 다르다. 이쪽은 **묶음 자체**의 번호라,
+                한 번 등록하면 그 안의 모든 줄이 같은 값을 갖는다.
+                조회 조건 `tradeSeq`(거래처·거래일자와 함께)가 이 값을 본다.
+                ‼️이 컬럼 도입 전 매출은 null 이다 — 소급해 채우지 않았다.""")
+        Integer tradeSeq,
+        @Schema(description = """
                 공급가액을 담당자가 **직접 입력**했나(B-3).
                 true 면 계산값이 아니라 손으로 맞춘 금액이다.""")
         boolean amountOverridden,
@@ -173,7 +180,7 @@ public record SaleResponse(
                 (s.getWarehouse() == null) ? null : s.getWarehouse().getId(),
                 (s.getWarehouse() == null) ? null : s.getWarehouse().getName(),
                 salesChannel,
-                s.getEntryNo(), s.getEntrySeq(), s.isAmountOverridden(),
+                s.getEntryNo(), s.getEntrySeq(), s.getTradeSeq(), s.isAmountOverridden(),
                 s.getMemo());
     }
 

@@ -72,6 +72,10 @@ class WorkResultJoinKeyIntegrationTest extends IntegrationTestSupport {
                 partner, java.sql.Date.valueOf(DATE));
         jdbc.update("DELETE FROM shipment WHERE partner_id = ? AND trade_class <> '교재'", partner);
         jdbc.update("UPDATE shipment SET trade_class = '교재' WHERE partner_id = ?", partner);
+        // ‼️**주문 식별자도 비운다** — 이관분에는 없는 값이다(10/27 §8-2 로 발송이 주문 단위로
+        //   갈리기 전에 만들어진 건이라 entry_no 가 NULL 이다). 비우지 않으면 "이관분 흉내"가
+        //   아니라 "새로 등록한 건"이 돼, 네 칸 키로 떨어지는 과거 데이터 경로를 못 지킨다.
+        jdbc.update("UPDATE shipment SET entry_no = NULL WHERE partner_id = ?", partner);
     }
 
     private Long book(String code, String division) {
@@ -108,16 +112,22 @@ class WorkResultJoinKeyIntegrationTest extends IntegrationTestSupport {
     @DisplayName("★세부구분이 섞인 발송도 수량·출고창고가 채워진다")
     void 섞여도_붙는다() {
         JsonNode rows = data(get("/logistics/work-results" + RANGE)).path("content");
-        JsonNode mine = null;
+        java.util.List<JsonNode> mines = new java.util.ArrayList<>();
         for (JsonNode r : rows) {
             if ("조인키거래처".equals(r.path("partnerName").asText())) {
-                mine = r;
+                mines.add(r);
             }
         }
-        assertThat(mine).as("발송 행이 있다: %s", rows).isNotNull();
+        assertThat(mines).as("발송 행이 있다: %s", rows).isNotEmpty();
+        JsonNode mine = mines.get(mines.size() - 1);
+        assertThat(mines).as("이관분은 한 건으로 합쳐져 있다").hasSize(1);
 
         // ‼️예전엔 여기가 0 이었다 — 상품 세부구분('교재'·'기타고사')이 발송('교재')과 안 맞아서다.
-        assertThat(mine.path("totalQty").asLong()).as("두 상품 수량이 모두 잡힌다").isEqualTo(65);
+        //   ★10/27 명세 §8-2 로 발송이 **주문 단위**로 갈렸지만, 이 시드는 **이관분**이라
+        //   entry_no 가 NULL 이다 → 예전처럼 **네 칸(일자·거래처·학교·분류)으로 묶인다**.
+        //   즉 과거 데이터가 주문 단위 전환 뒤에도 그대로 보이는지를 함께 지킨다.
+        long total = mines.stream().mapToLong(r -> r.path("totalQty").asLong()).sum();
+        assertThat(total).as("두 상품 수량이 모두 잡힌다(행이 갈려도 합은 같다)").isEqualTo(65);
 
         // 창고가 채워져야 물류 담당자 필터(본사물류창고 고정)를 통과한다 — 화면이 비던 진짜 원인.
         assertThat(mine.path("warehouseName").asText()).as("출고창고").contains("본사물류창고");

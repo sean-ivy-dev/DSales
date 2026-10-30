@@ -104,9 +104,55 @@ public class WorkService {
         return (st == null) ? null : st.label();
     }
 
-    private static String key(LocalDate date, Long partnerId, String schoolCode, String tradeClass) {
+    /**
+     * 발송 건과 매출 집계를 잇는 키 — (일자 · 거래처 · 학교 · 분류 · <b>주문</b>).
+     *
+     * <p>★{@code entryNo}(주문 식별자 = 매출등록번호)가 들어간다. 발송이 주문 단위로 갈린 뒤
+     * (10/27 명세 §8-2) 이 키에 주문이 없으면 <b>같은 날 같은 학교의 발송 두 건이 서로의 라인까지
+     * 가져가</b> 수량이 배로 잡힌다(실제로 테스트에서 50이 100으로 나왔다).
+     *
+     * <p>‼️<b>옛 발송은 {@code entryNo} 가 null 이다</b> — 주문 단위가 생기기 전에 만들어졌다.
+     * 그 건들은 여러 주문이 한 건에 합쳐져 있어 주문 하나로 되돌릴 수 없으므로,
+     * <b>주문을 뺀 네 칸으로 맞춘다</b>({@link #legacyKey}). 소급해 채우면 없던 사실을 만드는 것이다.
+     */
+    private static String key(LocalDate date, Long partnerId, String schoolCode, String tradeClass,
+                              String entryNo) {
+        return legacyKey(date, partnerId, schoolCode, tradeClass)
+                + "|" + (entryNo == null ? "" : entryNo);
+    }
+
+    /**
+     * 집계 한 줄을 담을 키 <b>둘</b> — 다섯 칸(주문 포함)과 네 칸(주문 없음).
+     *
+     * <p>새 발송은 다섯 칸으로 찾아 <b>자기 주문의 것만</b> 가져가고, 옛 발송은 네 칸으로 찾아
+     * <b>그 날 그 학교의 것을 합쳐</b> 가져간다(예전 묶음 그대로). 양쪽에 다 담아 두면
+     * 한 번 읽은 집계로 두 세대를 모두 맞출 수 있다.
+     */
+    private static java.util.List<String> bothKeys(LocalDate date, Long partnerId, String schoolCode,
+                                                   String tradeClass, String entryNo) {
+        String legacy = legacyKey(date, partnerId, schoolCode, tradeClass);
+        if (entryNo == null || entryNo.isBlank()) {
+            return List.of(legacy);
+        }
+        return List.of(key(date, partnerId, schoolCode, tradeClass, entryNo), legacy);
+    }
+
+    /** 주문이 없던 시절의 키(일자·거래처·학교·분류). 옛 발송을 맞출 때만 쓴다. */
+    private static String legacyKey(LocalDate date, Long partnerId, String schoolCode,
+                                    String tradeClass) {
         return date + "|" + partnerId + "|" + (schoolCode == null ? "" : schoolCode)
                 + "|" + (tradeClass == null ? "" : tradeClass);
+    }
+
+    /**
+     * 발송 건이 찾아야 할 키. 주문이 있으면 다섯 칸, 없으면(옛 건) 네 칸이다.
+     * 맵은 양쪽을 모두 담아 둔다({@link #putBothKeys}).
+     */
+    private static String lookupKey(com.daesung.sales.logistics.entity.Shipment s) {
+        return (s.getEntryNo() == null || s.getEntryNo().isBlank())
+                ? legacyKey(s.getTradeDate(), s.getPartner().getId(), s.getSchoolCode(), s.getTradeClass())
+                : key(s.getTradeDate(), s.getPartner().getId(), s.getSchoolCode(), s.getTradeClass(),
+                        s.getEntryNo());
     }
 
     /**
@@ -127,17 +173,19 @@ public class WorkService {
         // 발송 단위별 창고(여러 창고에서 나갔을 수 있다)
         Map<String, List<ShipmentWarehouseAgg>> whByKey = new LinkedHashMap<>();
         for (ShipmentWarehouseAgg a : saleRepository.shipmentWarehouses(from, to)) {
-            whByKey.computeIfAbsent(
-                    key(a.getTradeDate(), a.getPartnerId(), a.getSchoolCode(), a.getTradeClass()),
-                    k -> new ArrayList<>()).add(a);
+            for (String k : bothKeys(a.getTradeDate(), a.getPartnerId(), a.getSchoolCode(),
+                    a.getTradeClass(), a.getEntryNo())) {
+                whByKey.computeIfAbsent(k, x -> new ArrayList<>()).add(a);
+            }
         }
 
         Map<String, Map<String, Long>> qtyByKey = new LinkedHashMap<>();
         for (ShipmentQtyAgg a : saleRepository.shipmentQty(from, to)) {
-            qtyByKey.computeIfAbsent(
-                            key(a.getTradeDate(), a.getPartnerId(), a.getSchoolCode(), a.getTradeClass()),
-                            k -> new LinkedHashMap<>())
-                    .merge(blankToEtc(a.getTradeClass()), a.getQty(), Long::sum);
+            for (String k : bothKeys(a.getTradeDate(), a.getPartnerId(), a.getSchoolCode(),
+                    a.getTradeClass(), a.getEntryNo())) {
+                qtyByKey.computeIfAbsent(k, x -> new LinkedHashMap<>())
+                        .merge(blankToEtc(a.getTradeClass()), a.getQty(), Long::sum);
+            }
         }
 
         // ★진행상태 필터(발주처 확정 2026-10-23 #17 "조회조건에 진행상태 포함, 여러 개 선택").
@@ -163,7 +211,7 @@ public class WorkService {
             if (wanted != null && !wanted.contains(s.progressState())) {
                 continue;
             }
-            String k = key(s.getTradeDate(), s.getPartner().getId(), s.getSchoolCode(), s.getTradeClass());
+            String k = lookupKey(s);
             List<ShipmentWarehouseAgg> whs = whByKey.getOrDefault(k, List.of());
 
             // 창고 필터. 창고가 기록되지 않은 발송(V40 이전 매출)은 필터를 걸면 판단할 수 없어 제외한다 —
@@ -260,20 +308,24 @@ public class WorkService {
 
         Map<String, List<WorkOrderResponse.Line>> linesByKey = new LinkedHashMap<>();
         for (WorkOrderLineAgg a : saleRepository.workOrderLines(lineFrom, lineTo)) {
-            linesByKey.computeIfAbsent(
-                            key(a.getTradeDate(), a.getPartnerId(), a.getSchoolCode(), a.getTradeClass()),
-                            k -> new ArrayList<>())
-                    .add(new WorkOrderResponse.Line(a.getCatCode(), a.getProductCode(), a.getProductName(),
-                            a.getBookRound(), a.getUnitPrice(), a.getSupplyRate(),
-                            a.getQty(), a.getAmount() == null ? 0 : a.getAmount()));
+            WorkOrderResponse.Line line = new WorkOrderResponse.Line(
+                    a.getCatCode(), a.getProductCode(), a.getProductName(),
+                    a.getBookRound(), a.getUnitPrice(), a.getSupplyRate(),
+                    a.getQty(), a.getAmount() == null ? 0 : a.getAmount());
+            for (String k : bothKeys(a.getTradeDate(), a.getPartnerId(), a.getSchoolCode(),
+                    a.getTradeClass(), a.getEntryNo())) {
+                linesByKey.computeIfAbsent(k, x -> new ArrayList<>()).add(line);
+            }
         }
 
         // ★위탁출고 지시도 같은 키로 합친다(검수피드백 2026-09-30 p.12).
         //   위탁출고는 매출이 없어(미결로 나간다) 매출 기반 목록엔 안 잡힌다 —
         //   그동안 위탁 건은 작업요청서에 **빈 목록**으로 떠서 물류가 뭘 싸야 할지 몰랐다.
         for (var c : consignmentOutRepository.workOrderLines(lineFrom, lineTo)) {
+            // 위탁출고는 주문 식별자가 없다 — 네 칸 키에만 담는다.
             linesByKey.computeIfAbsent(
-                            key(c.getTradeDate(), c.getPartnerId(), c.getSchoolCode(), c.getTradeClass()),
+                            legacyKey(c.getTradeDate(), c.getPartnerId(), c.getSchoolCode(),
+                                    c.getTradeClass()),
                             k -> new ArrayList<>())
                     .add(new WorkOrderResponse.Line(c.getCatCode(), c.getProductCode(),
                             c.getProductName(), null, c.getUnitPrice(), c.getSupplyRate(),
@@ -283,28 +335,24 @@ public class WorkService {
         // 발송 건별 신청번호(2026-10-01). 한 발송에 신청이 여럿일 수 있어 목록으로 모은다.
         Map<String, List<Integer>> reqCdsByKey = new LinkedHashMap<>();
         for (var r : saleRepository.workOrderReqCds(lineFrom, lineTo)) {
-            reqCdsByKey.computeIfAbsent(
-                            key(r.getTradeDate(), r.getPartnerId(), r.getSchoolCode(), r.getTradeClass()),
-                            k -> new ArrayList<>())
-                    .add(r.getReqCd());
+            for (String k : bothKeys(r.getTradeDate(), r.getPartnerId(), r.getSchoolCode(),
+                    r.getTradeClass(), r.getEntryNo())) {
+                reqCdsByKey.computeIfAbsent(k, x -> new ArrayList<>()).add(r.getReqCd());
+            }
         }
 
         List<WorkOrderResponse> out = new ArrayList<>();
         // ★삭제된 건도 함께 읽는다(레거시와 같다 — 취소선으로 보여주고 작업 대상에서만 뺀다).
         for (Shipment s : shipments) {
-            List<WorkOrderResponse.Line> lines = linesByKey.getOrDefault(
-                    key(s.getTradeDate(), s.getPartner().getId(), s.getSchoolCode(), s.getTradeClass()),
-                    List.of());
+            List<WorkOrderResponse.Line> lines = linesByKey.getOrDefault(lookupKey(s), List.of());
             long total = lines.stream().mapToLong(WorkOrderResponse.Line::qty).sum();
             DeliveryType dt = s.getDeliveryType();
             out.add(new WorkOrderResponse(s.getId(), s.getTradeClass(), s.getTradeDate(),
+                    s.getTradeSeq(),
                     s.getPartner().getCode(), s.getPartner().getName(),
                     s.getSchoolCode(), s.getSchoolName(),
                     s.getDeletedAt() != null,
-                    reqCdsByKey.getOrDefault(
-                            key(s.getTradeDate(), s.getPartner().getId(), s.getSchoolCode(),
-                                    s.getTradeClass()),
-                            List.of()),
+                    reqCdsByKey.getOrDefault(lookupKey(s), List.of()),
                     s.getPrintedAt() != null,
                     s.getAcknowledgedAt() != null, s.getAcknowledgedBy(),
                     s.getBoxCount(), s.getSentDate(), s.getSendMemo(),

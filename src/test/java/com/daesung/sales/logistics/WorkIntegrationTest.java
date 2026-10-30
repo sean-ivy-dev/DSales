@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.daesung.sales.support.IntegrationTestSupport;
 import com.fasterxml.jackson.databind.JsonNode;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeAll;
@@ -57,22 +58,41 @@ class WorkIntegrationTest extends IntegrationTestSupport {
     private static final String RANGE = "?fromDate=2027-04-01&toDate=2027-04-30";
 
     @Test
-    @DisplayName("매출등록이 발송 건을 만들고, 같은 단위면 하나로 묶인다")
+    @DisplayName("★발송은 **주문(등록) 단위**로 생긴다 — 등록이 다르면 갈린다")
     void 발송건_생성단위() {
+        // ‼️**이 테스트는 10/27 명세 §8-2 로 뒤집혔다.**
+        //   예전 규칙: (일자·거래처·학교·분류)가 같으면 **몇 번을 등록하든 발송 한 건**.
+        //   새 규칙  : 거기에 **주문(매출등록번호)**이 더해진다 —
+        //             "출고 등록을 하면 **주문 단위**로 작업요청서에 보이게 한다"(§8-2),
+        //             "첫 번째 주문 1, 두 번째 주문 2"(§3-6).
+        //   seed 는 교재를 **두 번**(40, 10), 기타고사를 한 번 등록한다 → 발송 3건이 맞다.
         JsonNode orders = data(get("/logistics/work-orders" + RANGE + "&partnerId=" + partner)).path("content");
-        // 물류는 품목이 아니라 상자 단위로 일한다 — 두 번 등록해도 발송은 분류당 하나다.
-        assertThat(orders).hasSize(2);
+        assertThat(orders).as("교재 2건(등록 두 번) + 기타고사 1건").hasSize(3);
 
-        JsonNode textbook = null;
+        List<JsonNode> textbooks = new ArrayList<>();
         for (JsonNode o : orders) {
             if ("교재".equals(o.path("tradeClass").asText())) {
-                textbook = o;
+                textbooks.add(o);
             }
         }
-        assertThat(textbook).isNotNull();
-        assertThat(textbook.path("totalQty").asLong()).as("40+10이 한 건에 합쳐진다").isEqualTo(50);
-        assertThat(textbook.path("lines")).hasSize(1);
-        assertThat(textbook.path("lines").get(0).path("amount").asLong()).isEqualTo(375_000);
+        assertThat(textbooks).as("교재는 등록 두 번이라 두 건").hasSize(2);
+
+        // 합계는 그대로 40+10 이다 — 갈렸을 뿐 **수량이 새거나 겹치면 안 된다**.
+        // (키에 주문을 안 넣었을 때 실제로 두 건이 서로의 라인을 가져가 100이 됐다)
+        long total = textbooks.stream().mapToLong(o -> o.path("totalQty").asLong()).sum();
+        assertThat(total).as("40+10, 중복 없이").isEqualTo(50);
+        assertThat(textbooks).allSatisfy(o ->
+                assertThat(o.path("lines")).as("한 주문 안의 도서는 중첩된 한 줄").hasSize(1));
+
+        // ★거래순번(§3-6 "하루에 5번 주문하면 1~5"). seed 는 **두 번** 등록했다 —
+        //   ①교재40+IC20 ②교재10. 그래서 순번은 **1과 2** 두 개뿐이다.
+        //   ‼️①은 분류 때문에 발송 2건으로 갈리지만 **같은 주문이라 순번은 1 하나**다.
+        //     여기서 1,2,3 을 기대하면 규칙을 거꾸로 보는 것이다 —
+        //     순번은 발송이 아니라 **주문**에 붙는다.
+        List<Long> seqs = new ArrayList<>();
+        orders.forEach(o -> seqs.add(o.path("tradeSeq").asLong()));
+        assertThat(seqs).as("①의 발송 둘은 순번 1 을 공유하고, ②가 2 를 받는다")
+                .containsExactlyInAnyOrder(1L, 1L, 2L);
     }
 
     @Test

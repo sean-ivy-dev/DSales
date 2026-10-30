@@ -331,10 +331,25 @@ public class Sale extends com.daesung.sales.common.entity.SoftDeletableEntity {
     @Column(name = "entry_seq")
     private Integer entrySeq;
 
+    /**
+     * 거래순번 — 그 거래처의 그 날 <b>몇 번째 주문</b>인가(10/27 명세 §3-6, 1부터).
+     *
+     * <p>{@link #entrySeq}(묶음 <b>안</b>의 줄 번호)와 다르다. 이쪽은 <b>묶음 자체</b>의
+     * 번호다 — 한 번 등록하면 그 안의 모든 줄이 같은 값을 갖는다.
+     * 조회 조건 "거래처 + 거래일자 + 거래순번"(프론트 B-2③)이 이 값을 본다.
+     */
+    @Column(name = "trade_seq")
+    private Integer tradeSeq;
+
     /** 등록 묶음·순번 기록. 한 번의 등록에서 줄마다 1,2,3… 으로 올린다. */
     public void applyEntry(String entryNo, int entrySeq) {
         this.entryNo = entryNo;
         this.entrySeq = entrySeq;
+    }
+
+    /** 거래순번(주문 단위). 등록 1회당 한 번 정해 그 묶음의 모든 줄에 같은 값을 준다. */
+    public void applyTradeSeq(int tradeSeq) {
+        this.tradeSeq = tradeSeq;
     }
 
     /** 공급가액을 입력값으로 덮는다(계산값 대신). 총액도 세액과 합쳐 다시 맞춘다. */

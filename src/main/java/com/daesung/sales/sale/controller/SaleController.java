@@ -204,6 +204,10 @@ public class SaleController {
                     ★`미분류` 를 넣으면 **판매채널이 비어 있는 학교**의 매출을 뜻한다
                     (레거시 `< 미분류 >`, `조회.vb:1205`). 다른 채널명과 함께 보낼 수 있다.""")
             @RequestParam(required = false) List<String> salesChannels,
+            @Parameter(description = """
+                    거래순번 — 그 거래처의 그 날 **몇 번째 주문**인가(10/27 명세 §3-6).
+                    `partnerId`·기간과 함께 주면 그 주문 한 건만 추린다(프론트 B-2③).""")
+            @RequestParam(required = false) Integer tradeSeq,
             @Parameter(description = "키워드 — 거래처명·도서명·도서코드·매출번호·학교명을 한 번에 훑는다(부분일치)")
             @RequestParam(required = false) String keyword,
             @Parameter(description = "취소건 포함 여부(기본 false)") @RequestParam(defaultValue = "false") boolean includeCanceled,
@@ -214,7 +218,8 @@ public class SaleController {
                 MultiSelect.merge(shipmentType, shipmentTypes),
                 MultiSelect.merge(partnerId, partnerIds),
                 MultiSelect.merge(warehouseId, warehouseIds),
-                schoolCodes, divisions, productIds, partnerSchools, salesChannels, keyword, couponCount,
+                schoolCodes, divisions, productIds, partnerSchools, salesChannels, keyword,
+                tradeSeq, couponCount,
                 includeCanceled, pageReq.toPageable(SALE_SORTS)));
     }
 
@@ -267,9 +272,12 @@ public class SaleController {
             @Parameter(description = "판매채널 **다중선택**(조회와 동일). '미분류' 가능")
             @RequestParam(required = false) List<String> salesChannels,
             @RequestParam(required = false) String keyword,
+            @Parameter(description = "거래순번(조회와 동일) — 그 거래처의 그 날 몇 번째 주문인가")
+            @RequestParam(required = false) Integer tradeSeq,
             @RequestParam(defaultValue = "false") boolean includeCanceled) {
         List<Col> cols = List.of(
                 new Col("등록번호", "entryNo"), new Col("순번", "entrySeq"),
+                new Col("거래순번", "tradeSeq"),
                 new Col("매출번호", "salesNo"), new Col("매출일자", "salesDate"),
                 new Col("거래처코드", "partnerCode"), new Col("도시명", "partnerCityName"),
                 new Col("거래처명1", "partnerName1"), new Col("거래처명2", "partnerName"),
@@ -295,7 +303,8 @@ public class SaleController {
                 MultiSelect.merge(shipmentType, shipmentTypes),
                 MultiSelect.merge(partnerId, partnerIds),
                 MultiSelect.merge(warehouseId, warehouseIds),
-                schoolCodes, divisions, productIds, partnerSchools, salesChannels, keyword, couponCount,
+                schoolCodes, divisions, productIds, partnerSchools, salesChannels, keyword,
+                tradeSeq, couponCount,
                 includeCanceled,
                 org.springframework.data.domain.PageRequest.of(0, EXPORT_MAX));
         // ★고른 거래처 수를 머리말에 남긴다(2026-09-28 화면 정리안).

@@ -56,8 +56,14 @@ public class ShipmentService {
      * 매출 1건에 대응하는 발송 건을 확보한다(없으면 생성). 근거: UC_TabPages.vb:752 —
      * 레거시도 매출등록 시점에 sendData를 만든다.
      *
-     * <p>묶는 단위는 <b>(거래일자 · 거래처 · 학교 · 분류)</b>다. 같은 날 같은 학교로 여러 품목을
-     * 등록해도 <b>발송은 한 건</b>이어야 한다 — 물류는 품목이 아니라 상자 단위로 일한다.
+     * <p>묶는 단위는 <b>(거래일자 · 거래처 · 학교 · 분류 · 주문)</b>다. 한 번 등록한 것 안에서는
+     * 같은 날 같은 학교로 여러 품목을 넣어도 <b>발송은 한 건</b>이다 — 물류는 품목이 아니라
+     * 상자 단위로 일한다. 다만 <b>등록이 다르면 발송도 갈린다</b>(10/27 명세 §8-2
+     * "출고 등록을 하면 주문 단위로 작업요청서에 보이게 한다").
+     *
+     * <p>★주문 식별자는 매출등록번호({@code sale.entryNo})다. 예전엔 이 값이 키에 없어
+     * 같은 날 같은 학교로 다섯 번 주문해도 한 건에 합쳐졌고 <b>거래순번도 1개뿐</b>이었다
+     * (프론트 B-2② 지적 — 명세 §3-6 "하루에 5번 주문하면 1~5"를 어긴다).
      *
      * <p>반품은 대상이 아니다. 들어오는 물건이라 내보낼 작업이 없다.
      */
@@ -65,17 +71,27 @@ public class ShipmentService {
     public Shipment ensureFor(Sale sale) {
         String tradeClass = sale.getProduct().getSalesDivision();
         return shipmentRepository.findKey(sale.getSalesDate(), sale.getPartner().getId(),
-                        sale.getSchoolCode(), tradeClass)
+                        sale.getSchoolCode(), tradeClass, sale.getEntryNo())
                 .orElseGet(() -> {
                     Shipment s = Shipment.of(tradeClass, sale.getSalesDate(), sale.getPartner(),
-                            sale.getSchoolCode(), sale.getSchoolName(), null);
-                    s.assignTradeSeq(nextTradeSeq(sale.getPartner().getId(), sale.getSalesDate()));
+                            sale.getSchoolCode(), sale.getSchoolName(), null, sale.getEntryNo());
+                    // ★순번은 **그 주문의 것**을 그대로 쓴다. 한 번의 등록이 학교·분류 때문에
+                    //   발송 여러 건으로 갈려도 **같은 주문이므로 순번은 하나**여야 한다.
+                    //   매출 줄에 이미 박혀 있으면(등록 경로) 그 값을, 없으면 그때 채번한다
+                    //   (위탁 등 등록번호가 없는 경로).
+                    s.assignTradeSeq((sale.getTradeSeq() != null) ? sale.getTradeSeq()
+                            : nextTradeSeq(sale.getPartner().getId(), sale.getSalesDate()));
                     return shipmentRepository.save(s);
                 });
     }
 
-    /** 거래순번 채번(10/27 피드백 §3-6·8-2) — 거래처×거래일자 범위에서 1부터. */
-    private int nextTradeSeq(Long partnerId, LocalDate tradeDate) {
+    /**
+     * 거래순번 채번(10/27 명세 §3-6·§8-2) — 거래처×거래일자 범위에서 1부터.
+     *
+     * <p>‼️<b>주문(등록) 한 번에 한 번만</b> 불러야 한다. 발송이 생길 때마다 부르면
+     * 한 주문이 학교·분류로 갈릴 때 순번이 여러 개 소모돼 1,2,3이 건너뛴다.
+     */
+    public int nextTradeSeq(Long partnerId, LocalDate tradeDate) {
         return (int) sequenceService.nextInScope(SequenceService.SEQ_TRADE, partnerId + ":" + tradeDate);
     }
 
@@ -136,7 +152,8 @@ public class ShipmentService {
             return;   // 채울 것이 없다
         }
         shipmentRepository.findKey(sale.getSalesDate(), sale.getPartner().getId(),
-                        sale.getSchoolCode(), sale.getProduct().getSalesDivision())
+                        sale.getSchoolCode(), sale.getProduct().getSalesDivision(),
+                        sale.getEntryNo())
                 .ifPresent(s -> s.fillDeliveryIfBlank(type, teacher, tel));
     }
 
@@ -322,7 +339,9 @@ public class ShipmentService {
     @Transactional
     public Shipment ensureForConsignment(java.time.LocalDate tradeDate, Partner partner,
                                          String schoolCode, String schoolName, String tradeClass) {
-        return shipmentRepository.findKey(tradeDate, partner.getId(), schoolCode, tradeClass)
+        // 위탁출고는 주문 식별자가 없다 — 출고번호(OUT-)가 품목마다 생겨 쓸 수 없다.
+        // null 을 넘기면 예전처럼 (일자·거래처·학교·분류)로만 묶인다.
+        return shipmentRepository.findKey(tradeDate, partner.getId(), schoolCode, tradeClass, null)
                 .orElseGet(() -> {
                     Shipment s = Shipment.of(tradeClass, tradeDate, partner, schoolCode, schoolName, null);
                     s.assignTradeSeq(nextTradeSeq(partner.getId(), tradeDate));

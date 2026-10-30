@@ -110,7 +110,7 @@ public class SalesMailService {
                         salesCategories, tradeClasses, shipmentTypes,
                         partnerIds, warehouseIds, schoolCodes,
                         divisions, productIds, partnerSchools, salesChannels,
-                        keyword, couponCount, false,
+                        keyword, null, couponCount, false,   // 일괄메일은 주문 하나만 추리지 않는다
                         PageRequest.of(0, MAX_ROWS))
                 .getContent();
         if (rows.isEmpty()) {

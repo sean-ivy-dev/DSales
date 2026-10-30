@@ -44,8 +44,26 @@ public class Shipment extends BaseEntity {
     @Column(name = "trade_date", nullable = false)
     private LocalDate tradeDate;
 
+    /**
+     * 거래순번 — 그 거래처의 그 날 <b>몇 번째 주문</b>인가(10/27 명세 §3-6·§8-2).
+     * 같은 {@link #entryNo} 에서 생긴 발송은 모두 같은 값을 갖는다.
+     */
     @Column(name = "trade_seq", nullable = false)
     private int tradeSeq = 1;
+
+    /**
+     * 주문 식별자 = <b>매출등록번호</b>({@code E-20261027-55}).
+     *
+     * <p>★이 값이 발송 묶음 키에 들어간다 — <b>등록이 다르면 작업요청서도 갈린다</b>
+     * (명세 §8-2 "출고 등록을 하면 주문 단위로 작업요청서에 보이게 한다").
+     * 예전에는 (일자+거래처+학교+분류)로만 묶어, 같은 날 같은 학교로 다섯 번 주문해도
+     * 발송 1건에 합쳐지고 거래순번도 1개뿐이었다.
+     *
+     * <p>위탁출고는 {@code null} 이다 — 출고번호(OUT-)가 품목마다 생겨 주문 식별자로
+     * 쓸 수 없다. NULL 이면 예전처럼 (일자+거래처+학교+분류)로만 묶인다.
+     */
+    @Column(name = "entry_no", length = 30)
+    private String entryNo;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "partner_id", nullable = false)
@@ -152,6 +170,13 @@ public class Shipment extends BaseEntity {
 
     public static Shipment of(String tradeClass, LocalDate tradeDate, Partner partner,
                               String schoolCode, String schoolName, String memo) {
+        return of(tradeClass, tradeDate, partner, schoolCode, schoolName, memo, null);
+    }
+
+    /** 주문 식별자({@link #entryNo})까지 함께 받는다 — 매출등록 경로가 쓴다. */
+    public static Shipment of(String tradeClass, LocalDate tradeDate, Partner partner,
+                              String schoolCode, String schoolName, String memo,
+                              String entryNo) {
         Shipment s = new Shipment();
         s.tradeClass = tradeClass;
         s.tradeDate = tradeDate;
@@ -159,6 +184,7 @@ public class Shipment extends BaseEntity {
         s.schoolCode = schoolCode;
         s.schoolName = schoolName;
         s.memo = memo;
+        s.entryNo = entryNo;
         return s;
     }
 

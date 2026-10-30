@@ -16,6 +16,10 @@ public record WorkOrderResponse(
         @Schema(description = "발송 건 id") Long id,
         @Schema(description = "분류") String tradeClass,
         @Schema(description = "거래일자") LocalDate tradeDate,
+        @Schema(description = """
+                거래순번 — 그 거래처의 그 날 **몇 번째 주문**인가(10/27 명세 §3-6·§8-2, 1부터).
+                한 주문이 학교·분류 때문에 발송 여러 건으로 갈려도 **번호는 하나**다.""")
+        int tradeSeq,
         @Schema(description = "거래처코드") String partnerCode,
         @Schema(description = "거래처명") String partnerName,
         @Schema(description = "학교코드") String schoolCode,
