@@ -62,6 +62,19 @@ class MaterialRegisterIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
+    @DisplayName("★'책자'도 단행본으로 받는다 — DSRE 실데이터는 책자 305건 ↔ 단행본 2건")
+    void 책자는_단행본으로() {
+        // DSRE는 책자/단행본을 나눠 두었지만 단행본이 2건뿐이라 우리는 BOOK 한 항목이다.
+        // 표기는 '단행본'이고, 압도적으로 많은 쪽('책자')이 들어와도 400을 내지 않는다.
+        JsonNode r = post("/masters/materials", Map.of(
+                "name", "책자별칭검증" + SFX, "materialType", "책자"));
+
+        assertThat(r.path("success").asBoolean()).as("%s", r).isTrue();
+        assertThat(data(r).path("materialType").asText()).isEqualTo("BOOK");
+        assertThat(data(r).path("materialTypeName").asText()).as("표기는 단행본").isEqualTo("단행본");
+    }
+
+    @Test
     @DisplayName("★회차 자재 매칭 — 회차를 지정해 붙인다")
     void 회차_매칭() {
         long matId = data(post("/masters/materials", Map.of(

@@ -44,6 +44,13 @@ public enum MaterialType {
                 return t;
             }
         }
+        // ★'책자'도 단행본으로 받는다(DSRE 운영덤프 실측: 책자 305건 ↔ 단행본 2건).
+        // DSRE는 둘을 나눠 두었지만 단행본이 2건뿐이라 우리는 BOOK 한 항목으로 관리한다.
+        // 화면·엑셀 표기는 '단행본'이고, 그 값으로 들어오면 400을 내지 않고 받아 준다
+        // — 안 받으면 실데이터에서 압도적으로 많은 쪽(책자)이 거부된다.
+        if ("책자".equals(v)) {
+            return BOOK;
+        }
         throw new IllegalArgumentException("알 수 없는 자재구분입니다: " + raw
                 + " (시험지/해설지/OMR/라벨/단행본/기타)");
     }
