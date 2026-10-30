@@ -82,6 +82,7 @@ public class SalesUploadService {
         List<SalesUploadResponse.Line> lines = new ArrayList<>();
         int imported = 0;
         int failed = 0;
+        int warned = 0;
         // ★묶음번호는 **올린 날짜**로 뽑는다(줄마다 다를 수 있는 거래일자가 아니다).
         //   한 파일이 한 번의 등록이고, 파일 안에 여러 거래일자가 섞여 들어올 수 있다 —
         //   거래일자로 뽑으면 한 파일이 여러 묶음으로 쪼개져 "몇 번째 줄"을 못 센다.
@@ -163,8 +164,20 @@ public class SalesUploadService {
                     }
 
                     imported++;
-                    lines.add(new SalesUploadResponse.Line(rowNo, "IMPORTED", salesNo,
-                            custCode, label(catCode, bookCode), qty, amt.supplyAmount(), null));
+                    // ★파일에 적힌 금액이 서버 계산과 다르면 **등록은 하되 알린다**
+                    //   (10/27 피드백 §4-15 "수량·공급률·금액이 계산과 맞지 않아도 예외가
+                    //   있을 수 있다. 알럿만 주고 등록은 허용한다").
+                    //   ‼️예전엔 파일의 금액 칸을 **아예 안 읽고 조용히 덮어썼다** — 담당자는
+                    //   자기가 적은 금액이 바뀐 줄도 몰랐다. 막지 않되 숨기지도 않는다.
+                    String warn = amountWarning(row, amt.supplyAmount());
+                    if (warn == null) {
+                        lines.add(new SalesUploadResponse.Line(rowNo, "IMPORTED", salesNo,
+                                custCode, label(catCode, bookCode), qty, amt.supplyAmount(), null));
+                    } else {
+                        warned++;
+                        lines.add(new SalesUploadResponse.Line(rowNo, "IMPORTED_WITH_WARNING", salesNo,
+                                custCode, label(catCode, bookCode), qty, amt.supplyAmount(), warn));
+                    }
                 } catch (BusinessException e) {
                     failed++;
                     lines.add(new SalesUploadResponse.Line(rowNo, "ERROR", null,
@@ -174,7 +187,7 @@ public class SalesUploadService {
         } catch (IOException e) {
             throw new BusinessException(ErrorCode.INVALID_INPUT, "엑셀 파일을 읽을 수 없습니다: " + e.getMessage());
         }
-        return new SalesUploadResponse(imported, failed, lines);
+        return new SalesUploadResponse(imported, failed, warned, lines);
     }
 
     /**
@@ -268,6 +281,29 @@ public class SalesUploadService {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * 파일에 적힌 금액(9번 칸)과 서버 계산 금액이 다르면 경고 문구, 같거나 비어 있으면 null.
+     *
+     * <p>근거: 10/27 피드백 §4-15 — "수량·공급률·금액이 계산과 맞지 않아도 예외가 있을 수 있다.
+     * <b>알럿만 주고 등록은 허용</b>한다". 그래서 여기서 <b>막지 않는다</b>. 다만 예전처럼
+     * 파일 값을 조용히 버리지도 않는다 — 담당자가 적은 금액이 바뀌었다는 사실은 알려야 한다.
+     *
+     * <p>★<b>저장되는 값은 서버 계산이 맞다</b>(금액 단일 소스는 {@code Amounts}). 파일 값을
+     * 그대로 믿으면 정가·공급률·수량과 금액이 서로 안 맞는 행이 장부에 남는다.
+     */
+    private static String amountWarning(Row row, long computed) {
+        Double given = dbl(row, 9);
+        if (given == null) {
+            return null;   // 금액 칸은 선택이다(참고용) — 비어 있으면 할 말이 없다
+        }
+        long g = Math.round(given);
+        if (g == computed) {
+            return null;
+        }
+        return "파일의 금액(" + String.format("%,d", g) + ")이 계산값("
+                + String.format("%,d", computed) + ")과 다릅니다 — 계산값으로 등록했습니다";
     }
 
     private static Integer intOrNull(Row row, int i) {

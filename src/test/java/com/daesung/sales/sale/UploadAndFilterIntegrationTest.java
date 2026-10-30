@@ -79,12 +79,17 @@ class UploadAndFilterIntegrationTest extends IntegrationTestSupport {
         throw new IllegalStateException("도서 없음");
     }
 
-    /** 발주처 표준양식 12컬럼. */
+    /** 발주처 표준양식 12컬럼. 금액은 정가×공급률×수량과 일치(10000×70%×10 = 70,000). */
     private byte[] sheet(String catCode, String code) {
+        return sheet(catCode, code, 70000);
+    }
+
+    /** 금액 칸을 바꿔 가며 올린다 — null 이면 금액 칸을 비운다(선택 항목). */
+    private byte[] sheet(String catCode, String code, Object amount) {
         String[] head = {"거래일자", "거래처코드", "학교코드", "분류코드", "도서코드", "회차",
                 "정가", "공급률(%)", "수량", "금액", "구분(출고유형)", "메모"};
         Object[] row = {YEAR + "-03-05", "UFC" + SFX, "", catCode, code, "",
-                10000, 0.7, 10, 70000, "정상출고", "테스트"};
+                10000, 0.7, 10, amount, "정상출고", "테스트"};
         try (Workbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             Sheet s = wb.createSheet("s");
             Row h = s.createRow(0);
@@ -93,7 +98,9 @@ class UploadAndFilterIntegrationTest extends IntegrationTestSupport {
             }
             Row r = s.createRow(1);
             for (int i = 0; i < row.length; i++) {
-                if (row[i] instanceof Number n) {
+                if (row[i] == null) {
+                    r.createCell(i).setBlank();   // 선택 항목(금액)을 비운 경우
+                } else if (row[i] instanceof Number n) {
                     r.createCell(i).setCellValue(n.doubleValue());
                 } else {
                     r.createCell(i).setCellValue(String.valueOf(row[i]));
@@ -121,6 +128,37 @@ class UploadAndFilterIntegrationTest extends IntegrationTestSupport {
         JsonNode d = data(multipart("/sales/upload", sheet("", bookCode), "up.xlsx"));
 
         assertThat(d.path("imported").asInt()).as("%s", d).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("★금액이 계산과 달라도 등록한다 — 알럿만 준다(10/27 피드백 §4-15)")
+    void 금액_불일치는_경고만() {
+        // 정가 10,000 × 공급률 70% × 10부 = 70,000 인데 파일엔 99,999 로 적혀 있다.
+        JsonNode d = data(multipart("/sales/upload", sheet(CAT, bookCode, 99999), "up.xlsx"));
+
+        assertThat(d.path("failed").asInt()).as("막으면 안 된다: %s", d).isZero();
+        assertThat(d.path("imported").asInt()).as("등록은 돼야: %s", d).isEqualTo(1);
+        assertThat(d.path("warned").asInt()).as("경고 건수: %s", d).isEqualTo(1);
+
+        JsonNode line = d.path("lines").get(0);
+        assertThat(line.path("result").asText()).isEqualTo("IMPORTED_WITH_WARNING");
+        assertThat(line.path("salesNo").asText()).as("매출번호가 나와야(등록된 줄)").isNotEmpty();
+        assertThat(line.path("message").asText()).contains("99,999").contains("70,000");
+        // ★저장되는 값은 **서버 계산**이다 — 파일 값을 그대로 믿으면 정가·공급률·수량과
+        //   금액이 서로 안 맞는 행이 장부에 남는다.
+        assertThat(line.path("supplyAmount").asLong()).isEqualTo(70_000);
+    }
+
+    @Test
+    @DisplayName("금액이 맞거나 비어 있으면 경고가 없다 — 멀쩡한 줄까지 노랗게 만들지 않는다")
+    void 금액_일치하거나_비면_경고없음() {
+        JsonNode same = data(multipart("/sales/upload", sheet(CAT, bookCode, 70000), "up.xlsx"));
+        assertThat(same.path("warned").asInt()).as("일치: %s", same).isZero();
+        assertThat(same.path("lines").get(0).path("result").asText()).isEqualTo("IMPORTED");
+
+        JsonNode blank = data(multipart("/sales/upload", sheet(CAT, bookCode, null), "up.xlsx"));
+        assertThat(blank.path("warned").asInt()).as("금액 칸은 선택이다: %s", blank).isZero();
+        assertThat(blank.path("imported").asInt()).isEqualTo(1);
     }
 
     @Test
