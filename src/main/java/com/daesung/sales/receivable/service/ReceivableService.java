@@ -780,12 +780,62 @@ public class ReceivableService {
     @Transactional(readOnly = true)
     public List<ArLedgerResponse> arLedgerAll(LocalDate fromDate, LocalDate toDate,
                                               boolean onlyReportable) {
+        LocalDate from = (fromDate != null) ? fromDate : LocalDate.now().withDayOfYear(1);
+        LocalDate to = (toDate != null) ? toDate : LocalDate.now();
+
+        List<ArStatusResponse.Row> rows = arStatus(fromDate, toDate, null).rows();
+        List<Long> ids = rows.stream()
+                .map(ArStatusResponse.Row::partnerId)
+                .filter(java.util.Objects::nonNull)      // 합계행 제외
+                .distinct()
+                .toList();
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+
+        // ★여기부터가 성능 수정의 핵심(10/30 프론트 D-3).
+        //   예전에는 이 아래 루프에서 거래처마다 arLedger() 를 통째로 다시 돌렸다 —
+        //   거래처 1곳당 6쿼리(거래처 조회 1 + 이월잔액 3 + 매출라인 1 + 수금라인 1)에
+        //   도서 LAZY N+1 까지 얹혀 **100곳 8.5초 · 200곳 19.9초**(운영 실측)가 나왔다.
+        //   필요한 것을 **거래처 수와 무관하게 6쿼리**로 한 번에 읽고 메모리에서 가른다.
+        Map<Long, Partner> partners = new HashMap<>();
+        partnerRepository.findAllById(ids).forEach(pt -> partners.put(pt.getId(), pt));
+
+        // 이월잔액 3종 — 세 쿼리 모두 partnerId 가 null 이면 **전 거래처를 GROUP BY** 한다.
+        //   그래서 배치용 쿼리를 새로 만들 필요가 없었다(기존 시그니처 그대로 null 전달).
+        LocalDate asOf = from.minusDays(1);
+        LocalDate yStart = LocalDate.of(asOf.getYear(), 1, 1);
+        Map<Long, Long> carryMap = amountByPartner(
+                carryforwardRepository.sumByYear(asOf.getYear(), null));
+        Map<Long, Long> genMap = amountByPartner(
+                saleRepository.receivableByPartner(yStart, asOf, null));
+        Map<Long, Long> collSumMap = amountByPartner(
+                collectionRepository.sumByPartner(yStart, asOf, null));
+
+        Map<Long, List<Sale>> salesByPartner = new HashMap<>();
+        for (Sale sl : saleRepository.findLedgerLinesForPartners(ids, from, to)) {
+            salesByPartner.computeIfAbsent(sl.getPartner().getId(), k -> new ArrayList<>()).add(sl);
+        }
+        Map<Long, List<Collection>> collByPartner = new HashMap<>();
+        for (Collection c : collectionRepository.findLedgerLinesForPartners(ids, from, to)) {
+            collByPartner.computeIfAbsent(c.getPartner().getId(), k -> new ArrayList<>()).add(c);
+        }
+
         List<ArLedgerResponse> out = new ArrayList<>();
-        for (ArStatusResponse.Row r : arStatus(fromDate, toDate, null).rows()) {
+        for (ArStatusResponse.Row r : rows) {
             if (r.partnerId() == null) {
                 continue;   // 합계행
             }
-            ArLedgerResponse led = arLedger(r.partnerId(), fromDate, toDate);
+            Partner pt = partners.get(r.partnerId());
+            if (pt == null) {
+                continue;   // 집계 직후 지워진 거래처 — 단건 조회였다면 404였을 자리다.
+            }
+            long opening = nz(carryMap.get(r.partnerId()))
+                    + nz(genMap.get(r.partnerId()))
+                    - nz(collSumMap.get(r.partnerId()));
+            ArLedgerResponse led = buildLedger(pt, from, to, opening,
+                    salesByPartner.getOrDefault(r.partnerId(), List.of()),
+                    collByPartner.getOrDefault(r.partnerId(), List.of()));
             // '신고내역이 있는' = 그 기간에 매출·반품·수금 중 하나라도 움직인 거래처.
             // 이월만 있고 기간 거래가 없는 곳은 보낼 내역서가 없다.
             // ‼️**명세행(DETAIL)으로 센다.** 이월·일계 같은 집계행이 생긴 뒤로 lines 는 늘 비지 않는다 —
@@ -877,7 +927,23 @@ public class ReceivableService {
         LocalDate from = (fromDate != null) ? fromDate : LocalDate.now().withDayOfYear(1);
         LocalDate to = (toDate != null) ? toDate : LocalDate.now();
 
-        long opening = balanceAsOf(partnerId, from.minusDays(1));
+        return buildLedger(partner, from, to, balanceAsOf(partnerId, from.minusDays(1)),
+                saleRepository.findLedgerLines(partnerId, from, to),
+                collectionRepository.findLedgerLines(partnerId, from, to));
+    }
+
+    /**
+     * 외상매출장 한 건을 조립한다. <b>조회는 하지 않는다</b> — 읽어 온 것을 받아서 쓴다.
+     *
+     * <p>★이렇게 가른 이유(10/30 프론트 D-3): 전체 거래처 조회가 거래처마다
+     * 이 메서드 전체를 다시 돌려 <b>거래처 수 × 6쿼리 + 도서 N+1</b> 이 났다
+     * (운영 실측 100곳 8.5초 · 200곳 19.9초). 조립과 조회를 갈라 두면
+     * {@link #arLedgerAll} 이 <b>한 번에 읽어 메모리에서 나눠</b> 쓸 수 있다.
+     * 계산식은 한 곳에만 있으므로 단건과 전체가 어긋날 일이 없다.
+     */
+    private ArLedgerResponse buildLedger(Partner partner, LocalDate from, LocalDate to,
+                                         long opening, List<Sale> saleLines,
+                                         List<Collection> collLines) {
 
         // 매출/반품 라인 + 수금 라인을 일자순으로 병합(같은 날은 매출 먼저).
         // ★행은 도서 단위다(레거시 UNION 구조). 한 행에는 그 구분의 칸만 찬다 —
@@ -892,7 +958,7 @@ public class ReceivableService {
         //   (bookLabel) 같은 책이라도 회차·학교가 다르면 레거시 인쇄물처럼 줄이 갈린다.
         Map<String, long[]> merged = new LinkedHashMap<>();   // [매출수량,매출액,세액,교사용수량,교사용액,반품수량,반품액,채권증감]
         Map<String, Sale> firstOf = new LinkedHashMap<>();
-        for (Sale s : saleRepository.findLedgerLines(partnerId, from, to)) {
+        for (Sale s : saleLines) {
             long total = nz(s.getTotalAmount());
             SalesCategory cat = s.getSalesCategory();
             boolean isReturn = cat == SalesCategory.RETURN;
@@ -942,7 +1008,7 @@ public class ReceivableService {
                     null, v[7], 0L), v[7]));
         }
 
-        for (Collection c : collectionRepository.findLedgerLines(partnerId, from, to)) {
+        for (Collection c : collLines) {
             // ★수금 방법은 **분류명 칸**에 쓴다(10/27 피드백 §7-A "수금 행: 분류명 칸에
             //   수금 방법(현금 등)을 표시한다"). 예전엔 도서명 칸에 "수금(현금)"으로 넣었는데,
             //   레거시 인쇄물(SALES_*.pdf)은 분류명 자리에 "현금" 한 단어만 찍는다.
@@ -1070,6 +1136,21 @@ public class ReceivableService {
     }
 
     /** 특정 시점까지의 채권 잔액 = 이월(당해 스냅샷) + 당해 1/1~시점 채권발생 − 수금. */
+    /**
+     * {@code [partnerId, amount]} 집계 결과를 맵으로. 이월잔액 3종이 같은 모양이라 한 곳에 둔다.
+     * 거래처 지정 없이(=null) 부르면 전 거래처가 한 번에 돌아온다.
+     */
+    private static Map<Long, Long> amountByPartner(List<Object[]> rows) {
+        Map<Long, Long> m = new HashMap<>();
+        for (Object[] r : rows) {
+            if (r[0] == null) {
+                continue;
+            }
+            m.put(((Number) r[0]).longValue(), (r[1] == null) ? 0L : ((Number) r[1]).longValue());
+        }
+        return m;
+    }
+
     private long balanceAsOf(Long partnerId, LocalDate asOf) {
         int year = asOf.getYear();
         LocalDate yStart = LocalDate.of(year, 1, 1);

@@ -453,7 +453,8 @@ public class ReceivableController {
                     한 표로 합치면 러닝밸런스가 남의 거래에 밀려 의미를 잃는다.
 
                     · 대상 거래처는 **외상매출현황과 같은 집합**이다(이월이 있거나 기간 내 거래가 있는 곳).
-                    · ‼️거래처 수만큼 조회가 돈다. 기간을 넓게 잡으면 느리다.""")
+                    · 조회는 **거래처 수와 무관하게 한 벌**만 돈다(10/30 D-3 — 예전에는
+                      거래처마다 단건 조회를 다시 돌려 100곳 8.5초·200곳 19.9초였다).""")
     @GetMapping("/ar-ledger/all")
     public ApiResponse<com.daesung.sales.common.response.PageResponse<ArLedgerResponse>> arLedgerAll(
             @Parameter(description = "시작일(yyyy-MM-dd, 미지정 시 올해 1/1)") @RequestParam(required = false)

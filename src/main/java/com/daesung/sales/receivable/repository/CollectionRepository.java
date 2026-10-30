@@ -98,4 +98,15 @@ public interface CollectionRepository extends JpaRepository<Collection, Long> {
     List<Collection> findLedgerLines(@Param("partnerId") Long partnerId,
                                      @Param("from") LocalDate from,
                                      @Param("to") LocalDate to);
+
+    /**
+     * 외상매출장 <b>전체 거래처</b> 명세: 여러 거래처의 기간 내 수금 라인을 한 번에.
+     * 근거는 {@code SaleRepository.findLedgerLinesForPartners} 와 같다(10/30 D-3 성능).
+     */
+    @Query("select c from Collection c where c.partner.id in :partnerIds "
+            + "and c.collDate between :from and :to "
+            + "order by c.partner.id, c.collDate, c.id")
+    List<Collection> findLedgerLinesForPartners(@Param("partnerIds") List<Long> partnerIds,
+                                                @Param("from") LocalDate from,
+                                                @Param("to") LocalDate to);
 }

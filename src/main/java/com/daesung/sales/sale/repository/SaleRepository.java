@@ -725,12 +725,32 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
             + "and s.canceled = false order by s.id desc limit 1")
     java.util.Optional<Sale> findLatestConsignSale(@Param("consignmentOutId") Long consignmentOutId);
 
-    /** 외상매출장 명세: 특정 거래처의 기간 내 매출 라인(취소 제외, 일자순). */
-    @Query("select s from Sale s where s.partner.id = :partnerId and s.canceled = false "
-            + "and s.salesDate between :from and :to order by s.salesDate, s.id")
+    /**
+     * 외상매출장 명세: 특정 거래처의 기간 내 매출 라인(취소 제외, 일자순).
+     *
+     * <p>‼️{@code join fetch s.product} — 도서명이 행마다 필요한데
+     * {@code Sale.product} 가 LAZY 라, 안 걸면 <b>매출 행 수만큼 쿼리가 더 나간다</b>.
+     */
+    @Query("select s from Sale s join fetch s.product where s.partner.id = :partnerId "
+            + "and s.canceled = false and s.salesDate between :from and :to "
+            + "order by s.salesDate, s.id")
     List<Sale> findLedgerLines(@Param("partnerId") Long partnerId,
                                @Param("from") LocalDate from,
                                @Param("to") LocalDate to);
+
+    /**
+     * 외상매출장 <b>전체 거래처</b> 명세: 여러 거래처의 기간 내 매출 라인을 한 번에.
+     *
+     * <p>★성능(10/30 프론트 D-3 — 전체 조회가 8~9초). 예전에는 거래처마다
+     * {@link #findLedgerLines} 를 한 번씩 돌려 <b>거래처 수 × (쿼리 + 도서 N+1)</b> 이 났다.
+     * 100곳 기준 8.5초, 200곳 19.9초(운영 실측). 한 번에 읽어 메모리에서 거래처별로 가른다.
+     */
+    @Query("select s from Sale s join fetch s.product where s.partner.id in :partnerIds "
+            + "and s.canceled = false and s.salesDate between :from and :to "
+            + "order by s.partner.id, s.salesDate, s.id")
+    List<Sale> findLedgerLinesForPartners(@Param("partnerIds") List<Long> partnerIds,
+                                          @Param("from") LocalDate from,
+                                          @Param("to") LocalDate to);
 
     /**
      * 수익신고: 거래처×월 순매출/세액 집계. 취소 제외. 반품은 −(순매출·세액 감소).
