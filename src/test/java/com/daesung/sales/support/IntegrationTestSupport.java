@@ -2,6 +2,7 @@ package com.daesung.sales.support;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -161,20 +162,38 @@ public abstract class IntegrationTestSupport {
      * 파일명을 넘기는 이유: 서버가 확장자를 보고 파서를 고를 수 있어서 실제 요청과 같은 모양이어야 한다.
      */
     protected JsonNode multipart(String path, byte[] bytes, String filename) {
+        return multipart(path, bytes, filename, "file");
+    }
+
+    /** 파트 이름이 {@code file} 이 아닌 업로드(예: 다건을 받는 {@code files}). */
+    protected JsonNode multipart(String path, byte[] bytes, String filename, String partName) {
+        return multipartMany(path, partName, List.of(new FilePart(filename, bytes)));
+    }
+
+    /** 다건 업로드 한 건. 하위 테스트가 직접 만들어 넘기므로 public 이다. */
+    public record FilePart(String filename, byte[] bytes) {
+    }
+
+    /** 파트 이름 {@code files} 로 여러 개를 한 번에 올린다. */
+    protected JsonNode multipartMany(String path, List<FilePart> parts) {
+        return multipartMany(path, "files", parts);
+    }
+
+    protected JsonNode multipartMany(String path, String partName, List<FilePart> parts) {
         HttpHeaders h = new HttpHeaders();
         h.setContentType(MediaType.MULTIPART_FORM_DATA);
         h.setBearerAuth(token());
 
-        org.springframework.core.io.ByteArrayResource part =
-                new org.springframework.core.io.ByteArrayResource(bytes) {
-                    @Override
-                    public String getFilename() {
-                        return filename;
-                    }
-                };
         org.springframework.util.MultiValueMap<String, Object> form =
                 new org.springframework.util.LinkedMultiValueMap<>();
-        form.add("file", part);
+        for (FilePart p : parts) {
+            form.add(partName, new org.springframework.core.io.ByteArrayResource(p.bytes()) {
+                @Override
+                public String getFilename() {
+                    return p.filename();
+                }
+            });
+        }
 
         ResponseEntity<String> resp = rest.exchange(
                 "/api/v1" + path, HttpMethod.POST, new HttpEntity<>(form, h), String.class);
