@@ -968,7 +968,19 @@ public class ReceivableService {
                     && s.getSupplyRate() != null && s.getSupplyRate() != 0;
             boolean isSale = cat == SalesCategory.SALE;
 
-            String key = s.getSalesDate() + "|" + bookLabel(s) + "|" + s.getSupplyRate();
+            // ★묶는 단위는 **한 전표(주문)** 안이다 — 서로 다른 전표의 매출을 합치면 안 된다.
+            //   §7-A 원문은 "같은 도서의 **매출·교사용·반품**은 한 행의 컬럼으로"이고,
+            //   뒤이어 "값이 없는 교사용 행이 따로 생긴다"를 문제로 든다. 즉 합치라는 것은
+            //   **구분끼리**(매출/교사용/반품)이지 **전표끼리**가 아니다.
+            //   ‼️예전엔 (일자+도서+공급률)로만 묶어 **매출 두 건까지 합쳤다** —
+            //     발주처 샘플 PDF 의 2/10 독재자학원 36부·4부가 두 줄인데 40부 한 줄로 나왔다
+            //     (프론트 B-9① 지적). 전표를 키에 넣어 그 묶음을 끊는다.
+            //   이관분은 등록번호가 없어 **매출번호**로 떨어진다 = 전표마다 한 줄.
+            //   레거시 인쇄물이 전표 단위로 찍히므로 그 모양과 같다.
+            String voucher = (s.getEntryNo() != null && !s.getEntryNo().isBlank())
+                    ? s.getEntryNo() : s.getSalesNo();
+            String key = s.getSalesDate() + "|" + bookLabel(s) + "|" + s.getSupplyRate()
+                    + "|" + voucher;
             long[] v = merged.computeIfAbsent(key, k -> new long[8]);
             firstOf.putIfAbsent(key, s);
             if (isSale) {
@@ -997,12 +1009,20 @@ public class ReceivableService {
                 continue;
             }
             // 값이 0인 칸은 null로 내려 빈 칸으로 보이게 한다(레거시 인쇄물이 그렇다).
+            // ‼️**세액만 예외** — 매출이 있는 줄이면 0 이라도 **0 으로 찍는다**(프론트 B-9② 지적).
+            //   발주처 샘플 PDF 의 거래 줄이 세액 칸에 `0` 을 적는다(면세라 대부분 0 이다).
+            //   빈칸으로 두면 "세액 칸을 안 채웠다"로 읽힌다 — 0 은 값이지 없음이 아니다.
+            boolean hasSale = v[0] != 0 || v[1] != 0;
             entries.add(new Entry(s.getSalesDate(), 0, ArLedgerResponse.Line.detail(
                     s.getSalesDate(), s.getSalesNo(),
                     s.getProduct().getCatCode(), s.getProduct().getCatName(),
                     s.getProduct().getCode(), bookLabel(s),
                     s.getSupplyRate(),
-                    zeroToNull(v[0]), zeroToNull(v[1]), zeroToNull(v[2]),
+                    // ‼️`hasSale ? v[2] : zeroToNull(v[2])` 로 쓰면 안 된다 — 삼항의 한쪽이
+                    //   long, 다른 쪽이 Long 이라 자바가 **언박싱**하고, null 이면 NPE 다
+                    //   (교사용만 있는 줄에서 실제로 터졌다). Long.valueOf 로 타입을 맞춘다.
+                    zeroToNull(v[0]), zeroToNull(v[1]),
+                    hasSale ? Long.valueOf(v[2]) : zeroToNull(v[2]),
                     zeroToNull(v[3]), zeroToNull(v[4]),
                     zeroToNull(v[5]), zeroToNull(v[6]),
                     null, v[7], 0L), v[7]));

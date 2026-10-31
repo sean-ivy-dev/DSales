@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.daesung.sales.support.IntegrationTestSupport;
 import com.fasterxml.jackson.databind.JsonNode;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeAll;
@@ -38,6 +39,10 @@ class ArLedgerLegacyFormatIntegrationTest extends IntegrationTestSupport {
     private Long partner;
     private String partnerCode;
     private Long book;
+    private Long wh;
+    /** ‼️B-9 테스트 전용 거래처 — 기존 테스트가 **전체 기간**을 조회하므로
+     *  같은 거래처에 줄을 더하면 그쪽 단언(명세행 1줄)이 깨진다. */
+    private Long partnerB9;
 
     @BeforeAll
     void seed() {
@@ -46,7 +51,7 @@ class ArLedgerLegacyFormatIntegrationTest extends IntegrationTestSupport {
         partnerCode = "LGP" + SFX;
         partner = createId("/masters/clients",
                 Map.of("code", partnerCode, "name", "레거시양식거래처", "type", "NORMAL"));
-        Long wh = createId("/masters/warehouses", Map.of("code", "LGW" + SFX, "name", "물류", "type", "MAIN"));
+        wh = createId("/masters/warehouses", Map.of("code", "LGW" + SFX, "name", "물류", "type", "MAIN"));
         book = createId("/masters/products", Map.of("code", "LGB" + SFX, "name", "양식도서",
                 "contentType", "SELF", "price", 10000, "supplyRate", 70,
                 "catCode", "A" + YEAR + "A", "catName", "양식분류"));
@@ -64,6 +69,9 @@ class ArLedgerLegacyFormatIntegrationTest extends IntegrationTestSupport {
                                 "unitPrice", 10000, "supplyRate", 70),
                         Map.of("productId", book, "shipmentType", "GIFT", "qty", 3,
                                 "unitPrice", 10000, "supplyRate", 0))));
+
+        partnerB9 = createId("/masters/clients",
+                Map.of("code", "LGP9" + SFX, "name", "B9전용거래처", "type", "NORMAL"));
 
         // 수금 1건 — 분류명 칸에 "현금"이 찍혀야 한다.
         post("/closing/collections", Map.of("collDate", DAY, "partnerId", partner,
@@ -141,5 +149,56 @@ class ArLedgerLegacyFormatIntegrationTest extends IntegrationTestSupport {
         assertThat(h.path("partnerName").asText()).isEqualTo("레거시양식거래처");
         assertThat(h.path("supplierName").asText()).as("하단 왼쪽 회사명").isNotEmpty();
         assertThat(h.path("bankAccount").asText()).as("하단 오른쪽 입금계좌").contains("은행");
+    }
+
+    @Test
+    @DisplayName("★전표가 다르면 매출 줄도 갈린다 — 구분끼리만 합친다(B-9①)")
+    void 전표가_다르면_안합친다() {
+        // ‼️뒤집힌 지점. 예전엔 (일자+도서+공급률)로만 묶어 **매출 두 건까지 합쳤다** —
+        //   발주처 샘플 PDF 의 2/10 독재자학원 36부·4부가 두 줄인데 40부 한 줄로 나왔다.
+        //   §7-A 가 합치라고 한 것은 "같은 도서의 **매출·교사용·반품**"이지 전표끼리가 아니다.
+        String day = YEAR + "-07-07";
+        for (int qty : new int[] {36, 4}) {
+            JsonNode r = post("/sales/entries", Map.of("salesDate", day, "partnerId", partnerB9,
+                    "warehouseId", wh,
+                    "items", List.of(Map.of("productId", book, "shipmentType", "NORMAL_SHIP",
+                            "qty", qty, "unitPrice", 10000, "supplyRate", 70))));
+            assertThat(r.path("success").asBoolean()).as("%s", r).isTrue();
+        }
+
+        JsonNode led = data(get("/closing/ar-ledger?partnerId=" + partnerB9
+                + "&fromDate=" + day + "&toDate=" + day));
+        List<Long> qtys = new ArrayList<>();
+        for (JsonNode l : led.path("lines")) {
+            if ("DETAIL".equals(l.path("rowType").asText()) && !l.path("saleQty").isNull()) {
+                qtys.add(l.path("saleQty").asLong());
+            }
+        }
+        assertThat(qtys).as("36부·4부가 두 줄로 남는다(40부 한 줄이 아니다)")
+                .containsExactlyInAnyOrder(36L, 4L);
+    }
+
+    @Test
+    @DisplayName("매출 줄의 세액은 0이라도 0으로 찍는다 — 빈칸이 아니다(B-9②)")
+    void 세액은_0으로_찍는다() {
+        String day = YEAR + "-07-08";
+        JsonNode reg = post("/sales/entries", Map.of("salesDate", day, "partnerId", partnerB9,
+                "warehouseId", wh,
+                "items", List.of(Map.of("productId", book, "shipmentType", "NORMAL_SHIP",
+                        "qty", 5, "unitPrice", 10000, "supplyRate", 70))));
+        assertThat(reg.path("success").asBoolean()).as("%s", reg).isTrue();
+
+        JsonNode led = data(get("/closing/ar-ledger?partnerId=" + partnerB9
+                + "&fromDate=" + day + "&toDate=" + day));
+        JsonNode detail = null;
+        for (JsonNode l : led.path("lines")) {
+            if ("DETAIL".equals(l.path("rowType").asText()) && !l.path("saleQty").isNull()) {
+                detail = l;
+            }
+        }
+        assertThat(detail).as("거래 줄이 있다").isNotNull();
+        // 0 은 값이지 없음이 아니다 — 빈칸으로 두면 "세액을 안 채웠다"로 읽힌다.
+        assertThat(detail.path("tax").isNull()).as("세액이 null 이면 안 된다").isFalse();
+        assertThat(detail.path("tax").asLong()).isZero();
     }
 }
