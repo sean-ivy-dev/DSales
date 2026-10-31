@@ -28,7 +28,11 @@ import org.testcontainers.utility.DockerImageName;
 public abstract class IntegrationTestSupport {
 
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.4")
-            .withDatabaseName("sales").withUsername("sales").withPassword("sales");
+            .withDatabaseName("sales").withUsername("sales").withPassword("sales")
+            // ‼️특약점 PDF 보관함이 파일을 BLOB 으로 넣는다. 기본 1MB 로는 2.4MB PDF 가
+            //   "Packet for query is too large" 로 **500** 이 난다(프론트 B-6 의 진짜 원인).
+            //   운영 DB 에도 같은 설정이 필요하다 — 여기만 올리면 테스트만 통과하고 운영은 깨진다.
+            .withCommand("--max-allowed-packet=67108864");
 
     static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
             .withExposedPorts(6379);

@@ -24,6 +24,34 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail(ErrorResponse.of(code, e.getMessage())));
     }
 
+    /**
+     * 업로드 용량 초과 — <b>413</b>로 내린다(프론트 B-6).
+     *
+     * <p>‼️기본값이 그대로면 스프링이 <b>파일 1MB</b>에서 막고, 핸들러가 없으면 <b>500</b>이
+     * 나간다. 실제로 특약점 PDF 2.4MB 가 "서버 오류"로 돌아왔다 — 담당자는 파일을 줄여 볼
+     * 생각을 못 하고 개발에 문의하게 된다. <b>사유와 상한을 함께</b> 알려 준다.
+     *
+     * <p>상한 자체는 {@code application.yml} 의
+     * {@code spring.servlet.multipart.max-file-size / max-request-size} 에 있다.
+     */
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUploadTooLarge(
+            org.springframework.web.multipart.MaxUploadSizeExceededException e) {
+        // ‼️예외 메시지를 **인자로** 넘기지 않는다 — 자유 문자열은 CRLF 위조 통로가 된다
+        //   (이 파일 아래 203행과 같은 규율). 예외는 throwable 자리로 넘긴다.
+        log.warn("업로드 용량 초과", e);
+        return ResponseEntity.status(ErrorCode.PAYLOAD_TOO_LARGE.getStatus())
+                .body(ApiResponse.fail(ErrorResponse.of(ErrorCode.PAYLOAD_TOO_LARGE,
+                        "업로드 용량이 상한을 넘었습니다 — 파일 하나는 " + maxFileSize
+                                + ", 한 번에 올리는 전체는 " + maxRequestSize + " 까지입니다.")));
+    }
+
+    @org.springframework.beans.factory.annotation.Value("${spring.servlet.multipart.max-file-size:1MB}")
+    private String maxFileSize;
+
+    @org.springframework.beans.factory.annotation.Value("${spring.servlet.multipart.max-request-size:10MB}")
+    private String maxRequestSize;
+
     /** @Valid 검증 실패. */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Void>> handleValidation(MethodArgumentNotValidException e) {

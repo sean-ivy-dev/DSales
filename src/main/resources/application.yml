@@ -1,6 +1,15 @@
 spring:
   application:
     name: sales
+  servlet:
+    multipart:
+      # 특약점 PDF 보관함(10/27 §7-8) — 프론트 B-6 지적: 2.4MB PDF 가 500 이었다.
+      # ‼️스프링 기본값이 **파일 1MB · 요청 10MB** 라 설정이 없으면 그 값으로 막힌다.
+      #   외상매출장 PDF 는 기간이 길면 10쪽 넘어 수 MB 가 되고, 월마감 때 수백 개를
+      #   한 번에 올린다. 넉넉히 둔다(파일 20MB · 요청 200MB).
+      #   디스크로 흘려 쓰므로(file-size-threshold 기본 0) 메모리에 다 올리지 않는다.
+      max-file-size: 20MB
+      max-request-size: 200MB
   datasource:
     url: jdbc:mysql://localhost:3306/sales?characterEncoding=UTF-8&useUnicode=true&serverTimezone=Asia/Seoul
     username: sales

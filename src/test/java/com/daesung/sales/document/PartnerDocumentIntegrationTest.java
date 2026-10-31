@@ -156,4 +156,25 @@ class PartnerDocumentIntegrationTest extends IntegrationTestSupport {
         assertThat(res.getStatusCode().value()).isEqualTo(200);
         assertThat(res.getBody()).isEqualTo(body);
     }
+
+    @Test
+    @DisplayName("★1MB 넘는 PDF 도 올라간다 — 스프링 기본값(1MB)에 막히던 것(B-6)")
+    void 큰파일도_올라간다() {
+        // ‼️설정이 없으면 스프링 기본값이 **파일 1MB** 라, 특약점 PDF 2.4MB 가 500 이었다
+        //   (프론트 B-6). 외상매출장은 기간이 길면 10쪽 넘어 수 MB 가 된다.
+        byte[] big = new byte[2_500_000];      // 2.5MB — 실제로 걸렸던 크기
+        System.arraycopy("%PDF-1.4\n".getBytes(java.nio.charset.StandardCharsets.UTF_8), 0,
+                big, 0, 9);
+
+        String code = "PDB" + SFX;
+        createId("/masters/clients", Map.of("code", code, "name", "큰파일거래처", "type", "NORMAL"));
+
+        JsonNode r = upload("SALES_" + code + "_큰파일거래처_20260801-20260831.pdf", big);
+        assertThat(r.path("created").asInt()).as("2.5MB 가 등록된다: %s", r).isEqualTo(1);
+
+        // 내용이 잘리지 않았는지까지 본다 — 상한만 올리고 저장이 잘리면 PDF 가 깨진다.
+        long id = list(code).get(0).path("id").asLong();
+        byte[] got = getBytes("/closing/partner-documents/" + id + "/download").getBody();
+        assertThat(got).as("받은 바이트가 올린 것과 같다").hasSize(big.length);
+    }
 }

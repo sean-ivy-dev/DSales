@@ -16,6 +16,9 @@ public enum ErrorCode {
     FORBIDDEN(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),               // 권한 부족(403)
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "지원하지 않는 메서드입니다."),  // 경로는 맞고 메서드만 틀린 호출
     UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "지원하지 않는 Content-Type입니다."),  // 업로드에 JSON을 보낸 경우 등
+    // 업로드 크기 초과(프론트 B-6). ‼️**500이 아니라 413**이다 — 담당자가 "서버 오류"로 보면
+    //   파일을 줄여 볼 생각을 못 하고 개발에 문의한다. 상한을 함께 알려 준다.
+    PAYLOAD_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "업로드 용량이 상한을 넘었습니다."),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 오류가 발생했습니다."),
 
     // --- 도메인(시트 근거) ---
