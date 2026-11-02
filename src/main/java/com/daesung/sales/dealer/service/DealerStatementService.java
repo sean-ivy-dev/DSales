@@ -71,6 +71,7 @@ public class DealerStatementService {
 
         List<SalesOrderRow> orders = salesOrderQueryService.orders(
                 from, to, partner.getId(), null, null, OrderState.SHIPPED,
+                null,   // 접수경로 — 사이트는 자기 주문만 보므로 가를 이유가 없다
                 PageRequest.of(0, MAX_ROWS)).getContent();
 
         List<DealerShippedOrderRow> out = new ArrayList<>();

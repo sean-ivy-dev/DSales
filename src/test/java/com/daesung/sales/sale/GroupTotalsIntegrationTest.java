@@ -38,6 +38,8 @@ class GroupTotalsIntegrationTest extends IntegrationTestSupport {
     private Long pb;
     private Long wh;
     private Long book;
+    private Long coupon;
+    private Long consignWh;
 
     @BeforeAll
     void seed() {
@@ -66,6 +68,42 @@ class GroupTotalsIntegrationTest extends IntegrationTestSupport {
         sell(pa, D1, 20);   // 같은 거래처·같은 날 두 건 → 합쳐져야 한다
         sell(pa, D2, 5);
         sell(pb, D1, 30);
+
+        // ★아래 셋이 2026-11-02 프론트 실측(I-4)에서 소계를 어긋나게 한 축이다.
+        //   예전 시드는 전부 정상출고라 세 버그를 **하나도 못 잡았다**.
+        // ① 쿠폰 — 도서명에 '쿠폰'이 들어가면 수량만 0으로 센다(레거시 조회.vb:1335)
+        Map<String, Object> cb = new HashMap<>(b);
+        cb.put("code", "GTC" + SFX);
+        cb.put("name", "강의쿠폰" + SFX);
+        coupon = createId("/masters/products", cb);
+        post("/stock/inbound", Map.of("processedDate", "2046-01-05", "supplierClientId", sup,
+                "destinationWarehouseId", wh,
+                "items", List.of(Map.of("productId", coupon, "unitCost", 1000, "qty", 500))));
+        sellProduct(pa, D1, coupon, 7);
+
+        // ② 반품 — 목록은 음수로 내려준다(§3-2). 소계도 음수로 상쇄해야 한다
+        JsonNode ret = post("/sales/return-inbound", Map.of("returnDate", D2,
+                "partnerId", pa, "warehouseId", wh,
+                "items", List.of(Map.of("productId", book, "qty", 4,
+                        "unitPrice", 10000, "supplyRate", 70))));
+        assertThat(ret.path("success").asBoolean()).as("반품입고 %s", ret).isTrue();
+
+        // ③ 위탁 미결 — 출고/반품 조회 목록에만 있고 소계엔 없었다
+        consignWh = createId("/masters/warehouses", Map.of("code", "GTCW" + SFX,
+                "name", "묶음위탁창고", "type", "CONSIGN", "ownerClientId", pb));
+        JsonNode co = post("/sales/entries", Map.of("salesDate", D1,
+                "partnerId", pb, "warehouseId", wh,
+                "items", List.of(Map.of("productId", book, "shipmentType", "CONSIGN_SHIP",
+                        "qty", 50, "unitPrice", 10000, "supplyRate", 70))));
+        assertThat(co.path("success").asBoolean()).as("위탁출고 %s", co).isTrue();
+    }
+
+    private void sellProduct(Long partner, String date, Long productId, int qty) {
+        JsonNode r = post("/sales/entries", Map.of("salesDate", date,
+                "partnerId", partner, "warehouseId", wh,
+                "items", List.of(Map.of("productId", productId, "shipmentType", "NORMAL_SHIP",
+                        "qty", qty, "unitPrice", 10000, "supplyRate", 70))));
+        assertThat(r.path("success").asBoolean()).as("%s", r).isTrue();
     }
 
     private void sell(Long partner, String date, int qty) {
@@ -100,10 +138,12 @@ class GroupTotalsIntegrationTest extends IntegrationTestSupport {
     void 거래처별() {
         JsonNode rows = totals("PARTNER", "&partnerIds=" + pa + "&partnerIds=" + pb);
 
-        assertThat(row(rows, "묶음가").path("qty").asLong()).as("10+20+5").isEqualTo(35);
+        // 10+20+5 − 반품4 = 31. 쿠폰 7은 수량에서 0으로 센다.
+        assertThat(row(rows, "묶음가").path("qty").asLong()).as("10+20+5−4").isEqualTo(31);
         assertThat(row(rows, "묶음나").path("qty").asLong()).isEqualTo(30);
-        // 공급가액 = 10,000 × 70% × 수량
-        assertThat(row(rows, "묶음가").path("supplyAmount").asLong()).isEqualTo(35 * 7_000);
+        // 공급가액 = 10,000×70%×(35−4) + 쿠폰 7×7,000 (쿠폰은 **금액은 그대로**)
+        assertThat(row(rows, "묶음가").path("supplyAmount").asLong())
+                .isEqualTo(31 * 7_000 + 7 * 7_000);
     }
 
     @Test
@@ -111,8 +151,8 @@ class GroupTotalsIntegrationTest extends IntegrationTestSupport {
     void 일자별() {
         JsonNode rows = totals("DATE", "&partnerIds=" + pa + "&partnerIds=" + pb);
 
-        assertThat(row(rows, D1).path("qty").asLong()).as("10+20+30").isEqualTo(60);
-        assertThat(row(rows, D2).path("qty").asLong()).isEqualTo(5);
+        assertThat(row(rows, D1).path("qty").asLong()).as("10+20+30 (쿠폰 7은 0)").isEqualTo(60);
+        assertThat(row(rows, D2).path("qty").asLong()).as("5 − 반품4").isEqualTo(1);
     }
 
     @Test
@@ -131,7 +171,7 @@ class GroupTotalsIntegrationTest extends IntegrationTestSupport {
             sumQty += r.path("qty").asLong();
         }
 
-        assertThat(sumQty).as("소계 합 = 목록 합").isEqualTo(listQty).isEqualTo(35);
+        assertThat(sumQty).as("소계 합 = 목록 합").isEqualTo(listQty).isEqualTo(31);
         assertThat(rows).as("조건으로 좁혔으니 그 거래처만").hasSize(1);
     }
 
@@ -139,7 +179,70 @@ class GroupTotalsIntegrationTest extends IntegrationTestSupport {
     @DisplayName("shippedOnly 도 같이 먹는다 — 출고/반품 조회의 소계가 목록과 달라지면 안 된다")
     void 출고조건도_같이() {
         JsonNode rows = totals("PARTNER", "&partnerIds=" + pa + "&shippedOnly=true");
-        // 시드는 전부 정상 출고라 결과가 같아야 한다(조건이 **받아들여지는지**와 집합이 안 바뀌는지).
-        assertThat(row(rows, "묶음가").path("qty").asLong()).isEqualTo(35);
+        assertThat(row(rows, "묶음가").path("qty").asLong()).isEqualTo(31);
+    }
+
+    @Test
+    @DisplayName("★★반품은 소계에서도 음수로 상쇄된다 — 양수로 세면 두 배가 된다")
+    void 반품_부호() {
+        // 프론트 실측(I-4): 한 거래처가 목록 35 ↔ 합계 37, 금액 10,500원 차이로 잡혔다.
+        // 반품 1건(수량 1·5,250원)을 양수로 세서 2배(2건·10,500원)가 된 것이었다.
+        assertThat(row(totals("PARTNER", "&partnerIds=" + pa), "묶음가").path("qty").asLong())
+                .as("반품 4부가 빠진 31이어야(39가 되면 양수로 센 것)").isEqualTo(31);
+    }
+
+    @Test
+    @DisplayName("★★쿠폰은 수량만 0 — couponCount=true 면 센다")
+    void 쿠폰_수량() {
+        // 프론트 실측(I-4): 한 거래처가 목록 288 ↔ 합계 576(정확히 두 배)으로 잡혔다.
+        long off = row(totals("PARTNER", "&partnerIds=" + pa), "묶음가").path("qty").asLong();
+        long on = row(totals("PARTNER", "&partnerIds=" + pa + "&couponCount=true"), "묶음가")
+                .path("qty").asLong();
+
+        assertThat(off).as("기본은 쿠폰 7을 0으로").isEqualTo(31);
+        assertThat(on).as("couponCount=true 면 7을 더해 38").isEqualTo(38);
+        // 금액은 둘이 같다 — 쿠폰은 '부수'로만 안 세고 팔린 것은 맞다.
+        assertThat(row(totals("PARTNER", "&partnerIds=" + pa), "묶음가")
+                .path("supplyAmount").asLong())
+                .isEqualTo(row(totals("PARTNER", "&partnerIds=" + pa + "&couponCount=true"),
+                        "묶음가").path("supplyAmount").asLong());
+    }
+
+    @Test
+    @DisplayName("★★shippedOnly 면 위탁 미결도 소계에 더한다 — 목록에만 있고 합계엔 없었다")
+    void 위탁미결도_소계에() {
+        // 프론트 실측(I-4): 위탁 줄만 있는 거래처 2곳이 합계에서 **통째로 빠졌다**.
+        JsonNode rows = totals("PARTNER", "&partnerIds=" + pb + "&shippedOnly=true");
+        // 묶음나 = 정상출고 30 + 위탁 원출고 50
+        assertThat(row(rows, "묶음나").path("qty").asLong()).as("30 + 위탁 50").isEqualTo(80);
+        // 금액은 위탁 몫을 **더하지 않는다** — 미결이라 매출이 아직 서지 않았다.
+        assertThat(row(rows, "묶음나").path("supplyAmount").asLong()).isEqualTo(30 * 7_000);
+    }
+
+    @Test
+    @DisplayName("★★★목록 전량 합 = 묶음 합계 — 프론트가 손으로 하던 대조를 고정한다")
+    void 목록전량_합_대조() {
+        for (String flag : new String[] {"", "&shippedOnly=true"}) {
+            for (String cp : new String[] {"", "&couponCount=true"}) {
+                String cond = "&partnerIds=" + pa + "&partnerIds=" + pb + flag + cp;
+                Map<String, long[]> byName = new java.util.HashMap<>();
+                for (JsonNode l : data(get("/sales?" + range() + cond + "&size=200"))
+                        .path("content")) {
+                    long[] v = byName.computeIfAbsent(l.path("partnerName").asText(),
+                            k -> new long[2]);
+                    v[0] += l.path("qty").asLong();
+                    v[1] += l.path("supplyAmount").asLong();
+                }
+                for (JsonNode r : totals("PARTNER", cond)) {
+                    long[] v = byName.getOrDefault(r.path("name").asText(), new long[2]);
+                    assertThat(r.path("qty").asLong())
+                            .as("수량 — %s (조건%s%s)", r.path("name").asText(), flag, cp)
+                            .isEqualTo(v[0]);
+                    assertThat(r.path("supplyAmount").asLong())
+                            .as("금액 — %s (조건%s%s)", r.path("name").asText(), flag, cp)
+                            .isEqualTo(v[1]);
+                }
+            }
+        }
     }
 }

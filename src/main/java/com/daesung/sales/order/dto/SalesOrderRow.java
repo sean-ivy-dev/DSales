@@ -57,6 +57,15 @@ public record SalesOrderRow(
 
         @Schema(description = "진행상태 명칭", example = "접수완료") String progressStateName,
 
+        @Schema(description = """
+                접수경로 코드 — `ONLINE`(특약점 사이트에서 들어옴) / `MANUAL`(수기 등록).
+                근거: 10/27 §2-1 "**수기 주문과 온라인(특약점) 주문을 함께 보여주고**".
+                ‼️값이 비어 있던 옛 주문은 **수기**로 내려준다 — 특약점 연동이 2026-11 에
+                열렸으므로 그 전 주문은 전부 수기다.""", example = "MANUAL")
+        String channel,
+
+        @Schema(description = "접수경로 명칭(온라인/수기)", example = "수기") String channelName,
+
         @Schema(description = "주문 전체가 삭제됐는지. 일부만 삭제면 false(살아 있는 쪽이 이긴다)")
         boolean deleted,
 

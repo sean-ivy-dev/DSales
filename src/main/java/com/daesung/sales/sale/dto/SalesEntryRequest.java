@@ -54,6 +54,7 @@ public record SalesEntryRequest(
                 example = "false")
         Boolean onlySales,
 
+
         @Schema(description = """
                 발송구분(COURIER=택배/FREIGHT=화물). 신규 주문(간단 폼)의 「택배 발송」 체크 대응
                 (발주처 질의 2026-10-26 ①, 정본 16p·26p).
@@ -75,6 +76,14 @@ public record SalesEntryRequest(
 
         @Schema(description = "수령인 연락처", example = "010-0000-0000")
         String receiverPhone,
+
+        @Schema(description = """
+                접수경로 — `ONLINE`(특약점 사이트) / `MANUAL`(수기). **안 보내면 수기**다.
+                근거: 10/27 §2-1 "수기 주문과 온라인(특약점) 주문을 **함께** 보여주고".
+                ‼️특약점 접수(`POST /dealer-site/orders`)는 서버가 ONLINE 으로 박으므로
+                이 칸으로 바꿀 수 없다 — 사이트에서 온 주문을 수기로 위장할 수 없어야 한다.""",
+                example = "MANUAL")
+        com.daesung.sales.sale.entity.OrderChannel channel,
 
         @Schema(description = "매출 품목 목록", requiredMode = Schema.RequiredMode.REQUIRED)
         @NotEmpty @Valid List<Item> items

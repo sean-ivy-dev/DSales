@@ -30,6 +30,9 @@ class PartnerDocumentIntegrationTest extends IntegrationTestSupport {
 
     private static final String SFX = "-PD" + (System.nanoTime() % 1_000_000L);
 
+    /** 삭제 시험용 DSRE 거래처코드. 다른 케이스와 섞이지 않게 따로 둔다. */
+    private static final String DEL_CODE = "9" + (System.nanoTime() % 100_000L);
+
     private String partnerCode;
 
     @BeforeAll
@@ -176,5 +179,32 @@ class PartnerDocumentIntegrationTest extends IntegrationTestSupport {
         long id = list(code).get(0).path("id").asLong();
         byte[] got = getBytes("/closing/partner-documents/" + id + "/download").getBody();
         assertThat(got).as("받은 바이트가 올린 것과 같다").hasSize(big.length);
+    }
+
+    @Test
+    @DisplayName("★삭제 — 잘못 올린 파일을 지운다(프론트 I-5)")
+    void 삭제() {
+        // 요청 원문: "같은 거래처·종류·기준월은 다시 올리면 교체되지만, **거래처를 잘못 골라
+        //   올린 파일은 지울 길이 없어** 특약점 사이트(최근 12개월)에 그대로 보입니다."
+        JsonNode up = multipartMany("/closing/partner-documents", List.of(
+                new FilePart("SALES_" + DEL_CODE + "_삭제시험_20260701-20260731.pdf",
+                        "%PDF-1.4\n삭제대상\n%%EOF\n".getBytes(java.nio.charset.StandardCharsets.UTF_8))));
+        assertThat(up.path("success").asBoolean()).as("%s", up).isTrue();
+
+        long id = -1;
+        for (JsonNode r : data(get("/closing/partner-documents?partnerCode=" + DEL_CODE))) {
+            id = r.path("id").asLong();
+        }
+        assertThat(id).as("올린 파일을 찾았다").isPositive();
+
+        JsonNode del = del("/closing/partner-documents/" + id);
+        assertThat(del.path("success").asBoolean()).as("%s", del).isTrue();
+        assertThat(data(del).path("fileName").asText())
+                .as("무엇을 지웠는지 돌려준다").contains("삭제시험");
+
+        // ‼️논리삭제가 아니다 — 목록에서도, 다운로드에서도 사라진다.
+        assertThat(data(get("/closing/partner-documents?partnerCode=" + DEL_CODE))).isEmpty();
+        assertThat(get("/closing/partner-documents/" + id + "/download")
+                .path("success").asBoolean()).as("다운로드도 안 된다").isFalse();
     }
 }

@@ -180,4 +180,31 @@ public class PartnerDocumentService {
     private static LocalDate date(Object o) {
         return (o == null) ? null : ((java.sql.Date) o).toLocalDate();
     }
+
+    /**
+     * 보관함에서 <b>영구 삭제</b>(프론트 I-5).
+     *
+     * <p>요청 원문: "같은 거래처·종류·기준월은 다시 올리면 교체되지만, <b>거래처를 잘못 골라
+     * 올린 파일은 지울 길이 없어</b> 특약점 사이트(최근 12개월)에 그대로 보입니다.
+     * 관리자만 지울 수 있는 삭제를 부탁드립니다."
+     *
+     * <p>‼️<b>논리삭제가 아니라 실제로 지운다.</b> 파일 내용이 이 표에 들어 있어
+     * (LONGBLOB) 행만 숨기면 바이트가 DB 에 그대로 남는다 — 잘못 올린 남의 매출 자료를
+     * "안 보이게"만 하는 것은 요청의 목적(노출 차단)을 반만 채운다.
+     *
+     * <p>권한은 경로에서 관리자로 제한한다(컨트롤러 참고). 교체(재업로드)로 덮을 수 있는
+     * 경우까지 삭제로 처리하지 않도록, 지우기 전에 무엇을 지우는지 응답에 담아 돌려준다.
+     */
+    @Transactional
+    public PartnerDocumentDtos.Row delete(Long id) {
+        PartnerDocument d = download(id);
+        PartnerDocumentDtos.Row row = new PartnerDocumentDtos.Row(
+                d.getId(), d.getDocType(),
+                (d.getPartner() == null) ? null : d.getPartner().getId(),
+                d.getPartnerCode(), d.getPartnerName(), d.getBaseMonth(),
+                d.getPeriodFrom(), d.getPeriodTo(), d.getFileName(), d.getFileSize(),
+                d.getCreatedAt());
+        repository.delete(d);
+        return row;
+    }
 }

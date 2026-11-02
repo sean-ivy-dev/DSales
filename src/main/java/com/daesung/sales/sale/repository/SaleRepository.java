@@ -679,6 +679,36 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
                       Pageable pageable);
 
     /**
+     * 묶음 합계의 <b>수량 집계식</b> — 목록 응답({@code SaleResponse.from})과 <b>같은 값</b>을 내야 한다.
+     *
+     * <p>‼️<b>조건만 공유해서는 부족했다.</b> WHERE 절은 {@link #SALES_SEARCH_WHERE} 로 이미
+     * 목록과 같았는데, <b>행 값을 바꾸는 규칙</b>이 목록 쪽(Java)에만 있어 합이 어긋났다
+     * (프론트 실측 2026-11-02 I-4: 51곳 중 34곳 불일치). 두 규칙이다 —
+     * <ul>
+     *   <li><b>반품은 음수</b>(10/27 §3-2). 안 뒤집으면 반품이 두 배로 더해진다 —
+     *       실제로 한 거래처가 목록 35 ↔ 합계 37, 금액 10,500원 차이로 잡혔다.</li>
+     *   <li><b>쿠폰은 수량만 0</b>(레거시 {@code 조회.vb:1335}). 안 빼면 쿠폰이 그대로 세어진다 —
+     *       한 거래처가 288 ↔ 576(정확히 두 배)으로 잡혔다.</li>
+     * </ul>
+     * 순서가 중요하다 — <b>쿠폰이 먼저</b>다. 쿠폰 반품이면 목록은 0을 음수로 만들어 0이다.
+     */
+    String AGG_QTY = "coalesce(sum(case "
+            + "when :couponCount = false and s.product.name like '%쿠폰%' then 0 "
+            + "when s.salesCategory = com.daesung.sales.salestype.entity.SalesCategory.RETURN "
+            + "     then -s.qty else s.qty end),0)";
+
+    /**
+     * 금액 집계식. 반품만 음수로 뒤집는다 — <b>쿠폰은 금액을 건드리지 않는다</b>(수량만 0).
+     * ‼️애너테이션 값은 컴파일 상수여야 해서 메서드가 아니라 상수로 둔다.
+     */
+    String AGG_RET = "when s.salesCategory = "
+            + "com.daesung.sales.salestype.entity.SalesCategory.RETURN then -s.";
+
+    String AGG_SUPPLY = "coalesce(sum(case " + AGG_RET + "supplyAmount else s.supplyAmount end),0)";
+    String AGG_TAX = "coalesce(sum(case " + AGG_RET + "tax else s.tax end),0)";
+    String AGG_TOTAL = "coalesce(sum(case " + AGG_RET + "totalAmount else s.totalAmount end),0)";
+
+    /**
      * <b>묶음 합계 — 거래처별</b>(프론트 B-3). 소계 행을 붙이려고 쓴다.
      *
      * <p>★조건은 {@link #search} 와 <b>같은 문자열</b>을 쓴다({@link #SALES_SEARCH_WHERE}) —
@@ -690,8 +720,7 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
      * <p>반환 {@code Object[]}: [키, 이름, 수량, 공급가액, 세액, 합계금액]
      */
     @Query("select s.partner.id, s.partner.name, "
-            + "coalesce(sum(s.qty),0), coalesce(sum(s.supplyAmount),0), "
-            + "coalesce(sum(s.tax),0), coalesce(sum(s.totalAmount),0) "
+            + AGG_QTY + ", " + AGG_SUPPLY + ", " + AGG_TAX + ", " + AGG_TOTAL + " "
             + "from Sale s left join s.warehouse w " + SALES_SEARCH_WHERE
             + "group by s.partner.id, s.partner.name order by s.partner.name")
     List<Object[]> groupTotalsByPartner(@Param("from") LocalDate from,
@@ -719,12 +748,12 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
                       @Param("tradeSeq") Integer tradeSeq,
                       @Param("shippedOnly") boolean shippedOnly,
                       @Param("lectureDivisions") Collection<String> lectureDivisions,
-                      @Param("includeCanceled") boolean includeCanceled);
+                      @Param("includeCanceled") boolean includeCanceled,
+                      @Param("couponCount") boolean couponCount);
 
     /** <b>묶음 합계 — 거래일자별</b>. 근거·구조는 {@link #groupTotalsByPartner} 와 같다. */
     @Query("select s.salesDate, s.salesDate, "
-            + "coalesce(sum(s.qty),0), coalesce(sum(s.supplyAmount),0), "
-            + "coalesce(sum(s.tax),0), coalesce(sum(s.totalAmount),0) "
+            + AGG_QTY + ", " + AGG_SUPPLY + ", " + AGG_TAX + ", " + AGG_TOTAL + " "
             + "from Sale s left join s.warehouse w " + SALES_SEARCH_WHERE
             + "group by s.salesDate order by s.salesDate")
     List<Object[]> groupTotalsByDate(@Param("from") LocalDate from,
@@ -752,7 +781,8 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
                       @Param("tradeSeq") Integer tradeSeq,
                       @Param("shippedOnly") boolean shippedOnly,
                       @Param("lectureDivisions") Collection<String> lectureDivisions,
-                      @Param("includeCanceled") boolean includeCanceled);
+                      @Param("includeCanceled") boolean includeCanceled,
+                      @Param("couponCount") boolean couponCount);
 
     /**
      * 순매출 집계(상품별). 취소 제외. 회계구분·출고유형으로 매출/증정/교사용/반품 버킷 분해.
@@ -1482,4 +1512,61 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
                       w.id, w.name, w.type
             """)
     List<ShipmentWarehouseAgg> shipmentWarehouses(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /**
+     * 묶음 합계의 <b>위탁 미결 몫</b> — 거래처별. {@code shippedOnly=true} 일 때만 더한다.
+     *
+     * <p>‼️<b>목록에는 있는데 합계에 없었다.</b> 출고/반품 조회는 매출과 위탁 미결을
+     * {@code union all} 로 함께 보여주는데(§4-3·§4-4), 묶음 합계는 매출만 세고 있었다 —
+     * 프론트 실측(2026-11-02 I-4)에서 위탁 줄만 있는 거래처 2곳(리브커넥스·마이맥북스)이
+     * 합계에서 통째로 빠졌다. 목록 70·10부가 합계엔 0이었다.
+     *
+     * <p>수량은 <b>원출고수량</b>이고 금액은 <b>0</b>이다 — 목록의 위탁 가상 행
+     * ({@code Sale.forConsignmentView})과 같은 값이어야 한다. 위탁출고는 매출이 아직
+     * 서지 않았으므로(미결) 금액을 더하면 매출을 두 번 세는 것이 된다.
+     *
+     * <p>조건은 {@link #CONSIGN_SHIPPED_WHERE} — 목록의 union 이 쓰는 그 상수다.
+     *
+     * <p>반환 {@code Object[]}: [거래처id, 거래처명, 원출고수량]
+     */
+    @Query("select co.partner.id, co.partner.name, coalesce(sum(co.originalQty),0) "
+            + "from ConsignmentOut co join co.product cp " + CONSIGN_SHIPPED_WHERE
+            + " group by co.partner.id, co.partner.name order by co.partner.name")
+    List<Object[]> consignGroupTotalsByPartner(@Param("from") LocalDate from,
+                      @Param("to") LocalDate to,
+                      @Param("anyPartner") boolean anyPartner,
+                      @Param("partnerIds") Collection<Long> partnerIds,
+                      @Param("anySchool") boolean anySchool,
+                      @Param("schoolCodes") Collection<String> schoolCodes,
+                      @Param("anyProduct") boolean anyProduct,
+                      @Param("productIds") Collection<Long> productIds,
+                      @Param("anyDivision") boolean anyDivision,
+                      @Param("divisions") Collection<String> divisions,
+                      @Param("keyword") String keyword);
+
+    /** 위 메서드의 <b>거래일자별</b> 판. 기준 날짜는 목록과 같은 {@code tradeDate}(출고일)다. */
+    @Query("select co.tradeDate, co.tradeDate, coalesce(sum(co.originalQty),0) "
+            + "from ConsignmentOut co join co.product cp " + CONSIGN_SHIPPED_WHERE
+            + " group by co.tradeDate order by co.tradeDate")
+    List<Object[]> consignGroupTotalsByDate(@Param("from") LocalDate from,
+                      @Param("to") LocalDate to,
+                      @Param("anyPartner") boolean anyPartner,
+                      @Param("partnerIds") Collection<Long> partnerIds,
+                      @Param("anySchool") boolean anySchool,
+                      @Param("schoolCodes") Collection<String> schoolCodes,
+                      @Param("anyProduct") boolean anyProduct,
+                      @Param("productIds") Collection<Long> productIds,
+                      @Param("anyDivision") boolean anyDivision,
+                      @Param("divisions") Collection<String> divisions,
+                      @Param("keyword") String keyword);
+
+    /**
+     * 등록번호별 <b>접수경로</b>(프론트 I-2). 반환 {@code Object[]}: [entryNo, channel].
+     *
+     * <p>주문조회 행은 발송 건(Shipment)으로 만들고 접수경로는 매출(Sale)에 있어, 등록번호로
+     * 이어 붙인다. 한 묶음에 여러 줄이 있어도 경로는 같으므로 {@code distinct} 로 충분하다.
+     */
+    @Query("select distinct s.entryNo, s.channel from Sale s "
+            + "where s.entryNo in :entryNos and s.channel is not null")
+    List<Object[]> channelsByEntryNo(@Param("entryNos") Collection<String> entryNos);
 }

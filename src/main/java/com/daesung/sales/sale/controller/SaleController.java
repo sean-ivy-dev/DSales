@@ -346,6 +346,11 @@ public class SaleController {
     public ApiResponse<List<GroupTotalResponse>> groupTotals(
             @Parameter(description = "묶는 단위 — PARTNER(기본) 또는 DATE", example = "PARTNER")
             @RequestParam(defaultValue = "PARTNER") String groupBy,
+            @Parameter(description = """
+                    쿠폰 포함 카운트. **목록(`/sales`)과 같은 기본값(false)** 이다 —
+                    도서명에 '쿠폰'이 든 상품의 **수량만** 0으로 본다.
+                    ‼️목록과 다른 값을 주면 소계가 목록 합과 어긋난다.""")
+            @RequestParam(required = false, defaultValue = "false") boolean couponCount,
             @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
             @RequestParam(required = false)
@@ -368,7 +373,7 @@ public class SaleController {
         return ApiResponse.success(saleService.groupTotals(groupBy, fromDate, toDate,
                 salesCategories, tradeClasses, shipmentTypes, partnerIds, warehouseIds,
                 schoolCodes, divisions, productIds, partnerSchools, salesChannels,
-                keyword, tradeSeq, shippedOnly, includeCanceled));
+                keyword, tradeSeq, shippedOnly, includeCanceled, couponCount));
     }
 
     @Operation(summary = "수기 매출 등록(일반)",

@@ -14,6 +14,7 @@ import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -91,5 +92,23 @@ public class PartnerDocumentController {
                         .filename(d.getFileName(), StandardCharsets.UTF_8).build().toString())
                 .contentType(MediaType.APPLICATION_PDF)
                 .body(d.getContent());
+    }
+
+    @Operation(summary = "특약점 PDF 삭제(관리자)", description = """
+            보관함에서 **영구 삭제**한다(프론트 I-5).
+
+            요청 원문: "거래처를 잘못 골라 올린 파일은 지울 길이 없어 특약점 사이트
+            (최근 12개월)에 그대로 보입니다. **관리자만 지울 수 있는 삭제**를 부탁드립니다."
+
+            · ‼️**논리삭제가 아니다.** 파일 내용이 이 표에 들어 있어, 행만 숨기면 바이트가
+              DB 에 남는다 — 잘못 올린 자료를 '안 보이게'만 하는 것으로는 부족하다.
+            · 같은 거래처·종류·기준월은 **다시 올리면 교체**된다. 삭제는 거래처를 잘못 골라
+              올린 경우처럼 **교체로 덮을 수 없을 때** 쓴다.
+            · 응답에 지운 파일의 정보를 담아 돌려준다 — 무엇을 지웠는지 기록으로 남도록.""")
+    @DeleteMapping("/{id}")
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<PartnerDocumentDtos.Row> delete(
+            @Parameter(description = "문서 id") @PathVariable Long id) {
+        return ApiResponse.success(service.delete(id));
     }
 }

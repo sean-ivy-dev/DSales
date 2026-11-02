@@ -282,6 +282,16 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             + "   AND (:keyword IS NULL OR LOWER(p.name) LIKE :keyword"
             + "        OR LOWER(COALESCE(s.school_name,'')) LIKE :keyword"
             + "        OR LOWER(COALESCE(s.entry_no,'')) LIKE :keyword)"
+            // ★접수경로(프론트 I-2). 경로는 **매출** 에 있고 이 쿼리는 발송 건을 센다 —
+            //   등록번호로 매출을 되짚는다. 'MANUAL' 은 **값이 비어 있는 옛 주문까지** 포함한다
+            //   (특약점 연동이 2026-11 에 열렸으므로 그 전 주문은 전부 수기다).
+            + "   AND (:channel IS NULL"
+            + "        OR (:channel = 'MANUAL' AND NOT EXISTS ("
+            + "              SELECT 1 FROM sales sx WHERE sx.entry_no = s.entry_no"
+            + "                AND sx.channel = 'ONLINE'))"
+            + "        OR (:channel <> 'MANUAL' AND EXISTS ("
+            + "              SELECT 1 FROM sales sx WHERE sx.entry_no = s.entry_no"
+            + "                AND sx.channel = :channel)))"
             + " GROUP BY okey"
             + " HAVING (CAST(:stateRank AS SIGNED) IS NULL"
             + "         OR MIN(" + ORDER_STATE_RANK + ") = :stateRank)"
@@ -294,6 +304,16 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             + "   AND (:keyword IS NULL OR LOWER(p.name) LIKE :keyword"
             + "        OR LOWER(COALESCE(s.school_name,'')) LIKE :keyword"
             + "        OR LOWER(COALESCE(s.entry_no,'')) LIKE :keyword)"
+            // ★접수경로(프론트 I-2). 경로는 **매출** 에 있고 이 쿼리는 발송 건을 센다 —
+            //   등록번호로 매출을 되짚는다. 'MANUAL' 은 **값이 비어 있는 옛 주문까지** 포함한다
+            //   (특약점 연동이 2026-11 에 열렸으므로 그 전 주문은 전부 수기다).
+            + "   AND (:channel IS NULL"
+            + "        OR (:channel = 'MANUAL' AND NOT EXISTS ("
+            + "              SELECT 1 FROM sales sx WHERE sx.entry_no = s.entry_no"
+            + "                AND sx.channel = 'ONLINE'))"
+            + "        OR (:channel <> 'MANUAL' AND EXISTS ("
+            + "              SELECT 1 FROM sales sx WHERE sx.entry_no = s.entry_no"
+            + "                AND sx.channel = :channel)))"
             + " GROUP BY okey"
             + " HAVING (CAST(:stateRank AS SIGNED) IS NULL"
             + "         OR MIN(" + ORDER_STATE_RANK + ") = :stateRank)) g",
@@ -305,6 +325,7 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             @Param("partnerCode") String partnerCode,
             @Param("keyword") String keyword,
             @Param("stateRank") Integer stateRank,
+            @Param("channel") String channel,
             org.springframework.data.domain.Pageable pageable);
 
     /** 주문 키들에 묶인 발송 건 전부(삭제분 포함). {@link #findOrderKeyPage} 와 짝이다. */

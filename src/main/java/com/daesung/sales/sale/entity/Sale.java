@@ -303,6 +303,19 @@ public class Sale extends com.daesung.sales.common.entity.SoftDeletableEntity {
     /** 매출 업로드 세부(학교·회차) 설정. */
     /** 포장구분 지정(물류 작업현황 집계용). */
     /** 출고 창고 지정(매출등록·위탁정산에서 호출). */
+    /**
+     * 접수경로(ONLINE/MANUAL) — 프론트 I-2. 비면 수기로 본다({@link OrderChannel#orDefault}).
+     * 근거: 10/27 §2-1 "수기 주문과 온라인(특약점) 주문을 <b>함께</b> 보여주고".
+     */
+    @Enumerated(jakarta.persistence.EnumType.STRING)
+    @Column(name = "channel", length = 10)
+    private OrderChannel channel;
+
+    /** 접수경로를 지정한다. 특약점 접수는 ONLINE, 매출등록은 보낸 값(없으면 비움=수기). */
+    public void applyChannel(OrderChannel channel) {
+        this.channel = channel;
+    }
+
     public void applyWarehouse(Warehouse warehouse) {
         this.warehouse = warehouse;
     }

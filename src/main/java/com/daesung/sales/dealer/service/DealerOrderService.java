@@ -79,9 +79,12 @@ public class DealerOrderService {
 
         // onlySales·발송구분·담당자정보는 비워 둔다 — §2-10 "특약점 사이트에서는 고르지 않는다".
         // 발송구분은 등록 쪽이 "아무것도 없으면 화물"로 정한다(기존 decideDeliveryTypeIfBlank).
+        // ★접수경로는 **서버가 ONLINE 으로 박는다**(프론트 I-2) — 요청으로 바꿀 수 없다.
+        //   사이트에서 온 주문을 수기로 위장할 수 있으면 §2-1 의 "함께 보여주고"가 무의미해진다.
         SalesEntryRequest entry = new SalesEntryRequest(
                 date, partner.getId(), warehouse.getId(),
-                null, null, null, null, items);
+                null, null, null, null,
+                com.daesung.sales.sale.entity.OrderChannel.ONLINE, items);
         SalesEntryResponse res = saleService.createEntries(entry);
 
         markReceived(res.entryNo());

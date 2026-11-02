@@ -42,6 +42,7 @@ public class SalesOrderQueryService {
 
     private final ShipmentRepository shipmentRepository;
     private final WorkService workService;
+    private final com.daesung.sales.sale.repository.SaleRepository saleRepository;
 
     /**
      * 주문 목록. 페이징 단위는 <b>주문</b>이다 — 한 주문이 발송 여럿으로 갈려도 한 줄이다(§3-6).
@@ -51,13 +52,15 @@ public class SalesOrderQueryService {
     @Transactional(readOnly = true)
     public Page<SalesOrderRow> orders(LocalDate from, LocalDate to, Long partnerId,
                                       String partnerCode, String keyword, OrderState state,
+                                      com.daesung.sales.sale.entity.OrderChannel channel,
                                       Pageable pageable) {
         String kw = (keyword == null || keyword.isBlank())
                 ? null : "%" + keyword.trim().toLowerCase(Locale.ROOT) + "%";
         Integer stateRank = (state == null) ? null : OrderProgress.rankOf(state);
 
         Page<String> keys = shipmentRepository.findOrderKeyPage(
-                from, to, partnerId, blankToNull(partnerCode), kw, stateRank, pageable);
+                from, to, partnerId, blankToNull(partnerCode), kw, stateRank,
+                (channel == null) ? null : channel.name(), pageable);
         if (keys.getContent().isEmpty()) {
             return new PageImpl<>(List.of(), pageable, keys.getTotalElements());
         }
@@ -89,10 +92,25 @@ public class SalesOrderQueryService {
             }
         }
 
+        // 접수경로(I-2) — 등록번호로 이어 붙인다. `#발송id` 키는 등록번호가 없던 옛 주문이라
+        // 조회 대상이 아니고, 값이 없으면 **수기**로 해석한다(특약점 연동은 2026-11 에 열렸다).
+        List<String> entryNos = new ArrayList<>();
+        for (String k : grouped.keySet()) {
+            if (!k.startsWith("#")) {
+                entryNos.add(k);
+            }
+        }
+        Map<String, com.daesung.sales.sale.entity.OrderChannel> channels = new LinkedHashMap<>();
+        if (!entryNos.isEmpty()) {
+            for (Object[] r : saleRepository.channelsByEntryNo(entryNos)) {
+                channels.put((String) r[0], (com.daesung.sales.sale.entity.OrderChannel) r[1]);
+            }
+        }
+
         List<SalesOrderRow> rows = new ArrayList<>();
         for (Map.Entry<String, List<WorkOrderResponse>> e : grouped.entrySet()) {
             if (!e.getValue().isEmpty()) {
-                rows.add(merge(e.getKey(), e.getValue(), byId));
+                rows.add(merge(e.getKey(), e.getValue(), byId, channels.get(e.getKey())));
             }
         }
         return new PageImpl<>(rows, pageable, keys.getTotalElements());
@@ -111,7 +129,8 @@ public class SalesOrderQueryService {
      * </ul>
      */
     private SalesOrderRow merge(String key, List<WorkOrderResponse> parts,
-                                Map<Long, Shipment> byId) {
+                                Map<Long, Shipment> byId,
+                                com.daesung.sales.sale.entity.OrderChannel channel) {
         WorkOrderResponse head = parts.get(0);
         List<Shipment> entities = new ArrayList<>();
         List<Long> shipmentIds = new ArrayList<>();
@@ -158,10 +177,13 @@ public class SalesOrderQueryService {
         }
 
         OrderState state = OrderProgress.groupState(entities);
+        var ch = com.daesung.sales.sale.entity.OrderChannel.orDefault(channel);
         return new SalesOrderRow(key, tradeSeq, date,
                 head.partnerCode(), head.partnerName(),
                 schoolCode, schoolName, tradeClass,
-                state.name(), state.label(), allDeleted,
+                state.name(), state.label(),
+                ch.name(), ch.label(),
+                allDeleted,
                 deliveryType, (deliveryType == null) ? null : deliveryType.label(),
                 qty, amount, shipmentIds, new ArrayList<>(reqCds), lines);
     }

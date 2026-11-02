@@ -81,11 +81,15 @@ public class SalesOrderController {
             @Parameter(description = "키워드 — 거래처명·학교명·주문번호를 함께 훑는다")
             @RequestParam(required = false) String keyword,
             @Parameter(description = "진행상태(미지정=전체)") @RequestParam(required = false) OrderState state,
+            @Parameter(description = """
+                    접수경로(미지정=전체) — `ONLINE`(특약점 사이트) / `MANUAL`(수기).
+                    ‼️`MANUAL` 은 **값이 비어 있는 옛 주문까지** 포함한다(그 전 주문은 전부 수기).""")
+            @RequestParam(required = false) com.daesung.sales.sale.entity.OrderChannel channel,
             @Parameter(description = "페이지(0부터)") @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "페이지 크기(최대 500)") @RequestParam(defaultValue = "100") int size) {
         return ApiResponse.success(PageResponse.of(
                 salesOrderQueryService.orders(from(fromDate), to(toDate), partnerId, partnerCode,
-                        keyword, state, PageRequest.of(Math.max(0, page),
+                        keyword, state, channel, PageRequest.of(Math.max(0, page),
                                 Math.min(Math.max(1, size), 500)))));
     }
 
@@ -99,7 +103,8 @@ public class SalesOrderController {
             @RequestParam(required = false) Long partnerId,
             @RequestParam(required = false) String partnerCode,
             @RequestParam(required = false) String keyword,
-            @RequestParam(required = false) OrderState state) {
+            @RequestParam(required = false) OrderState state,
+            @RequestParam(required = false) com.daesung.sales.sale.entity.OrderChannel channel) {
         List<Col> cols = List.of(
                 new Col("주문번호", "orderNo"), new Col("거래순번", "tradeSeq"),
                 new Col("주문일자", "orderDate"),
@@ -107,12 +112,13 @@ public class SalesOrderController {
                 new Col("학교/학원코드", "schoolCode"), new Col("학교/학원명", "schoolName"),
                 new Col("분류", "tradeClass"),
                 new Col("진행상태", "progressStateName"),
+                new Col("접수경로", "channelName"),
                 new Col("발송구분", "deliveryTypeName"),
                 new Col("총수량", "totalQty"), new Col("총금액", "totalAmount"));
         // ★엑셀은 한 번에 다 필요하다 — 상한(500)까지 받는다. 그 위는 기간을 좁혀야 한다
         //   (전량을 열면 배포 서버 힙이 터진다 — 작업요청서에서 실제로 겪었다).
         var rows = salesOrderQueryService.orders(from(fromDate), to(toDate), partnerId, partnerCode,
-                keyword, state, PageRequest.of(0, 500)).getContent();
+                keyword, state, channel, PageRequest.of(0, 500)).getContent();
         return excel.asDownload(excel.toXlsx("주문조회", cols, rows), "주문조회.xlsx");
     }
 

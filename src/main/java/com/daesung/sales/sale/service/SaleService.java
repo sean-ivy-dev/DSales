@@ -172,6 +172,8 @@ public class SaleService {
             }
             sale.applyDiscount(r.discountAmount());   // 적용된 할인액을 남긴다(매핑은 나중에 바뀐다)
             sale.applyWarehouse(warehouse);   // 출고 창고(7p 재고위치 · 27p 출고창고)
+            // 접수경로(I-2). 안 보내면 null 로 둔다 — 조회에서 '수기'로 해석한다.
+            sale.applyChannel(req.channel());
             sale.applyUploadDetail(item.schoolCode(), item.schoolName(), item.round());   // 학교·회차(12p)
             sale.applyPackType(item.packType());   // 포장구분(회차별 작업현황 집계축)
             sale.applyEntry(entryNo, ++entrySeq);  // 등록 묶음·순번(B-4)
@@ -352,6 +354,13 @@ public class SaleService {
                     item.unitPrice(), item.supplyRate(), item.qty(),
                     supplyAmount, tax, totalAmount, null, item.memo());
             sale.applyDiscount(discount);
+            // ★반품도 **창고를 남긴다**. 물건이 그 물류창고로 실제로 돌아왔고(아래에서 재고 +복구),
+            //   정본 §3 표가 출고/반품 조회를 "실제로 재고가 **움직인** 출고·반품"으로 정의한다.
+            //   ‼️안 남기면 `shippedOnly=true`(창고 필수)가 **반품을 전부 걸러낸다** —
+            //     '출고/반품 조회'라는 화면에 반품이 한 줄도 안 나오고, §3-2(반품 음수 표시)도
+            //     이야기할 대상이 없어진다. 이관분 반품은 창고가 채워져 있어 드러나지 않았고,
+            //     새로 등록한 반품만 조용히 빠졌다(2026-11-02 실측).
+            sale.applyWarehouse(warehouse);
             if (item.sourceOutNo() != null && !item.sourceOutNo().isBlank()) {
                 sale.linkSourceOut(item.sourceOutNo());
             }
@@ -943,7 +952,8 @@ public class SaleService {
                                                 String keyword,
                                                 Integer tradeSeq,
                                                 boolean shippedOnly,
-                                                boolean includeCanceled) {
+                                                boolean includeCanceled,
+                                                boolean couponCount) {
         CategoryFilter cf = resolveCategories(salesCategories, tradeClasses);
         if (!cf.possible()) {
             return List.of();   // 입고·폐기만 골랐다 — 매출 원장에 없다
@@ -972,7 +982,8 @@ public class SaleService {
                         MultiSelect.orPlaceholder(normalizePairs(partnerSchools), "\u0000"),
                         MultiSelect.isAny(salesChannels), hasUnclassifiedChannel(salesChannels),
                         MultiSelect.orPlaceholder(namedChannels(salesChannels), "\u0000"),
-                        kw, tradeSeq, shippedOnly, lectureDivisionCodes(), includeCanceled)
+                        kw, tradeSeq, shippedOnly, lectureDivisionCodes(), includeCanceled,
+                        couponCount)
                 : saleRepository.groupTotalsByPartner(from, to,
                         MultiSelect.isAny(categories),
                         MultiSelect.orPlaceholder(categories, SalesCategory.SALE),
@@ -987,14 +998,55 @@ public class SaleService {
                         MultiSelect.orPlaceholder(normalizePairs(partnerSchools), "\u0000"),
                         MultiSelect.isAny(salesChannels), hasUnclassifiedChannel(salesChannels),
                         MultiSelect.orPlaceholder(namedChannels(salesChannels), "\u0000"),
-                        kw, tradeSeq, shippedOnly, lectureDivisionCodes(), includeCanceled);
+                        kw, tradeSeq, shippedOnly, lectureDivisionCodes(), includeCanceled,
+                        couponCount);
 
-        List<GroupTotalResponse> out = new ArrayList<>(rows.size());
+        // 키 순서를 쿼리가 정한 그대로 유지한다 — 여기서 다시 정렬하면 화면 소계 순서가 바뀐다.
+        Map<String, long[]> merged = new LinkedHashMap<>();
+        Map<String, String> names = new LinkedHashMap<>();
         for (Object[] r : rows) {
-            out.add(new GroupTotalResponse(
-                    String.valueOf(r[0]), String.valueOf(r[1]),
-                    ((Number) r[2]).longValue(), ((Number) r[3]).longValue(),
-                    ((Number) r[4]).longValue(), ((Number) r[5]).longValue()));
+            String key = String.valueOf(r[0]);
+            names.putIfAbsent(key, String.valueOf(r[1]));
+            merged.computeIfAbsent(key, k -> new long[4]);
+            long[] v = merged.get(key);
+            v[0] += ((Number) r[2]).longValue();
+            v[1] += ((Number) r[3]).longValue();
+            v[2] += ((Number) r[4]).longValue();
+            v[3] += ((Number) r[5]).longValue();
+        }
+
+        // ★출고/반품 조회일 때는 **위탁 미결도 더한다** — 목록이 그 줄을 함께 보여주기 때문이다
+        //   (§4-3·§4-4). 안 더하면 위탁 줄만 있는 거래처가 합계에서 통째로 빠진다
+        //   (프론트 실측 2026-11-02 I-4: 리브커넥스 70부·마이맥북스 10부가 0으로 나왔다).
+        //   ‼️금액은 더하지 않는다 — 위탁출고는 매출이 아직 서지 않았다(미결).
+        if (shippedOnly) {
+            List<Object[]> cons = byDate
+                    ? saleRepository.consignGroupTotalsByDate(from, to,
+                            MultiSelect.isAny(partnerIds), MultiSelect.orPlaceholder(partnerIds, 0L),
+                            MultiSelect.isAny(schoolCodes),
+                            MultiSelect.orPlaceholder(schoolCodes, "\u0000"),
+                            MultiSelect.isAny(productIds), MultiSelect.orPlaceholder(productIds, 0L),
+                            MultiSelect.isAny(divisionCodes),
+                            MultiSelect.orPlaceholder(divisionCodes, "\u0000"), kw)
+                    : saleRepository.consignGroupTotalsByPartner(from, to,
+                            MultiSelect.isAny(partnerIds), MultiSelect.orPlaceholder(partnerIds, 0L),
+                            MultiSelect.isAny(schoolCodes),
+                            MultiSelect.orPlaceholder(schoolCodes, "\u0000"),
+                            MultiSelect.isAny(productIds), MultiSelect.orPlaceholder(productIds, 0L),
+                            MultiSelect.isAny(divisionCodes),
+                            MultiSelect.orPlaceholder(divisionCodes, "\u0000"), kw);
+            for (Object[] r : cons) {
+                String key = String.valueOf(r[0]);
+                names.putIfAbsent(key, String.valueOf(r[1]));
+                merged.computeIfAbsent(key, k -> new long[4])[0] += ((Number) r[2]).longValue();
+            }
+        }
+
+        List<GroupTotalResponse> out = new ArrayList<>(merged.size());
+        for (Map.Entry<String, long[]> e : merged.entrySet()) {
+            long[] v = e.getValue();
+            out.add(new GroupTotalResponse(e.getKey(), names.get(e.getKey()),
+                    v[0], v[1], v[2], v[3]));
         }
         return out;
     }
