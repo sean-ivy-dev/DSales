@@ -22,6 +22,9 @@ public interface CollectionRepository extends JpaRepository<Collection, Long> {
             + "and (:to is null or (case when :basis = 'WRITE' then c.writeDate else c.collDate end) <= :to) "
             + "and (:partnerId is null or c.partner.id = :partnerId) "
             + "and (:collKind is null or c.collKind = :collKind) "
+            // 수금순번(프론트 B-7② — "거래처 · 수금일자 · 순번"으로 조회).
+            // 거래처·기간은 위 조건이 이미 받으므로 여기서는 순번만 더한다.
+            + "and (:collSeq is null or c.collSeq = :collSeq) "
             + "and (:collType is null or c.collType = :collType) "
             // ★여긴 DB 페이징이라 키워드를 쿼리에 넣는다. 메모리에서 거르면 한 페이지(20건)만
             //   걸러져 "2페이지엔 있는데 1페이지에선 안 보인다"가 된다.
@@ -36,6 +39,7 @@ public interface CollectionRepository extends JpaRepository<Collection, Long> {
                             @Param("collType") CollectionType collType,
                             @Param("basis") String basis,
                             @Param("keyword") String keyword,
+                            @Param("collSeq") Integer collSeq,
                             Pageable pageable);
 
     /**

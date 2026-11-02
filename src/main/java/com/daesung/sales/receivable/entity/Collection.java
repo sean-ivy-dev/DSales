@@ -57,8 +57,26 @@ public class Collection extends SoftDeletableEntity {
         this.voucherNo = voucherNo;
     }
 
+    /** 수금순번(거래처×수금일자). 등록할 때 한 번 정한다. */
+    public void applyCollSeq(int collSeq) {
+        this.collSeq = collSeq;
+    }
+
     @Column(name = "coll_date", nullable = false)
     private LocalDate collDate;
+
+    /**
+     * 수금순번 — 그 <b>거래처</b>의 그 <b>수금일자</b> 안에서 몇 번째인가(1부터).
+     * 레거시 {@code amtData.collSeq} 그대로다.
+     *
+     * <p>★{@link #voucherNo} 와 <b>다른 축</b>이다. 전표코드는 "한 번에 올린 묶음"이고
+     * (거래처가 섞일 수 있다), 이쪽은 "그 거래처의 몇 번째 수금인가"다. 담당자는 등록 창의
+     * 드롭다운에서 이 번호를 골라 그 수금을 불러온다(레거시 {@code 수금등록.vb} RefeshSeq).
+     *
+     * <p>이관분은 {@code null} 이다 — 소급해 채우면 없던 순서를 만드는 것이다.
+     */
+    @Column(name = "coll_seq")
+    private Integer collSeq;
 
     /**
      * 기장일자(회계 기표일). 근거: 레거시 AmtData.writeDate — 수금등록 그리드에서 수금일자와

@@ -76,9 +76,16 @@ public class ReceivableService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
                         "거래처가 없습니다. id=" + req.partnerId()));
         String collNo = "C-" + req.collDate().format(YYYYMMDD) + "-" + sequenceService.next(SequenceService.SEQ_COLLECTION);
-        return collectionRepository.save(Collection.create(
+        Collection c = Collection.create(
                 collNo, req.collDate(), req.writeDate(), partner, req.collKind(), req.collType(), req.collAmt(),
-                req.promissoryNo(), req.promissoryDue(), req.bankName(), req.branchName(), req.memo()));
+                req.promissoryNo(), req.promissoryDue(), req.bankName(), req.branchName(), req.memo());
+        // ★**모든 수금**에 거래처×수금일자 순번을 붙인다(프론트 B-7①).
+        //   예전엔 묶음 등록분에만 전표코드가 있어, 한 건씩 등록한 수금은 번호가 비어 있었다 —
+        //   담당자가 드롭다운에서 고를 수 없으니 그 수금은 불러와 고칠 길이 없었다.
+        //   단건·묶음이 **같은 이 경로**를 타므로 여기 한 곳에서 매긴다.
+        c.applyCollSeq((int) sequenceService.nextInScope(SequenceService.SEQ_COLLECTION_SEQ,
+                partner.getId() + ":" + req.collDate()));
+        return collectionRepository.save(c);
     }
 
     /**
@@ -139,12 +146,13 @@ public class ReceivableService {
     public PageResponse<CollectionResponse> searchCollections(LocalDate from, LocalDate to,
                                                               Long partnerId, String collKind,
                                                               CollectionType collType, String keyword,
+                                                              Integer collSeq,
                                                               String dateBasis, Pageable pageable) {
         String kind = (collKind == null || collKind.isBlank()) ? null : collKind.trim();
         String kw = com.daesung.sales.common.query.Keywords.norm(keyword);
         return PageResponse.of(collectionRepository
                 .search(from, to, partnerId, kind, collType, normalizeBasis(dateBasis),
-                        (kw == null) ? null : "%" + kw + "%", pageable)
+                        (kw == null) ? null : "%" + kw + "%", collSeq, pageable)
                 .map(CollectionResponse::from));
     }
 

@@ -19,6 +19,14 @@ public record CollectionResponse(
                 한 번 들어온 돈을 여러 줄로 쪼개 적을 때 그 줄들이 공유한다.
                 ‼️한 건씩 등록한 수금은 null 이다(묶음이 없다).""")
         String voucherNo,
+
+        @io.swagger.v3.oas.annotations.media.Schema(description = """
+                수금순번 — 그 **거래처**의 그 **수금일자** 안에서 몇 번째인가(1부터).
+                등록 창의 순번 드롭다운이 이 값이고, `partnerId`+`collDate`+`collSeq` 로
+                그 수금을 불러온다(레거시 `amtData.collSeq`).
+                ‼️`voucherNo`(한 번에 올린 **묶음**)와 다른 축이다.
+                이관분은 null 이다 — 소급해 채우지 않았다.""")
+        Integer collSeq,
         @Schema(description = "수금일자") LocalDate collDate,
         @Schema(description = "기장일자(회계 기표일)") LocalDate writeDate,
         @Schema(description = "거래처 id") Long partnerId,
@@ -35,7 +43,8 @@ public record CollectionResponse(
 ) {
     public static CollectionResponse from(Collection c) {
         return new CollectionResponse(
-                c.getId(), c.getCollectionNo(), c.getVoucherNo(), c.getCollDate(), c.getWriteDate(),
+                c.getId(), c.getCollectionNo(), c.getVoucherNo(), c.getCollSeq(),
+                c.getCollDate(), c.getWriteDate(),
                 c.getPartner().getId(), c.getPartner().getName(),
                 c.getCollKind(), c.getCollType(), c.getCollType().label(), c.getCollAmt(),
                 c.getPromissoryNo(), c.getPromissoryDue(), c.getBankName(), c.getBranchName(), c.getMemo());

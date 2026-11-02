@@ -39,6 +39,18 @@ public class SequenceService {
     /** 수금 <b>전표코드</b>(V-). 한 번에 등록한 수금 묶음을 가리킨다(수금번호 C- 와 별개). */
     public static final String SEQ_COLLECTION_VOUCHER = "seq_collection_voucher_no";
 
+    /**
+     * 수금순번 — <b>거래처 × 수금일자</b> 범위에서 1부터(10/27 명세 §6-1, 프론트 B-7).
+     * 레거시 {@code amtData.collSeq} 다. 스코프가 날짜만이 아니라 <b>거래처까지</b>인 것이 핵심 —
+     * 담당자는 "그 거래처의 몇 번째 수금"으로 찾는다.
+     *
+     * <p>‼️레거시는 {@code max+1} 이라 지운 번호가 재사용됐지만, 우리는 {@link #nextInScope}
+     * 로 단조증가시킨다. 지운 자리에 번호가 비는 것이 맞다 — 같은 번호가 서로 다른 수금을
+     * 가리키면 이력을 못 따라간다. 화면 드롭다운은 실제 저장된 값을 나열하므로 빈 번호는 문제없다.
+     */
+    public static final String SEQ_COLLECTION_SEQ = "seq_collection_seq";
+
+
     /** 세트 조립·해체 전표(BW-). 이고와 같은 이유. */
     public static final String SEQ_BOMWORK = "seq_bomwork_no";
 
