@@ -436,8 +436,17 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
      */
     // ‼️창고는 **left join** 이어야 한다. `s.warehouse.id` 라고만 쓰면 JPQL이 inner join을 만들어
     //   창고가 없는 과거 매출(업로드분 등)이 조건과 무관하게 통째로 사라진다.
-    @Query("select s from Sale s left join s.warehouse w "
-            + "where (:from is null or s.salesDate >= :from) "
+    /**
+     * 통합 매출 조회의 <b>WHERE 절</b>. {@link #search} 와 {@link #groupTotalsByPartner}·
+     * {@link #groupTotalsByDate} 가 <b>같은 문자열을 공유</b>한다.
+     *
+     * <p>★이렇게 뺀 이유 — 프론트 B-3 이 "조건은 {@code /sales} 와 같음"을 요구한다.
+     * 복사해 두면 한쪽만 고쳐져 <b>목록과 소계가 다른 집합을 세게</b> 된다. 이 프로젝트는
+     * 이미 그런 어긋남을 겪었다(물류 작업비가 출고/반품 조회와 다른 조건을 쓰던 일).
+     * 상수 하나를 이어 붙이면 갈릴 수가 없다.
+     */
+    String SALES_SEARCH_WHERE =
+            "where (:from is null or s.salesDate >= :from) "
             + "and (:to is null or s.salesDate <= :to) "
             + "and (:anyCategory = true or s.salesCategory in :salesCategories) "
             + "and (:anyShipmentType = true or s.shipmentType in :shipmentTypes) "
@@ -495,7 +504,9 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
             + "      coalesce(s.onlySales, false) = false "
             + "      and w.id is not null "
             + "      and coalesce(s.product.salesDivision, '') not in :lectureDivisions)) "
-            + "and (:includeCanceled = true or s.canceled = false)")
+            + "and (:includeCanceled = true or s.canceled = false)";
+
+    @Query("select s from Sale s left join s.warehouse w " + SALES_SEARCH_WHERE)
     Page<Sale> search(@Param("from") LocalDate from,
                       @Param("to") LocalDate to,
                       @Param("anyCategory") boolean anyCategory,
@@ -523,6 +534,82 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
                       @Param("lectureDivisions") Collection<String> lectureDivisions,
                       @Param("includeCanceled") boolean includeCanceled,
                       Pageable pageable);
+
+    /**
+     * <b>묶음 합계 — 거래처별</b>(프론트 B-3). 소계 행을 붙이려고 쓴다.
+     *
+     * <p>★조건은 {@link #search} 와 <b>같은 문자열</b>을 쓴다({@link #SALES_SEARCH_WHERE}) —
+     * 목록과 소계가 다른 집합을 세면 화면에서 합이 안 맞는다.
+     *
+     * <p>지금은 화면이 전량을 받아 더하는데 1~10월 27,187건에 <b>약 4분</b>이 걸린다
+     * (프론트 실측). DB 가 세면 한 번이면 끝난다.
+     *
+     * <p>반환 {@code Object[]}: [키, 이름, 수량, 공급가액, 세액, 합계금액]
+     */
+    @Query("select s.partner.id, s.partner.name, "
+            + "coalesce(sum(s.qty),0), coalesce(sum(s.supplyAmount),0), "
+            + "coalesce(sum(s.tax),0), coalesce(sum(s.totalAmount),0) "
+            + "from Sale s left join s.warehouse w " + SALES_SEARCH_WHERE
+            + "group by s.partner.id, s.partner.name order by s.partner.name")
+    List<Object[]> groupTotalsByPartner(@Param("from") LocalDate from,
+                      @Param("to") LocalDate to,
+                      @Param("anyCategory") boolean anyCategory,
+                      @Param("salesCategories") Collection<SalesCategory> salesCategories,
+                      @Param("anyShipmentType") boolean anyShipmentType,
+                      @Param("shipmentTypes") Collection<ShipmentType> shipmentTypes,
+                      @Param("anyPartner") boolean anyPartner,
+                      @Param("partnerIds") Collection<Long> partnerIds,
+                      @Param("anyWarehouse") boolean anyWarehouse,
+                      @Param("warehouseIds") Collection<Long> warehouseIds,
+                      @Param("anySchool") boolean anySchool,
+                      @Param("schoolCodes") Collection<String> schoolCodes,
+                      @Param("anyDivision") boolean anyDivision,
+                      @Param("divisions") Collection<String> divisions,
+                      @Param("anyProduct") boolean anyProduct,
+                      @Param("productIds") Collection<Long> productIds,
+                      @Param("anyPair") boolean anyPair,
+                      @Param("pairs") Collection<String> pairs,
+                      @Param("anyChannel") boolean anyChannel,
+                      @Param("unclassified") boolean unclassified,
+                      @Param("channels") Collection<String> channels,
+                      @Param("keyword") String keyword,
+                      @Param("tradeSeq") Integer tradeSeq,
+                      @Param("shippedOnly") boolean shippedOnly,
+                      @Param("lectureDivisions") Collection<String> lectureDivisions,
+                      @Param("includeCanceled") boolean includeCanceled);
+
+    /** <b>묶음 합계 — 거래일자별</b>. 근거·구조는 {@link #groupTotalsByPartner} 와 같다. */
+    @Query("select s.salesDate, s.salesDate, "
+            + "coalesce(sum(s.qty),0), coalesce(sum(s.supplyAmount),0), "
+            + "coalesce(sum(s.tax),0), coalesce(sum(s.totalAmount),0) "
+            + "from Sale s left join s.warehouse w " + SALES_SEARCH_WHERE
+            + "group by s.salesDate order by s.salesDate")
+    List<Object[]> groupTotalsByDate(@Param("from") LocalDate from,
+                      @Param("to") LocalDate to,
+                      @Param("anyCategory") boolean anyCategory,
+                      @Param("salesCategories") Collection<SalesCategory> salesCategories,
+                      @Param("anyShipmentType") boolean anyShipmentType,
+                      @Param("shipmentTypes") Collection<ShipmentType> shipmentTypes,
+                      @Param("anyPartner") boolean anyPartner,
+                      @Param("partnerIds") Collection<Long> partnerIds,
+                      @Param("anyWarehouse") boolean anyWarehouse,
+                      @Param("warehouseIds") Collection<Long> warehouseIds,
+                      @Param("anySchool") boolean anySchool,
+                      @Param("schoolCodes") Collection<String> schoolCodes,
+                      @Param("anyDivision") boolean anyDivision,
+                      @Param("divisions") Collection<String> divisions,
+                      @Param("anyProduct") boolean anyProduct,
+                      @Param("productIds") Collection<Long> productIds,
+                      @Param("anyPair") boolean anyPair,
+                      @Param("pairs") Collection<String> pairs,
+                      @Param("anyChannel") boolean anyChannel,
+                      @Param("unclassified") boolean unclassified,
+                      @Param("channels") Collection<String> channels,
+                      @Param("keyword") String keyword,
+                      @Param("tradeSeq") Integer tradeSeq,
+                      @Param("shippedOnly") boolean shippedOnly,
+                      @Param("lectureDivisions") Collection<String> lectureDivisions,
+                      @Param("includeCanceled") boolean includeCanceled);
 
     /**
      * 순매출 집계(상품별). 취소 제외. 회계구분·출고유형으로 매출/증정/교사용/반품 버킷 분해.

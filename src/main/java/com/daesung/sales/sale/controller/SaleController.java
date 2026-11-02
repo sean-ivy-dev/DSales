@@ -15,6 +15,7 @@ import com.daesung.sales.sale.dto.RoundWorkStatusRow;
 import com.daesung.sales.sale.dto.AttendancePeriodResponse;
 import com.daesung.sales.sale.dto.AttendanceResponse;
 import com.daesung.sales.sale.dto.SaleResponse;
+import com.daesung.sales.sale.dto.GroupTotalResponse;
 import com.daesung.sales.sale.dto.SalesEntryRequest;
 import com.daesung.sales.sale.dto.SalesEntryResponse;
 import com.daesung.sales.sale.dto.SalesStatementResponse;
@@ -328,6 +329,46 @@ public class SaleController {
         byte[] xlsx = excel.toXlsx("통합매출조회", cols, page.getContent(),
                 Heading.period("통합 매출 조회", either(startDate, fromDate), either(endDate, toDate), extra));
         return excel.asDownload(xlsx, "통합매출조회.xlsx");
+    }
+
+    @Operation(summary = "묶음 합계(소계용)",
+            description = """
+                    통합 매출 조회의 **소계 행**을 붙이는 데 쓴다(프론트 B-3).
+                    **조건은 `GET /sales` 와 완전히 같다** — 서버가 같은 WHERE 절을 공유하므로
+                    목록과 소계가 다른 집합을 셀 수 없다.
+
+                    · `groupBy=PARTNER`(기본) — 거래처별. 키=거래처 id, 이름=거래처명
+                    · `groupBy=DATE` — 거래일자별. 키·이름 모두 날짜
+
+                    지금까지는 화면이 전량을 받아 더했다 — 1~10월 27,187건에 **약 4분**이 걸려
+                    1만 건이 넘으면 소계를 못 붙였다. DB 가 세면 한 번이면 끝난다.""")
+    @GetMapping("/group-totals")
+    public ApiResponse<List<GroupTotalResponse>> groupTotals(
+            @Parameter(description = "묶는 단위 — PARTNER(기본) 또는 DATE", example = "PARTNER")
+            @RequestParam(defaultValue = "PARTNER") String groupBy,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @RequestParam(required = false) List<SalesCategory> salesCategories,
+            @RequestParam(required = false) List<TradeClass> tradeClasses,
+            @RequestParam(required = false) List<ShipmentType> shipmentTypes,
+            @RequestParam(required = false) List<Long> partnerIds,
+            @RequestParam(required = false) List<Long> warehouseIds,
+            @RequestParam(required = false) List<String> schoolCodes,
+            @RequestParam(required = false) List<String> divisions,
+            @RequestParam(required = false) List<Long> productIds,
+            @RequestParam(required = false) List<String> partnerSchools,
+            @RequestParam(required = false) List<String> salesChannels,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Integer tradeSeq,
+            @Parameter(description = "출고/반품 조회 전용 — 매출만·창고없음·특강을 뺀다")
+            @RequestParam(defaultValue = "false") boolean shippedOnly,
+            @RequestParam(defaultValue = "false") boolean includeCanceled) {
+        return ApiResponse.success(saleService.groupTotals(groupBy, fromDate, toDate,
+                salesCategories, tradeClasses, shipmentTypes, partnerIds, warehouseIds,
+                schoolCodes, divisions, productIds, partnerSchools, salesChannels,
+                keyword, tradeSeq, shippedOnly, includeCanceled));
     }
 
     @Operation(summary = "수기 매출 등록(일반)",

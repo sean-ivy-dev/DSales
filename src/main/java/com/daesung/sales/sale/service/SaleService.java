@@ -22,6 +22,7 @@ import com.daesung.sales.sale.dto.ReturnableAgg;
 import com.daesung.sales.sale.dto.ReturnableResponse;
 import com.daesung.sales.sale.dto.SaleResponse;
 import com.daesung.sales.sale.dto.SaleUpdateRequest;
+import com.daesung.sales.sale.dto.GroupTotalResponse;
 import com.daesung.sales.sale.dto.SalesEntryRequest;
 import com.daesung.sales.sale.dto.SalesEntryResponse;
 import com.daesung.sales.sale.entity.Sale;
@@ -835,6 +836,84 @@ public class SaleService {
     }
 
     /**
+     * 묶음 합계(프론트 B-3) — 화면이 소계 행을 붙이는 데 쓴다.
+     *
+     * <p>★조건 해석은 {@link #search} 와 <b>한 글자도 다르지 않아야</b> 한다. 그래서
+     * 거래분류→회계구분 변환 같은 앞단 처리를 그대로 거치고, 리포지토리도 같은 WHERE 절
+     * 상수를 공유한다. 목록과 소계가 다른 집합을 세면 화면에서 합이 안 맞는다.
+     */
+    @Transactional(readOnly = true)
+    public List<GroupTotalResponse> groupTotals(String groupBy, LocalDate from, LocalDate to,
+                                                List<SalesCategory> salesCategories,
+                                                List<TradeClass> tradeClasses,
+                                                List<ShipmentType> shipmentTypes,
+                                                List<Long> partnerIds,
+                                                List<Long> warehouseIds,
+                                                List<String> schoolCodes,
+                                                List<String> divisionCodes,
+                                                List<Long> productIds,
+                                                List<String> partnerSchools,
+                                                List<String> salesChannels,
+                                                String keyword,
+                                                Integer tradeSeq,
+                                                boolean shippedOnly,
+                                                boolean includeCanceled) {
+        CategoryFilter cf = resolveCategories(salesCategories, tradeClasses);
+        if (!cf.possible()) {
+            return List.of();   // 입고·폐기만 골랐다 — 매출 원장에 없다
+        }
+        List<SalesCategory> categories = cf.categories();
+        String norm = com.daesung.sales.common.query.Keywords.norm(keyword);
+        String kw = (norm == null) ? null : "%" + norm + "%";
+        // ‼️대소문자 변환을 쓰지 않는다 — `equalsIgnoreCase` 도 `toUpperCase(Locale.ROOT)` 도
+        //   정적분석(FindSecBugs IMPROPER_UNICODE)이 잡는다. 제외하지 않는 것이 이 프로젝트 규율이라
+        //   **상수와 정확히 일치**로 간다(자재구분 '책자'에서 쓴 그 방식). 값은 둘뿐이고
+        //   Swagger 에 대문자로 적혀 있다.
+        boolean byDate = "DATE".equals(groupBy);
+
+        List<Object[]> rows = byDate
+                ? saleRepository.groupTotalsByDate(from, to,
+                        MultiSelect.isAny(categories),
+                        MultiSelect.orPlaceholder(categories, SalesCategory.SALE),
+                        MultiSelect.isAny(shipmentTypes),
+                        MultiSelect.orPlaceholder(shipmentTypes, ShipmentType.NORMAL_SHIP),
+                        MultiSelect.isAny(partnerIds), MultiSelect.orPlaceholder(partnerIds, 0L),
+                        MultiSelect.isAny(warehouseIds), MultiSelect.orPlaceholder(warehouseIds, 0L),
+                        MultiSelect.isAny(schoolCodes), MultiSelect.orPlaceholder(schoolCodes, "\u0000"),
+                        MultiSelect.isAny(divisionCodes), MultiSelect.orPlaceholder(divisionCodes, "\u0000"),
+                        MultiSelect.isAny(productIds), MultiSelect.orPlaceholder(productIds, 0L),
+                        MultiSelect.isAny(normalizePairs(partnerSchools)),
+                        MultiSelect.orPlaceholder(normalizePairs(partnerSchools), "\u0000"),
+                        MultiSelect.isAny(salesChannels), hasUnclassifiedChannel(salesChannels),
+                        MultiSelect.orPlaceholder(namedChannels(salesChannels), "\u0000"),
+                        kw, tradeSeq, shippedOnly, lectureDivisionCodes(), includeCanceled)
+                : saleRepository.groupTotalsByPartner(from, to,
+                        MultiSelect.isAny(categories),
+                        MultiSelect.orPlaceholder(categories, SalesCategory.SALE),
+                        MultiSelect.isAny(shipmentTypes),
+                        MultiSelect.orPlaceholder(shipmentTypes, ShipmentType.NORMAL_SHIP),
+                        MultiSelect.isAny(partnerIds), MultiSelect.orPlaceholder(partnerIds, 0L),
+                        MultiSelect.isAny(warehouseIds), MultiSelect.orPlaceholder(warehouseIds, 0L),
+                        MultiSelect.isAny(schoolCodes), MultiSelect.orPlaceholder(schoolCodes, "\u0000"),
+                        MultiSelect.isAny(divisionCodes), MultiSelect.orPlaceholder(divisionCodes, "\u0000"),
+                        MultiSelect.isAny(productIds), MultiSelect.orPlaceholder(productIds, 0L),
+                        MultiSelect.isAny(normalizePairs(partnerSchools)),
+                        MultiSelect.orPlaceholder(normalizePairs(partnerSchools), "\u0000"),
+                        MultiSelect.isAny(salesChannels), hasUnclassifiedChannel(salesChannels),
+                        MultiSelect.orPlaceholder(namedChannels(salesChannels), "\u0000"),
+                        kw, tradeSeq, shippedOnly, lectureDivisionCodes(), includeCanceled);
+
+        List<GroupTotalResponse> out = new ArrayList<>(rows.size());
+        for (Object[] r : rows) {
+            out.add(new GroupTotalResponse(
+                    String.valueOf(r[0]), String.valueOf(r[1]),
+                    ((Number) r[2]).longValue(), ((Number) r[3]).longValue(),
+                    ((Number) r[4]).longValue(), ((Number) r[5]).longValue()));
+        }
+        return out;
+    }
+
+    /**
      * 대분류가 <b>특강</b>인 세부구분 코드들. 출고/반품 조회에서 특강을 빼는 데 쓴다.
      *
      * <p>매출 행에는 세부구분(코드)만 있고 대분류는 마스터에 있어, 쿼리가 대분류를 바로 못 본다.
@@ -849,6 +928,51 @@ public class SaleService {
             }
         }
         return codes.isEmpty() ? List.of("\u0000") : codes;
+    }
+
+    /**
+     * 거래분류 축과 회계구분 축을 합쳐 <b>실제로 걸 회계구분</b>을 정한다.
+     *
+     * <p>둘을 같이 주면 <b>교집합</b>이다 — 다른 질문에 답하는 별개 축이라 둘 다 만족해야 한다.
+     * 입고·폐기는 매출 원장에 없으므로 떨어뜨린다.
+     *
+     * <p>★목록({@code search})과 묶음 합계({@code groupTotals})가 <b>같은 해석</b>을 쓰도록
+     * 빼냈다. 복사해 두면 한쪽만 고쳐져 소계가 목록과 다른 집합을 센다.
+     *
+     * <p>‼️<b>{@code null} 을 신호로 쓰지 않는다.</b> "거르지 않음"도 null 이라 한 번 섞었더니
+     * <b>조건 없이 조회하면 빈 결과</b>가 나왔다(이 리팩터링에서 실제로 그랬다).
+     * "있을 수 없음"은 {@code possible=false} 로만 말한다.
+     */
+    private record CategoryFilter(boolean possible, List<SalesCategory> categories) {
+        static final CategoryFilter IMPOSSIBLE = new CategoryFilter(false, List.of());
+
+        static CategoryFilter of(List<SalesCategory> c) {
+            return new CategoryFilter(true, c);
+        }
+    }
+
+    private static CategoryFilter resolveCategories(List<SalesCategory> salesCategories,
+                                                    List<TradeClass> tradeClasses) {
+        if (MultiSelect.isAny(tradeClasses)) {
+            return CategoryFilter.of(salesCategories);
+        }
+        List<SalesCategory> mapped = new ArrayList<>();
+        for (TradeClass tc : tradeClasses) {
+            SalesCategory m = tc.toSalesCategory();
+            if (m != null && !mapped.contains(m)) {
+                mapped.add(m);
+            }
+        }
+        if (mapped.isEmpty()) {
+            return CategoryFilter.IMPOSSIBLE;
+        }
+        if (!MultiSelect.isAny(salesCategories)) {
+            mapped.retainAll(salesCategories);
+            if (mapped.isEmpty()) {
+                return CategoryFilter.IMPOSSIBLE;
+            }
+        }
+        return CategoryFilter.of(mapped);
     }
 
     /** 판매채널 조건에 '미분류'가 섞여 있나. 레거시가 별도 분기로 처리하는 값이다(조회.vb:1205). */
@@ -931,26 +1055,11 @@ public class SaleService {
                                              boolean shippedOnly,
                                              boolean couponCount,
                                              boolean includeCanceled, Pageable pageable) {
-        List<SalesCategory> categories = salesCategories;
-        if (!MultiSelect.isAny(tradeClasses)) {
-            List<SalesCategory> mapped = new ArrayList<>();
-            for (TradeClass tc : tradeClasses) {
-                SalesCategory m = tc.toSalesCategory();
-                if (m != null && !mapped.contains(m)) {
-                    mapped.add(m);       // 입고·폐기(null)는 매출 원장에 없다 — 떨어뜨린다
-                }
-            }
-            if (mapped.isEmpty()) {
-                return PageResponse.of(Page.empty(pageable));   // 입고·폐기만 골랐다
-            }
-            if (!MultiSelect.isAny(categories)) {
-                mapped.retainAll(categories);                   // 두 축은 교집합
-                if (mapped.isEmpty()) {
-                    return PageResponse.of(Page.empty(pageable));
-                }
-            }
-            categories = mapped;
+        CategoryFilter cf = resolveCategories(salesCategories, tradeClasses);
+        if (!cf.possible()) {
+            return PageResponse.of(Page.empty(pageable));   // 입고·폐기만 골랐다 / 교집합이 빔
         }
+        List<SalesCategory> categories = cf.categories();
         // 세부구분 마스터는 몇 줄이라 한 번에 읽어 맵으로 쓴다 — 행마다 조회하면 목록 한 장에 수백 번이 된다.
         Map<String, SalesDivision> divisions = new HashMap<>();
         for (SalesDivision d : salesDivisionRepository.findAll()) {
