@@ -49,6 +49,7 @@ public class ShipmentService {
     private final StatusHistoryService statusHistoryService;
     private final CurrentAuditor currentAuditor;
     private final SequenceService sequenceService;
+    private final com.daesung.sales.sale.repository.SaleRepository saleRepository;
     /** DSRE 연동이 꺼져 있으면(daesung.dsre.enabled=false) 비어 있다 — 그땐 우리 발송일만 다룬다. */
     private final ObjectProvider<DsreGateway> dsreGateway;
 
@@ -550,6 +551,49 @@ public class ShipmentService {
         statusHistoryService.record(StatusEntityType.SHIPMENT, shipmentId,
                 "deleted", "false", "true", orNoReason(reason));
         return true;
+    }
+
+    /**
+     * 그 매출이 묶여 있던 발송 건에 <b>남은 줄이 하나도 없으면 발송 건도 걷어낸다</b>.
+     *
+     * <p>근거: 프론트 B-5 — 매출 줄을 모두 지워도 작업요청서가 <b>도서 0줄로 남아</b>
+     * 알림 배지에 잡혔다(빈 건 2개를 지우니 21→19). 물류가 쌀 것이 없는 지시를 받는다.
+     *
+     * <p>‼️<b>발송완료된 건은 건드리지 않는다.</b> 이미 물건이 나갔으면 그 기록은 남아야 한다 —
+     * 매출을 잘못 지웠다고 해서 나간 사실이 없어지지는 않는다. 그런 경우가 보이면
+     * 담당자가 작업요청서에서 직접 판단할 일이다.
+     *
+     * <p>지우는 방식은 {@link #delete} 와 같은 <b>논리삭제</b>다 — 목록에 취소선으로 남고
+     * 이력에도 적힌다. 행을 없애면 "취소된 건"과 "원래 없던 건"이 구분되지 않는다.
+     *
+     * @return 이번 호출로 발송 건을 걷어냈으면 true
+     */
+    @Transactional
+    public boolean deleteIfEmptied(Sale sale) {
+        String tradeClass = (sale.getTradeClass() != null) ? sale.getTradeClass()
+                : sale.getProduct().getSalesDivision();
+        String schoolCode = (sale.getSchoolCode() == null) ? "" : sale.getSchoolCode();
+        String entryNo = (sale.getEntryNo() == null) ? "" : sale.getEntryNo();
+
+        long alive = saleRepository.countLiveForShipment(sale.getSalesDate(),
+                sale.getPartner().getId(), schoolCode,
+                (tradeClass == null) ? "" : tradeClass, entryNo);
+        if (alive > 0) {
+            return false;   // 아직 쌀 것이 남았다
+        }
+
+        return shipmentRepository.findKey(sale.getSalesDate(), sale.getPartner().getId(),
+                        sale.getSchoolCode(), tradeClass, sale.getEntryNo())
+                .filter(sh -> sh.getDeletedAt() == null)
+                .filter(sh -> sh.getSentDate() == null)   // 발송완료는 그대로 둔다
+                .map(sh -> {
+                    sh.markDeleted(currentAuditor.username());
+                    statusHistoryService.record(StatusEntityType.SHIPMENT, sh.getId(),
+                            "deleted", "false", "true",
+                            "묶인 매출이 모두 없어져 자동 정리(" + sale.getSalesNo() + ")");
+                    return true;
+                })
+                .orElse(false);
     }
 
     /**

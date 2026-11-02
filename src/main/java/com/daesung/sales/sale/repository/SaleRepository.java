@@ -730,6 +730,32 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
     java.util.Optional<Sale> findLatestConsignSale(@Param("consignmentOutId") Long consignmentOutId);
 
     /**
+     * 그 발송 건에 <b>아직 살아 있는 매출 줄</b>이 몇인가 — 빈 작업요청서를 걷어내려고 센다.
+     *
+     * <p>근거: 프론트 B-5 — 매출 줄을 모두 지워도 묶여 있던 작업요청서가 <b>도서 0줄로 남고</b>
+     * 알림 배지에 그대로 잡힌다(빈 건 2개를 지우니 21→19). 물류는 쌀 것이 없는 지시를 본다.
+     *
+     * <p>키는 작업요청서 집계와 <b>같은 다섯 칸</b>이다(일자·거래처·학교·분류·주문).
+     * 분류는 매출 행의 거래분류가 없으면 상품 세부구분으로 떨어진다 — 집계 쿼리와 같은 규칙이라
+     * 여기만 다르면 "줄은 있는데 0으로 세는" 반대 사고가 난다.
+     *
+     * <p>삭제분은 {@code Sale} 의 {@code @SQLRestriction} 이 알아서 빼고, 취소분은 여기서 뺀다.
+     */
+    @Query("""
+            select count(s) from Sale s join s.product p
+             where s.canceled = false
+               and s.salesDate = :tradeDate and s.partner.id = :partnerId
+               and coalesce(s.schoolCode, '') = :schoolCode
+               and coalesce(s.tradeClass, p.salesDivision, '') = :tradeClass
+               and coalesce(s.entryNo, '') = :entryNo
+            """)
+    long countLiveForShipment(@Param("tradeDate") LocalDate tradeDate,
+                              @Param("partnerId") Long partnerId,
+                              @Param("schoolCode") String schoolCode,
+                              @Param("tradeClass") String tradeClass,
+                              @Param("entryNo") String entryNo);
+
+    /**
      * 외상매출장 명세: 특정 거래처의 기간 내 매출 라인(취소 제외, 일자순).
      *
      * <p>‼️{@code join fetch s.product} — 도서명이 행마다 필요한데

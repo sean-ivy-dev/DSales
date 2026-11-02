@@ -3,6 +3,7 @@ package com.daesung.sales.logistics;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -63,8 +64,11 @@ class ShipmentDsreSyncTest {
     void setUp() {
         when(provider.getIfAvailable()).thenReturn(gw);
         when(currentAuditor.username()).thenReturn("logi01");
+        // SaleRepository 는 '빈 작업요청서 정리'(B-5)에만 쓰여 이 테스트 경로와 무관하다 —
+        // 목만 넘긴다.
         service = new ShipmentService(shipmentRepository, statusHistoryService, currentAuditor,
-                sequenceService, provider);
+                sequenceService, mock(com.daesung.sales.sale.repository.SaleRepository.class),
+                provider);
     }
 
     private Shipment shipment(long id, LocalDate sent) {

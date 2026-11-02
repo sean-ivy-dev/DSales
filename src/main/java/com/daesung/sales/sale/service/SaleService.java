@@ -642,6 +642,11 @@ public class SaleService {
         saleRepository.flush();
         SaleResponse response = SaleResponse.from(sale, divisionOf(sale));
         inventoryService.reverseShipments(sale.getSalesNo(), LocalDate.now());
+
+        // ★삭제와 같은 이유로 여기서도 본다(프론트 B-5는 삭제만 말했지만 원인이 같다).
+        //   작업요청서 지시 목록은 **취소분도 빼고** 세므로, 한 주문이 통째로 취소되면
+        //   똑같이 0줄짜리 지시가 남아 물류가 쌀 것 없는 건을 본다.
+        shipmentService.deleteIfEmptied(sale);
         return response;
     }
 
@@ -668,8 +673,10 @@ public class SaleService {
      *       미결원장이 정상 복원된다({@link #cancel}).</li>
      * </ul>
      *
-     * <p>발송 건(작업요청서)은 건드리지 않는다 — 지시 목록은 매출에서 파생되므로
-     * 삭제된 매출은 자동으로 빠진다. 품목이 하나도 안 남은 발송 건이 0수량으로 보일 수 있다.
+     * <p>★<b>남은 줄이 없으면 작업요청서도 함께 걷어낸다</b>(프론트 B-5).
+     * 지시 목록은 매출에서 파생되니 줄은 알아서 빠지지만 <b>발송 건 자체는 남아</b>,
+     * 도서 0줄짜리 지시가 알림 배지에 그대로 잡혔다. 발송완료된 건은 건드리지 않는다 —
+     * 이미 나간 사실은 매출을 지운다고 없어지지 않는다({@code ShipmentService.deleteIfEmptied}).
      */
     @Transactional
     public void delete(Long id, String reason) {
@@ -694,6 +701,11 @@ public class SaleService {
         saleRepository.flush();
 
         inventoryService.softDeleteByRefNo(sale.getSalesNo(), currentAuditor.username());
+
+        // ★묶여 있던 작업요청서에 남은 줄이 없으면 그 발송 건도 걷어낸다(프론트 B-5).
+        //   예전엔 "지시 목록은 매출에서 파생되니 자동으로 빠진다"고 두었는데,
+        //   **발송 건 자체는 남아** 도서 0줄짜리 지시가 알림 배지에 잡혔다(21→19).
+        shipmentService.deleteIfEmptied(sale);
     }
 
     /** 판매채널 조건에 '미분류'가 섞여 있나. 레거시가 별도 분기로 처리하는 값이다(조회.vb:1205). */
