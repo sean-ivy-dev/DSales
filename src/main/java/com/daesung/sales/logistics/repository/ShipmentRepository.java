@@ -37,6 +37,24 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
     /**
      * 발송 건에 묶인 신청번호들 — {@link #findByReqCd}의 역방향(작업요청서 {@code reqCds} 와 같은 기준).
      * 취소된 매출은 뺀다.
+     *
+     * <p>★<b>연결은 직접 외래키가 아니라 4칸 복합키다</b>(거래일자·거래처·학교코드·거래분류).
+     * {@code shipment} 에는 {@code req_cd} 컬럼이 없고, {@code sales.req_cd} 를 경유한다.
+     * 그래서 결과가 <b>단건이 아니라 목록</b>이다 — 같은 날 같은 거래처·학교·분류로 두 신청이
+     * 들어오면 둘 다 붙는다.
+     *
+     * <p>‼️<b>{@code sales.req_cd} 는 DSRE 신청을 거친 매출만 갖는다.</b>
+     * {@code Sale.linkOrder} 호출부가 셋뿐이다 — 매출일괄등록 · 더프 일괄등록 ·
+     * DSRE 신규 주문 등록. 수기 매출등록 · 엑셀 업로드 · 반품입고 · 위탁정산 ·
+     * <b>특약점 새 주문</b>은 전부 {@code NULL} 이다.
+     *
+     * <p>★<b>그래서 {@code shipment} 에 {@code req_cd} 를 추가하지 않는다</b>(10/26 §10-2 숙제의 답).
+     * 10/27 명세 §1 이 "송장·거래명세서 표시(§4·§5)는 <b>새 탭 주문에 적용</b>한다,
+     * 기존 모의고사 탭에는 적용하지 않는다"로 적용 대상을 바꿨고, 새 탭 주문은
+     * "<b>매출 주문으로 저장</b>"이라 {@code tbl_request_info} 에 들어가지 않는다 —
+     * 담을 값이 없다. 사이트용 송장·거래명세서는 <b>거래처(서버 세션)+기간</b>으로
+     * 우리 주문({@code entry_no})을 직접 읽는다.
+     * 조사 상세: {@code docs-local/1028-docs/조사_REQCD-SHIPMENT_연결경로.md}.
      */
     @Query("""
             select distinct sa.reqCd from Sale sa join sa.product p, Shipment sh
