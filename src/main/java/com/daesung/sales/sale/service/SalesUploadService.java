@@ -150,6 +150,23 @@ public class SalesUploadService {
                     // 업로드는 한 파일이 곧 한 번의 등록이다 — 파일 전체에 같은 묶음번호,
                     // 줄마다 순번. 담당자가 "몇 번째 줄" 로 찾는 경로다(프론트 실측 2026-10-16 B-2).
                     sale.applyEntry(entryNo, ++entrySeq);
+
+                    // ★파일에 적힌 금액이 서버 계산과 다르면 **그 값을 그대로 저장한다**
+                    //   (10/27 §4-15 "수량·공급률·금액이 계산과 맞지 않아도 **예외가 있을 수 있다**",
+                    //   프론트 B-8). 계산값으로 덮으면 예외를 적은 뜻이 사라진다.
+                    //   매출등록 창의 직접 입력과 같은 취급 — `amountOverridden` 으로 표시된다.
+                    //
+                    // ‼️**반드시 save 前이다.** 아래 재고 반영(applyShipment)이 원자적 UPDATE라
+                    //   영속성 컨텍스트를 비운다. 그 뒤에 부르면 detached 엔티티에 걸려
+                    //   **조용히 아무 일도 안 일어난다**(응답엔 파일 값, 장부엔 계산값이 남았다).
+                    //   매출 취소·삭제 쪽에 같은 주석이 있는 바로 그 함정이다.
+                    Long fileAmount = fileSupplyAmount(row);
+                    boolean overridden = fileAmount != null && fileAmount != amt.supplyAmount();
+                    if (overridden) {
+                        sale.overrideSupplyAmount(fileAmount);
+                    }
+                    long saved = overridden ? fileAmount : amt.supplyAmount();
+
                     saleRepository.save(sale);
 
                     // ★재고도 같이 뺀다. 업로드만 이게 빠져 있어서, 올린 만큼 매출은 서는데
@@ -164,19 +181,18 @@ public class SalesUploadService {
                     }
 
                     imported++;
-                    // ★파일에 적힌 금액이 서버 계산과 다르면 **등록은 하되 알린다**
-                    //   (10/27 피드백 §4-15 "수량·공급률·금액이 계산과 맞지 않아도 예외가
-                    //   있을 수 있다. 알럿만 주고 등록은 허용한다").
-                    //   ‼️예전엔 파일의 금액 칸을 **아예 안 읽고 조용히 덮어썼다** — 담당자는
-                    //   자기가 적은 금액이 바뀐 줄도 몰랐다. 막지 않되 숨기지도 않는다.
+                    // 계산값과 다르다는 사실은 **등록을 막지 않고** 경고로 알린다
+                    //   ("알럿만 주고 등록은 허용한다"). 저장값은 위에서 이미 파일 값으로 정했다.
+                    //   ‼️두 번 고친 자리다 — ①처음엔 파일 금액을 **안 읽고 조용히 덮어썼고**,
+                    //     ②경고를 붙인 뒤에도 **저장값은 계산값**이라 그 "예외"가 결국 버려졌다.
                     String warn = amountWarning(row, amt.supplyAmount());
                     if (warn == null) {
                         lines.add(new SalesUploadResponse.Line(rowNo, "IMPORTED", salesNo,
-                                custCode, label(catCode, bookCode), qty, amt.supplyAmount(), null));
+                                custCode, label(catCode, bookCode), qty, saved, null));
                     } else {
                         warned++;
                         lines.add(new SalesUploadResponse.Line(rowNo, "IMPORTED_WITH_WARNING", salesNo,
-                                custCode, label(catCode, bookCode), qty, amt.supplyAmount(), warn));
+                                custCode, label(catCode, bookCode), qty, saved, warn));
                     }
                 } catch (BusinessException e) {
                     failed++;
@@ -290,15 +306,26 @@ public class SalesUploadService {
      * <b>알럿만 주고 등록은 허용</b>한다". 그래서 여기서 <b>막지 않는다</b>. 다만 예전처럼
      * 파일 값을 조용히 버리지도 않는다 — 담당자가 적은 금액이 바뀌었다는 사실은 알려야 한다.
      *
-     * <p>★<b>저장되는 값은 서버 계산이 맞다</b>(금액 단일 소스는 {@code Amounts}). 파일 값을
-     * 그대로 믿으면 정가·공급률·수량과 금액이 서로 안 맞는 행이 장부에 남는다.
+     * <p>★<b>저장되는 값은 파일 값이다</b>(프론트 B-8). 명세가 말한 "예외"가 바로 그 금액이라,
+     * 계산값으로 덮으면 예외를 적은 뜻이 사라진다. 대신 {@code amountOverridden} 으로
+     * <b>손으로 맞춘 금액</b>임을 남긴다 — 매출등록 창의 직접 입력과 같은 취급이다.
+     * 계산값과 다르다는 사실은 이 경고로 알린다.
      */
-    private static String amountWarning(Row row, long computed) {
+    /**
+     * 양식 9번 칸(금액). 비어 있으면 {@code null} — 선택 항목이다.
+     * 경고 판정과 저장값이 <b>같은 값을 봐야</b> 하므로 한 곳에서 읽는다.
+     */
+    private static Long fileSupplyAmount(Row row) {
         Double given = dbl(row, 9);
+        return (given == null) ? null : Math.round(given);
+    }
+
+    private static String amountWarning(Row row, long computed) {
+        Long given = fileSupplyAmount(row);
         if (given == null) {
             return null;   // 금액 칸은 선택이다(참고용) — 비어 있으면 할 말이 없다
         }
-        long g = Math.round(given);
+        long g = given;
         if (g == computed) {
             return null;
         }

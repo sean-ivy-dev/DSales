@@ -144,9 +144,32 @@ class UploadAndFilterIntegrationTest extends IntegrationTestSupport {
         assertThat(line.path("result").asText()).isEqualTo("IMPORTED_WITH_WARNING");
         assertThat(line.path("salesNo").asText()).as("매출번호가 나와야(등록된 줄)").isNotEmpty();
         assertThat(line.path("message").asText()).contains("99,999").contains("70,000");
-        // ★저장되는 값은 **서버 계산**이다 — 파일 값을 그대로 믿으면 정가·공급률·수량과
-        //   금액이 서로 안 맞는 행이 장부에 남는다.
-        assertThat(line.path("supplyAmount").asLong()).isEqualTo(70_000);
+
+        // ‼️**뒤집힌 단언**(프론트 B-8). 예전엔 "저장값은 서버 계산"을 고정했는데,
+        //   그러면 §4-15 가 말한 그 **"예외" 금액이 버려진다**. 이제 파일 값을 그대로 쓴다.
+        assertThat(line.path("supplyAmount").asLong()).as("파일 금액이 저장된다").isEqualTo(99_999);
+
+        // 매출 원장에도 파일 값으로 들어가고, **손으로 맞춘 금액**임이 표시된다
+        //   (매출등록 창의 직접 입력과 같은 취급).
+        // ‼️**매출번호로 집는다** — 같은 도서코드로 다른 테스트도 등록해서,
+        //   keyword 로만 찾으면 남의 줄을 집는다(실제로 35,000 짜리를 집었다).
+        String salesNo = line.path("salesNo").asText();
+        JsonNode sale = data(get("/sales?keyword=" + salesNo + "&size=5")).path("content").get(0);
+        assertThat(sale.path("supplyAmount").asLong()).isEqualTo(99_999);
+        assertThat(sale.path("amountOverridden").asBoolean())
+                .as("계산값과 다르면 override 표시").isTrue();
+    }
+
+    @Test
+    @DisplayName("금액이 계산과 같으면 override 로 표시하지 않는다 — 전부 노랗게 만들지 않는다")
+    void 금액_일치하면_override_아님() {
+        // 70,000 = 10,000 × 70% × 10 — 계산과 같다. 담당자가 손으로 맞춘 것이 아니다.
+        JsonNode d = data(multipart("/sales/upload", sheet(CAT, bookCode, 70000), "same.xlsx"));
+        assertThat(d.path("warned").asInt()).as("%s", d).isZero();
+
+        String salesNo = d.path("lines").get(0).path("salesNo").asText();
+        JsonNode sale = data(get("/sales?keyword=" + salesNo + "&size=5")).path("content").get(0);
+        assertThat(sale.path("amountOverridden").asBoolean()).isFalse();
     }
 
     @Test
