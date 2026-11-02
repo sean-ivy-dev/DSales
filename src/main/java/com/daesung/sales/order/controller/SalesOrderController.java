@@ -5,11 +5,14 @@ import com.daesung.sales.common.excel.ExcelExportUtil;
 import com.daesung.sales.common.response.ApiResponse;
 import com.daesung.sales.common.response.PageResponse;
 import com.daesung.sales.dsre.gateway.OrderState;
+import com.daesung.sales.order.dto.OrderProgressChangeRequest;
 import com.daesung.sales.order.dto.SalesOrderRow;
 import com.daesung.sales.order.service.SalesOrderQueryService;
+import com.daesung.sales.order.service.SalesOrderStateService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import java.time.LocalDate;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +20,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -39,6 +44,7 @@ public class SalesOrderController {
 
     private final SalesOrderQueryService salesOrderQueryService;
     private final ExcelExportUtil excel;
+    private final SalesOrderStateService salesOrderStateService;
 
     @Operation(summary = "★주문 조회(통합) — 우리 주문", description = """
             **새 특약점 주문 + 매출에서 등록한 주문**을 조회한다.
@@ -108,6 +114,39 @@ public class SalesOrderController {
         var rows = salesOrderQueryService.orders(from(fromDate), to(toDate), partnerId, partnerCode,
                 keyword, state, PageRequest.of(0, 500)).getContent();
         return excel.asDownload(excel.toXlsx("주문조회", cols, rows), "주문조회.xlsx");
+    }
+
+    @Operation(summary = "★선택 건 상태변경(접수완료·상품검수·상품준비중)", description = """
+            주문조회에서 체크한 주문들의 **접수 단계**를 한 번에 바꾼다.
+
+            근거: 10/27 명세 §2-8 — "선택지를 **접수완료 / 상품검수 / 상품준비중**만 남긴다.
+            발송준비중·발송완료는 물류 영역이므로 **[작업요청서]에서만** 처리한다."
+
+            ### 전이 축이 둘이다
+            | 축 | 전이 | 어디서 |
+            |---|---|---|
+            | 접수 | 접수완료 ↔ 상품검수 ↔ 상품준비중 | **이 API** |
+            | 물류 | 상품준비중 → 발송준비중 → 발송완료 | 작업요청서(`POST /orders/state`) |
+
+            섞으면 접수완료가 곧바로 발송완료가 되는 주문이 생긴다.
+            · 세 상태 **사이는 자유롭게** 오간다 — 발주처가 상품검수를 "사용빈도는 거의
+              없으나 일단 포함"이라 했으니 접수완료→상품준비중 바로 가기가 평상시 흐름이다.
+            · `READY_TO_SHIP`·`SHIPPED`·`CANCELED` 를 목표로 주면 **거부**한다(400).
+            · ‼️**이미 출력·발송된 주문은 건별로 거부**한다. 적어도 화면이 안 바뀌기 때문이다
+              (진행상태는 출력·발송을 먼저 본다) — 조용한 무동작은 담당자가 바뀐 줄 알게 만든다.
+
+            ### 실패 처리
+            **한 건이 안 된다고 전체를 실패시키지 않는다.** 건별 `changed` 와 사유(`message`)를
+            준다 — `skipped` 가 0이 아니면 확인할 것.
+
+            ### 이력
+            바꾼 건은 상태변경 이력(`status_history`)에 **발송 건마다** 남는다.
+            주문이 발송 여럿으로 갈렸을 때 어느 것이 바뀌었는지 따라갈 수 있어야 한다.""")
+    @PostMapping("/progress-state")
+    public ApiResponse<SalesOrderStateService.BulkResult> changeProgressState(
+            @Valid @RequestBody OrderProgressChangeRequest req) {
+        return ApiResponse.success(
+                salesOrderStateService.change(req.orderNos(), req.toState(), req.reason()));
     }
 
     private static LocalDate from(LocalDate v) {
