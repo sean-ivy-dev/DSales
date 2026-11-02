@@ -2,13 +2,23 @@ package com.daesung.sales.dealer.controller;
 
 import com.daesung.sales.common.response.ApiResponse;
 import com.daesung.sales.dealer.dto.DealerOrderRequest;
+import com.daesung.sales.dealer.dto.DealerShippedOrderRow;
+import com.daesung.sales.logistics.entity.DeliveryType;
+import com.daesung.sales.sale.dto.TransactionStatementResponse;
 import com.daesung.sales.dealer.service.DealerOrderService;
 import com.daesung.sales.sale.dto.SalesEntryResponse;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.time.LocalDate;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -30,6 +40,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class DealerOrderController {
 
     private final DealerOrderService dealerOrderService;
+    private final com.daesung.sales.dealer.service.DealerStatementService dealerStatementService;
 
     @Operation(summary = "새 주문 접수(특약점 → 매출 주문)", description = """
             특약점 사이트 **[새 주문] 탭**(과목별·모의고사·교재)에서 들어온 주문을
@@ -52,5 +63,54 @@ public class DealerOrderController {
     @PostMapping("/orders")
     public ApiResponse<SalesEntryResponse> accept(@Valid @RequestBody DealerOrderRequest req) {
         return ApiResponse.success(dealerOrderService.accept(req));
+    }
+
+    @Operation(summary = "발송완료 주문 목록(송장 조회·거래명세서 공통)", description = """
+            그 거래처의 **발송완료** 주문을 내린다. 송장 메뉴(10/26 §4)와 거래명세서 메뉴(§5)가
+            **같은 목록**을 본다 — 둘 다 "내 발송완료 주문"이다.
+
+            · §4 표시 조건이 **택배 AND 발송완료**이므로, 송장 메뉴는 `deliveryType=COURIER` 로
+              걸러 부른다. 화물 건은 `trackings` 가 빈 목록이다.
+            · §5 표시 대상이 **발송완료부터**다 — "발송준비중까지는 내부에서 수정될 수 있으므로
+              표시하지 않는다".
+            · 송장번호를 눌러 택배사 조회 페이지를 새 창으로 여는 것은 **사이트 몫**이다
+              (§4 "택배사 API는 연동하지 않는다").
+            · 송장 입력은 매출 [작업요청서 > 송장번호 입력]에서만 한다 —
+              §4 "**사이트에는 업로드 기능을 두지 않는다**".
+
+            한 번에 최대 500건이다. 그 위는 기간을 좁혀야 한다.""")
+    @GetMapping("/orders/shipped")
+    public ApiResponse<List<DealerShippedOrderRow>> shippedOrders(
+            @Parameter(description = "주문 거래처 코드", example = "A10A195")
+            @RequestParam String partnerCode,
+            @Parameter(description = "주문일 시작. 미지정 시 올해 1월 1일")
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @Parameter(description = "주문일 종료. 미지정 시 오늘")
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @Parameter(description = "배송구분 필터. 송장 메뉴는 COURIER 로 부른다")
+            @RequestParam(required = false) DeliveryType deliveryType) {
+        LocalDate from = (fromDate != null) ? fromDate : LocalDate.now().withDayOfYear(1);
+        LocalDate to = (toDate != null) ? toDate : LocalDate.now();
+        return ApiResponse.success(
+                dealerStatementService.shippedOrders(partnerCode, from, to, deliveryType));
+    }
+
+    @Operation(summary = "거래명세서(조회·출력 전용)", description = """
+            발송완료된 주문 하나의 거래명세서를 내린다. **양식은 매출프로그램 거래명세서와
+            같다** — §5 "기존 양식과 출력 로직을 재사용".
+
+            · **발송완료가 아니면 거부**한다(§5 "발송준비중까지는 표시하지 않는다").
+            · **본인 거래처 주문이 아니면 "없음"** 으로 답한다 — 존재 자체를 숨긴다
+              (§5 "URL이나 파라미터로 받은 거래처코드는 믿지 않는다 / Phase 0 order IDOR과 같은 유형").
+            · 명세서는 (거래처 × **학교**) 단위로 발행된다. 한 주문에 학교가 섞여 있으면
+              특정할 수 없어 거부한다 — 섞은 채로 뽑으면 「학교(원)」 칸에 첫 학교만 찍히고
+              나머지가 그 학교 몫처럼 보인다.""")
+    @GetMapping("/orders/{orderNo}/statement")
+    public ApiResponse<TransactionStatementResponse> statement(
+            @Parameter(description = "주문번호", example = "E-20261102-7")
+            @PathVariable String orderNo,
+            @Parameter(description = "주문 거래처 코드", example = "A10A195")
+            @RequestParam String partnerCode) {
+        return ApiResponse.success(dealerStatementService.statement(partnerCode, orderNo));
     }
 }
