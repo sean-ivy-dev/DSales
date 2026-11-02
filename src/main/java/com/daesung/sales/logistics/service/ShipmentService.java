@@ -554,6 +554,22 @@ public class ShipmentService {
     }
 
     /**
+     * 그 매출이 묶인 발송 건이 <b>이미 나갔나</b>(발송완료). 주문 수정 거부 판정에 쓴다.
+     *
+     * <p>발송 건이 아직 없으면 {@code false} — 작업요청서를 만들지 않는 매출
+     * (매출만·특강·창고없음)이 여기 걸려 수정이 막히면 안 된다.
+     */
+    @Transactional(readOnly = true)
+    public boolean isShipped(Sale sale) {
+        String tradeClass = (sale.getTradeClass() != null) ? sale.getTradeClass()
+                : sale.getProduct().getSalesDivision();
+        return shipmentRepository.findKey(sale.getSalesDate(), sale.getPartner().getId(),
+                        sale.getSchoolCode(), tradeClass, sale.getEntryNo())
+                .map(sh -> sh.getSentDate() != null)
+                .orElse(false);
+    }
+
+    /**
      * 그 매출이 묶여 있던 발송 건에 <b>남은 줄이 하나도 없으면 발송 건도 걷어낸다</b>.
      *
      * <p>근거: 프론트 B-5 — 매출 줄을 모두 지워도 작업요청서가 <b>도서 0줄로 남아</b>
@@ -594,6 +610,36 @@ public class ShipmentService {
                     return true;
                 })
                 .orElse(false);
+    }
+
+    /**
+     * 그 주문이 만든 발송 중 <b>줄이 하나도 안 남은 것</b>을 걷는다 — 주문 수정 뒤에 부른다.
+     *
+     * <p>바꾼 내용에 따라 발송이 남을 수도 사라질 수도 있다. 예를 들어 두 분류를 담았던
+     * 주문을 한 분류만 남기면 다른 분류의 발송이 빈 채로 남는다 — 쌀 것이 없는 지시다.
+     *
+     * <p>‼️수정은 발송 건을 <b>미리 걷지 않는다</b>(같은 주문이라 출력·확인 상태를 지켜야 하고,
+     * 묶음 키가 논리삭제된 행에 잡혀 같은 번호로 다시 넣을 수 없다). 그래서 다 넣은 <b>뒤에</b>
+     * 남은 것만 본다.
+     */
+    @Transactional
+    public void cleanupEmptiedForEntry(String entryNo) {
+        for (Shipment s : shipmentRepository.findByEntryNo(entryNo)) {
+            if (s.getDeletedAt() != null || s.getSentDate() != null) {
+                continue;
+            }
+            long alive = saleRepository.countLiveForShipment(s.getTradeDate(),
+                    s.getPartner().getId(),
+                    (s.getSchoolCode() == null) ? "" : s.getSchoolCode(),
+                    (s.getTradeClass() == null) ? "" : s.getTradeClass(),
+                    (s.getEntryNo() == null) ? "" : s.getEntryNo());
+            if (alive == 0) {
+                s.markDeleted(currentAuditor.username());
+                statusHistoryService.record(StatusEntityType.SHIPMENT, s.getId(),
+                        "deleted", "false", "true",
+                        "주문 수정으로 줄이 모두 빠져 자동 정리(" + entryNo + ")");
+            }
+        }
     }
 
     /**

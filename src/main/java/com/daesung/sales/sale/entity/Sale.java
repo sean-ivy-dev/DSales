@@ -341,6 +341,20 @@ public class Sale extends com.daesung.sales.common.entity.SoftDeletableEntity {
     @Column(name = "trade_seq")
     private Integer tradeSeq;
 
+    /**
+     * 「매출만(배송X)」 체크 여부 — 담당자가 등록할 때 고른 값(프론트 B-4④).
+     *
+     * <p>‼️예전엔 요청에서만 쓰고 <b>버렸다</b>(작업요청서를 만들지 말지 판단하는 데만 썼다).
+     * 그래서 주문을 불러와 고칠 때 체크 상태를 되살릴 수 없었다 — 다시 등록하면 풀린 채 저장된다.
+     *
+     * <p>★<b>"발송이 없는 매출"로 유추하면 안 된다.</b> 특강·창고없음 건도 작업요청서를
+     * 만들지 않아 같이 걸린다. "담당자가 체크했다"와 "결과적으로 발송이 없다"는 다른 말이다.
+     *
+     * <p>이 컬럼 도입 전 매출은 {@code null} — 조회·수정에서는 '체크 안 함'으로 본다.
+     */
+    @Column(name = "only_sales")
+    private Boolean onlySales;
+
     /** 등록 묶음·순번 기록. 한 번의 등록에서 줄마다 1,2,3… 으로 올린다. */
     public void applyEntry(String entryNo, int entrySeq) {
         this.entryNo = entryNo;
@@ -350,6 +364,11 @@ public class Sale extends com.daesung.sales.common.entity.SoftDeletableEntity {
     /** 거래순번(주문 단위). 등록 1회당 한 번 정해 그 묶음의 모든 줄에 같은 값을 준다. */
     public void applyTradeSeq(int tradeSeq) {
         this.tradeSeq = tradeSeq;
+    }
+
+    /** 「매출만(배송X)」 체크 여부. 등록 1회당 한 번 정해 그 묶음의 모든 줄에 같은 값을 준다. */
+    public void applyOnlySales(boolean onlySales) {
+        this.onlySales = onlySales;
     }
 
     /** 공급가액을 입력값으로 덮는다(계산값 대신). 총액도 세액과 합쳐 다시 맞춘다. */

@@ -66,6 +66,10 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             """)
     List<Object[]> findReqCdsOf(@Param("shipmentIds") java.util.Collection<Long> shipmentIds);
 
+    /** 한 주문(등록 묶음)이 만든 발송 건들. 주문 수정 뒤 빈 것을 걷을 때 쓴다. */
+    @Query("select s from Shipment s where s.entryNo = :entryNo")
+    List<Shipment> findByEntryNo(@Param("entryNo") String entryNo);
+
     /**
      * 발송 묶음 키 — (일자·거래처·학교·분류·<b>주문</b>).
      *

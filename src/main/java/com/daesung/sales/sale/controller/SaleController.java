@@ -45,11 +45,13 @@ import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import com.daesung.sales.logistics.dto.ReasonRequest;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -323,6 +325,43 @@ public class SaleController {
     @PostMapping("/entries")
     public ApiResponse<SalesEntryResponse> createEntries(@Valid @RequestBody SalesEntryRequest req) {
         return ApiResponse.success(saleService.createEntries(req));
+    }
+
+    @Operation(summary = "주문 통째 수정(거래순번으로 불러와 고치기)",
+            description = """
+                    한 번의 등록(`entryNo`)에 속한 줄을 **본문으로 통째 교체**한다.
+                    근거: 10/27 명세 §3-6 "이 순번으로 **들어가 수정할 수 있게** 한다.
+                    레거시 출고 화면의 '거래순번'과 같다(PPT 3)".
+
+                    · 본문은 `POST /sales/entries` 와 **같다**.
+                    · **등록번호·거래순번은 그대로** 둔다 — 바뀌면 화면이 방금 고친 주문을 다시 못 찾는다.
+                    · 재고·작업요청서도 함께 맞춰진다(지우고 다시 넣는 방식이라 등록과 결과가 같다).
+
+                    **거부**
+                    · 마감된 달 — 원래 날짜와 바꾼 뒤 날짜를 **둘 다** 본다(한쪽만 보면 열린 달로 옮겨 빠져나간다).
+                    · **발송완료된 주문** — 물건이 나간 뒤라 줄을 바꾸면 나간 것과 장부가 갈린다.
+                      반품 또는 매출 취소로 처리한다.""")
+    @PutMapping("/entries/{entryNo}")
+    public ApiResponse<SalesEntryResponse> replaceEntry(
+            @Parameter(description = "등록 묶음번호(E-yyyyMMdd-n)", example = "E-20261027-55")
+            @PathVariable String entryNo,
+            @Valid @RequestBody SalesEntryRequest req) {
+        return ApiResponse.success(saleService.replaceEntry(entryNo, req));
+    }
+
+    @Operation(summary = "주문 통째 삭제(거래순번으로 불러와 지우기)",
+            description = """
+                    한 번의 등록(`entryNo`)에 속한 줄을 **전부** 지운다.
+                    재고는 되돌아가고, **발송 전이면 묶여 있던 작업요청서도 함께 걷힌다**
+                    (이미 나간 건은 그대로 둔다 — 나간 사실은 매출을 지운다고 없어지지 않는다).
+
+                    논리삭제다 — 목록에서 빠지고 이력에 남는다. 마감된 달은 거부한다.""")
+    @DeleteMapping("/entries/{entryNo}")
+    public ApiResponse<Integer> deleteEntry(
+            @Parameter(description = "등록 묶음번호(E-yyyyMMdd-n)", example = "E-20261027-55")
+            @PathVariable String entryNo,
+            @Valid @RequestBody(required = false) ReasonRequest req) {
+        return ApiResponse.success(saleService.deleteEntry(entryNo, ReasonRequest.reasonOf(req)));
     }
 
     @Operation(summary = "매출 엑셀 업로드(표준양식 일괄등록)",

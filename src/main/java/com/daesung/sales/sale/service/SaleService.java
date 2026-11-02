@@ -78,6 +78,20 @@ public class SaleService {
      */
     @Transactional
     public SalesEntryResponse createEntries(SalesEntryRequest req) {
+        return createEntries(req, null, null);
+    }
+
+    /**
+     * 등록 본문. {@code fixedEntryNo}·{@code fixedTradeSeq} 가 주어지면 <b>그 번호를 그대로</b>
+     * 쓴다 — 주문 통째 수정({@link #replaceEntry})이 쓰는 길이다.
+     *
+     * <p>★수정이 이 메서드를 **그대로 재사용**하는 이유: 등록과 수정이 각자 저장 로직을 가지면
+     * 둘이 조금씩 어긋난다(재고 반영·거래처별 단가·경고 판정이 전부 여기 있다).
+     * 번호만 고정하고 나머지는 등록과 한 글자도 다르지 않게 간다.
+     */
+    @Transactional
+    public SalesEntryResponse createEntries(SalesEntryRequest req,
+                                            String fixedEntryNo, Integer fixedTradeSeq) {
         periodLockService.assertNotLocked(req.salesDate());
         Partner partner = partnerRepository.findById(req.partnerId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
@@ -106,13 +120,15 @@ public class SaleService {
         // ★등록 묶음번호(현장 피드백 2026-10-14 B-4) — "여러 매출을 등록했을 때 등록 순서로 순번".
         //   매출번호(I-)는 줄마다 채번돼 "한 번에 올린 것"을 가리키지 못한다.
         //   묶음번호 하나를 먼저 뽑고, 줄마다 1,2,3… 을 붙인다.
-        String entryNo = entryNumberService.next(req.salesDate());
+        String entryNo = (fixedEntryNo != null) ? fixedEntryNo
+                : entryNumberService.next(req.salesDate());
         int entrySeq = 0;
         // ★거래순번은 **등록 한 번에 한 번만** 뽑는다(10/27 명세 §3-6 "하루에 5번 주문하면 1~5").
         //   예전엔 발송(작업요청서)이 생길 때마다 뽑아, 같은 날 같은 학교면 발송이 한 건에
         //   합쳐지면서 순번도 1개뿐이었다(프론트 B-2② 지적). 여기서 한 번 정해
         //   이 묶음의 모든 줄과 그 줄이 만든 발송이 **같은 번호**를 쓴다.
-        int tradeSeq = shipmentService.nextTradeSeq(req.partnerId(), req.salesDate());
+        int tradeSeq = (fixedTradeSeq != null) ? fixedTradeSeq
+                : shipmentService.nextTradeSeq(req.partnerId(), req.salesDate());
         List<SalesEntryResponse.Line> lines = new ArrayList<>();
 
         for (ResolvedItem r : resolved) {
@@ -144,6 +160,9 @@ public class SaleService {
             sale.applyPackType(item.packType());   // 포장구분(회차별 작업현황 집계축)
             sale.applyEntry(entryNo, ++entrySeq);  // 등록 묶음·순번(B-4)
             sale.applyTradeSeq(tradeSeq);          // 거래순번(주문 단위, §3-6)
+            // ★체크 상태를 **저장**한다(프론트 B-4④). 예전엔 작업요청서를 만들지 말지
+            //   판단하는 데만 쓰고 버려서, 주문을 불러와 고칠 때 되살릴 수 없었다.
+            sale.applyOnlySales(Boolean.TRUE.equals(req.onlySales()));
             saleRepository.save(sale);
 
             // 재고 반영(한 트랜잭션): 출고유형 → 부호/이벤트유형. 위탁·취소는 이 API 불가.
@@ -191,7 +210,8 @@ public class SaleService {
         }
         // ★재고 경고(음수)를 같은 배열에 합친다 — 화면이 한 곳만 보면 되도록.
         stockWarningCollector.drain().forEach(w -> warnings.add(SalesEntryResponse.Warning.ofStock(w)));
-        return new SalesEntryResponse(partner.getId(), partner.getName(), lines, warnings);
+        return new SalesEntryResponse(partner.getId(), partner.getName(),
+                entryNo, tradeSeq, lines, warnings);
     }
 
     /** 매출등록 라인 해석 결과(정가·공급률 자동적용까지 확정된 상태). */
@@ -335,7 +355,8 @@ public class SaleService {
         }
         // ★재고 경고(음수)를 같은 배열에 합친다 — 화면이 한 곳만 보면 되도록.
         stockWarningCollector.drain().forEach(w -> warnings.add(SalesEntryResponse.Warning.ofStock(w)));
-        return new SalesEntryResponse(partner.getId(), partner.getName(), lines, warnings);
+        return new SalesEntryResponse(partner.getId(), partner.getName(),
+                entryNo, tradeSeq, lines, warnings);
     }
 
     /**
@@ -680,6 +701,18 @@ public class SaleService {
      */
     @Transactional
     public void delete(Long id, String reason) {
+        delete(id, reason, true);
+    }
+
+    /**
+     * @param cleanupShipment 마지막 줄이면 발송 건도 걷을지. <b>주문 수정은 false</b> —
+     *                        같은 주문이라 발송 건은 그대로 두고 줄만 바꿔야 한다.
+     *                        걷었다가 다시 만들면 출력·확인 상태가 날아가고, 발송 묶음 키
+     *                        (일자·거래처·학교·분류·거래순번)가 **논리삭제된 행에 잡혀 있어**
+     *                        같은 번호로 다시 넣을 수 없다(실제로 유니크 제약에 걸렸다).
+     */
+    @Transactional
+    public void delete(Long id, String reason, boolean cleanupShipment) {
         Sale sale = saleRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "매출이 없습니다. id=" + id));
         periodLockService.assertNotLocked(sale.getSalesDate());
@@ -705,7 +738,100 @@ public class SaleService {
         // ★묶여 있던 작업요청서에 남은 줄이 없으면 그 발송 건도 걷어낸다(프론트 B-5).
         //   예전엔 "지시 목록은 매출에서 파생되니 자동으로 빠진다"고 두었는데,
         //   **발송 건 자체는 남아** 도서 0줄짜리 지시가 알림 배지에 잡혔다(21→19).
-        shipmentService.deleteIfEmptied(sale);
+        if (cleanupShipment) {
+            shipmentService.deleteIfEmptied(sale);
+        }
+    }
+
+    /**
+     * 주문(등록 묶음) <b>통째 삭제</b> — {@code DELETE /sales/entries/{entryNo}}(프론트 B-4②).
+     *
+     * <p>근거: 10/27 명세 §3-6 "이 순번으로 들어가 <b>수정할 수 있게</b> 한다.
+     * 레거시 출고 화면의 '거래순번'과 같다(PPT 3)". 레거시({@code UC_TabPages.vb:158~176})는
+     * 거래순번 드롭다운에서 기존 번호를 고르면 그 주문을 불러와 통째로 고치거나 지운다.
+     *
+     * <p>★<b>줄 하나씩 지우는 {@link #delete} 를 그대로 돌린다.</b> 재고 역분개·이력·
+     * 빈 작업요청서 정리가 전부 거기 있다 — 여기서 다시 쓰면 둘이 어긋난다.
+     * 발송 건은 마지막 줄이 빠질 때 함께 걷힌다({@code deleteIfEmptied}).
+     * ‼️레거시도 같은 순서다 — 배송정보를 먼저 정리하고 매출 줄을 지운다
+     * ({@code UC_TabPages.vb:526} "꼭! 해당데이터 삭제 전에 반영해야 됨").
+     *
+     * @return 지운 줄 수
+     */
+    @Transactional
+    public int deleteEntry(String entryNo, String reason) {
+        List<Sale> sales = requireEntry(entryNo);
+        for (Sale sale : sales) {
+            delete(sale.getId(), reason);
+        }
+        return sales.size();
+    }
+
+    /**
+     * 주문(등록 묶음) <b>통째 교체</b> — {@code PUT /sales/entries/{entryNo}}(프론트 B-4①).
+     *
+     * <p>요청 본문은 등록과 같다. <b>등록번호·거래순번은 그대로 두고</b> 줄만 바꾼다 —
+     * 담당자가 드롭다운에서 고른 그 번호가 바뀌면 화면이 방금 고친 주문을 다시 못 찾는다.
+     *
+     * <p>★<b>지우고 다시 넣는다.</b> 줄을 하나씩 맞춰 고치면 수량이 바뀔 때 재고 역분개가
+     * 반쪽만 돌고, 줄이 줄거나 늘면 작업요청서가 어긋난다. 삭제·등록은 이미 재고·발송을
+     * 끝까지 맞추므로 그 둘을 그대로 이어 붙이는 쪽이 안전하다.
+     *
+     * <p><b>거부하는 경우</b>(프론트 요청 그대로)
+     * <ul>
+     *   <li>마감된 달 — 바꾼 뒤 날짜와 원래 날짜 <b>둘 다</b> 본다. 한쪽만 보면
+     *       마감월 주문을 열린 달로 옮기는 것으로 빠져나갈 수 있다.</li>
+     *   <li><b>발송완료된 주문</b> — 물건이 이미 나갔다. 줄을 바꾸면 나간 것과 장부가 갈린다.</li>
+     * </ul>
+     */
+    @Transactional
+    public SalesEntryResponse replaceEntry(String entryNo, SalesEntryRequest req) {
+        List<Sale> sales = requireEntry(entryNo);
+        Sale first = sales.get(0);
+
+        periodLockService.assertNotLocked(first.getSalesDate());   // 원래 달
+        periodLockService.assertNotLocked(req.salesDate());        // 바꾼 뒤 달
+
+        assertNotShipped(sales);
+
+        Integer tradeSeq = first.getTradeSeq();
+        for (Sale sale : sales) {
+            // ★발송 건은 **걷지 않는다**(cleanupShipment=false). 같은 주문이라 그대로 두고
+            //   줄만 바꿔야 한다 — 걷었다가 다시 만들면 출력·확인 상태가 날아가고,
+            //   발송 묶음 키가 논리삭제된 행에 잡혀 있어 같은 번호로 다시 넣을 수 없다.
+            delete(sale.getId(), "주문 수정(" + entryNo + ")", false);
+        }
+        SalesEntryResponse res = createEntries(req, entryNo, tradeSeq);
+
+        // 바꾼 뒤 줄이 줄어 **빈 발송이 생길 수 있다**(예: 두 분류였다가 하나만 남김).
+        // 그건 여기서 걷는다 — 쌀 것이 없는 지시가 물류로 넘어가면 안 된다.
+        shipmentService.cleanupEmptiedForEntry(entryNo);
+        return res;
+    }
+
+    /** 그 등록번호의 줄들. 없으면 404 — 드롭다운에 없는 번호를 받은 것이다. */
+    private List<Sale> requireEntry(String entryNo) {
+        List<Sale> sales = saleRepository.findByEntryNo(entryNo);
+        if (sales.isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND,
+                    "그 등록번호의 주문이 없습니다: " + entryNo);
+        }
+        return sales;
+    }
+
+    /**
+     * 발송완료된 주문이면 거부한다. 발송 건은 (일자·거래처·학교·분류·주문)으로 묶이므로
+     * 한 주문이 학교·분류 때문에 여러 건으로 갈릴 수 있다 — <b>하나라도 나갔으면</b> 막는다.
+     */
+    private void assertNotShipped(List<Sale> sales) {
+        for (Sale sale : sales) {
+            if (shipmentService.isShipped(sale)) {
+                throw new BusinessException(ErrorCode.INVALID_INPUT,
+                        "이미 발송완료된 주문입니다. 수정할 수 없습니다 — "
+                                + "물건이 나간 뒤라 줄을 바꾸면 나간 것과 장부가 갈립니다. "
+                                + "반품 또는 매출 취소로 처리하세요.");
+            }
+        }
     }
 
     /** 판매채널 조건에 '미분류'가 섞여 있나. 레거시가 별도 분기로 처리하는 값이다(조회.vb:1205). */

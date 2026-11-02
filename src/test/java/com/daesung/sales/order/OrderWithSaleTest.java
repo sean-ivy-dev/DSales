@@ -81,7 +81,7 @@ class OrderWithSaleTest {
 
     private void givenSaleOk() {
         when(saleService.createEntries(any())).thenReturn(new SalesEntryResponse(
-                1L, "거래처",
+                1L, "거래처", "E-20960501-1", 1,
                 List.of(new SalesEntryResponse.Line("I-20960501-1", 42L, "BK",
                         com.daesung.sales.salestype.entity.ShipmentType.NORMAL_SHIP,
                         com.daesung.sales.salestype.entity.SalesCategory.SALE,

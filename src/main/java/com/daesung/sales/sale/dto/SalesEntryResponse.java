@@ -14,6 +14,17 @@ public record SalesEntryResponse(
         @Schema(description = "거래처명", example = "리브커넥스(주)")
         String partnerName,
 
+        @Schema(description = """
+                등록 묶음번호(E-yyyyMMdd-n) — **이 한 번의 등록**을 가리킨다.
+                주문을 통째로 고치거나 지울 때 이 값으로 부른다
+                (`PUT`/`DELETE /sales/entries/{entryNo}`, 프론트 B-4③).""")
+        String entryNo,
+
+        @Schema(description = """
+                거래순번 — 그 거래처의 그 날 **몇 번째 주문**인가(1부터, 10/27 명세 §3-6).
+                등록 직후 화면의 순번 칸에 그대로 보여 주면 된다.""")
+        Integer tradeSeq,
+
         @Schema(description = "등록된 매출 라인")
         List<Line> items,
 

@@ -730,6 +730,16 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
     java.util.Optional<Sale> findLatestConsignSale(@Param("consignmentOutId") Long consignmentOutId);
 
     /**
+     * 한 번의 등록(주문)에 속한 매출 줄 전부 — 주문 통째 수정·삭제가 쓴다(프론트 B-4).
+     *
+     * <p>취소분도 포함해 돌려준다. 이미 취소된 줄까지 보여야 담당자가 "무엇을 되돌리는지"
+     * 알 수 있고, 삭제는 취소 여부와 무관하게 그 묶음 전체를 지운다.
+     */
+    @Query("select s from Sale s join fetch s.product "
+            + "where s.entryNo = :entryNo order by s.entrySeq, s.id")
+    List<Sale> findByEntryNo(@Param("entryNo") String entryNo);
+
+    /**
      * 그 발송 건에 <b>아직 살아 있는 매출 줄</b>이 몇인가 — 빈 작업요청서를 걷어내려고 센다.
      *
      * <p>근거: 프론트 B-5 — 매출 줄을 모두 지워도 묶여 있던 작업요청서가 <b>도서 0줄로 남고</b>

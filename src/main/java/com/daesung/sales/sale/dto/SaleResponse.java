@@ -93,6 +93,12 @@ public record SaleResponse(
                 ‼️이 컬럼 도입 전 매출은 null 이다 — 소급해 채우지 않았다.""")
         Integer tradeSeq,
         @Schema(description = """
+                「매출만(배송X)」 체크 여부 — 담당자가 등록할 때 고른 값.
+                주문을 불러와 고칠 때 **체크 상태를 그대로 되살리는** 값이다(프론트 B-4④).
+                ‼️"발송이 없다"와 다르다 — 특강·창고없음 건도 작업요청서를 만들지 않는다.
+                이 컬럼 도입 전 매출은 null(= 체크 안 함).""")
+        Boolean onlySales,
+        @Schema(description = """
                 공급가액을 담당자가 **직접 입력**했나(B-3).
                 true 면 계산값이 아니라 손으로 맞춘 금액이다.""")
         boolean amountOverridden,
@@ -180,7 +186,8 @@ public record SaleResponse(
                 (s.getWarehouse() == null) ? null : s.getWarehouse().getId(),
                 (s.getWarehouse() == null) ? null : s.getWarehouse().getName(),
                 salesChannel,
-                s.getEntryNo(), s.getEntrySeq(), s.getTradeSeq(), s.isAmountOverridden(),
+                s.getEntryNo(), s.getEntrySeq(), s.getTradeSeq(), s.getOnlySales(),
+                s.isAmountOverridden(),
                 s.getMemo());
     }
 
