@@ -291,8 +291,13 @@ public class WorkService {
         return buildWorkOrders(shipments, from, to);
     }
 
-    /** 발송 건 묶음에 줄·신청번호를 붙여 응답으로 만든다(페이지·전량 공용). */
-    private List<WorkOrderResponse> buildWorkOrders(List<Shipment> shipments,
+    /**
+     * 발송 건 묶음에 줄·신청번호를 붙여 응답으로 만든다(페이지·전량 공용).
+     *
+     * <p>★<b>주문조회(§2-1)도 이걸 쓴다</b> — 줄을 모으는 규칙(매출 줄 + 위탁출고 지시,
+     * 키 맞추기)을 복붙하면 두 화면의 줄이 달라진다. 공개로 둔 이유가 그것이다.
+     */
+    public List<WorkOrderResponse> buildWorkOrders(List<Shipment> shipments,
                                                     LocalDate from, LocalDate to) {
         if (shipments.isEmpty()) {
             return List.of();
@@ -358,7 +363,10 @@ public class WorkService {
             List<WorkOrderResponse.Line> lines = linesByKey.getOrDefault(lookupKey(s), List.of());
             long total = lines.stream().mapToLong(WorkOrderResponse.Line::qty).sum();
             DeliveryType dt = s.getDeliveryType();
-            out.add(new WorkOrderResponse(s.getId(), s.getTradeClass(), s.getTradeDate(),
+            var st = s.progressState();
+            out.add(new WorkOrderResponse(s.getId(), s.getEntryNo(),
+                    st.name(), st.label(),
+                    s.getTradeClass(), s.getTradeDate(),
                     s.getTradeSeq(),
                     s.getPartner().getCode(), s.getPartner().getName(),
                     s.getSchoolCode(), s.getSchoolName(),

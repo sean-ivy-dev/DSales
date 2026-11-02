@@ -244,8 +244,15 @@ public class OrderController {
         return ApiResponse.success(orderService.changeState(req.reqCds(), req.toState(), req.reason()));
     }
 
-    @Operation(summary = "주문·진행상태 조회",
+    @Operation(summary = "DSRE 신청 주문 조회(옛 목록)",
             description = """
+                    ‼️**주문조회 화면의 목록은 더 이상 이 경로가 아니다.** 10/27 명세 §1 로
+                    조회 대상이 **우리 주문**(새 특약점 주문 + 매출 등록 주문)으로 바뀌었다 →
+                    `GET /orders` 를 쓸 것. 이 경로는 DSRE 신청을 보던 옛 목록이고,
+                    §2-3 "[DSRE 신청 등록] 버튼은 **숨김 처리한다(삭제하지 않음)**.
+                    나중에 다시 쓰게 되면 별도 페이지로 만든다"에 따라 **남겨 둔 것**이다.
+                    기존 모의고사 탭(DSRE 연동 유지)이 이 축을 쓴다.
+
                     신청일 기간으로 DSRE2 주문을 조회한다. 진행상태는 DSRE2 원본값을 한글명과 함께 돌려준다.
 
                     · **기간을 생략하면 올해 1/1~오늘**이다(다른 조회 API와 같은 규칙).
@@ -257,8 +264,8 @@ public class OrderController {
                     · ⚠️ 취소분은 **본사·물류가 삭제한 건만** C로 조회된다.
                       특약점(지사)이 삭제한 건은 원본 행이 지워져 조회되지 않는다.
                     · 인원은 DSRE2 저장함수(FUNC_REQINWON_GET) 산출값이다.""")
-    @GetMapping
-    public ApiResponse<com.daesung.sales.common.response.PageResponse<DsreOrderRow>> orders(
+    @GetMapping("/dsre")
+    public ApiResponse<com.daesung.sales.common.response.PageResponse<DsreOrderRow>> dsreOrders(
             @Parameter(description = "신청일 시작(yyyy-MM-dd). 미지정 시 올해 1월 1일")
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
             @Parameter(description = "신청일 종료(yyyy-MM-dd). 미지정 시 오늘")
@@ -298,8 +305,9 @@ public class OrderController {
                         prodCodes, dtlCds, productYear)));
     }
 
-    @Operation(summary = "주문·진행상태 엑셀 다운로드")
-    @GetMapping("/export")
+    @Operation(summary = "DSRE 신청 주문 엑셀 다운로드(옛 목록)",
+            description = "‼️우리 주문 목록의 엑셀은 `GET /orders/export` 다. 이 경로는 옛 DSRE 목록용이다.")
+    @GetMapping("/dsre/export")
     public ResponseEntity<byte[]> export(
             @RequestParam(name = "fromDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
             @RequestParam(name = "toDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,

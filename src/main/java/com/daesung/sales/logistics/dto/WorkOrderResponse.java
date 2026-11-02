@@ -14,6 +14,16 @@ import java.util.List;
 @Schema(name = "WorkOrderResponse", description = "작업요청서(발송 건 + 도서 지시 목록)")
 public record WorkOrderResponse(
         @Schema(description = "발송 건 id") Long id,
+        @Schema(description = """
+                주문번호(매출등록 묶음번호 `E-…`). 한 주문이 발송 여럿으로 갈려도 같은 값이다.
+                ‼️V103 전 등록분·이관분은 비어 있다.""")
+        String entryNo,
+        @Schema(description = """
+                진행상태 코드(A 접수완료 / G 상품검수 / S 상품준비중 /
+                W 발송준비중 / D 발송완료 / C 삭제). 이 **발송 건** 하나의 상태다 —
+                주문 단위 상태는 주문조회(`GET /orders`)가 준다.""")
+        String progressState,
+        @Schema(description = "진행상태 명칭") String progressStateName,
         @Schema(description = "분류") String tradeClass,
         @Schema(description = "거래일자") LocalDate tradeDate,
         @Schema(description = """

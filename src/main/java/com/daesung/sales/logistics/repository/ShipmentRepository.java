@@ -3,6 +3,7 @@ package com.daesung.sales.logistics.repository;
 import com.daesung.sales.logistics.entity.DeliveryType;
 import com.daesung.sales.logistics.entity.Shipment;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -220,4 +221,76 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
     /** 삭제된 건 포함 단건 조회 — 삭제 대상을 찾을 때 쓴다(@SQLRestriction 우회). */
     @Query(value = "SELECT * FROM shipment WHERE id = :id", nativeQuery = true)
     Optional<Shipment> findByIdIncludingDeleted(@Param("id") Long id);
+
+    /**
+     * 진행상태 <b>랭크</b> 식(SQL). {@code OrderProgress.rankOf} 와 <b>같은 값</b>을 내야 한다.
+     *
+     * <p>★{@link com.daesung.sales.logistics.entity.Shipment#progressState()} 의 판정 순서를
+     * 그대로 옮긴 것이다 — 삭제 &gt; 발송 &gt; 출력 &gt; 접수단계 &gt; 상품준비중.
+     * 주문 목록을 <b>DB에서 걸러 페이징</b>하려면 상태를 SQL 로 알아야 해서 한 번 더 적는다.
+     * ‼️어긋나면 "상태로 걸렀는데 다른 상태가 나온다"가 된다 — 테스트가 전 상태를 맞춰 본다.
+     */
+    String ORDER_STATE_RANK = """
+            CASE WHEN s.deleted_at IS NOT NULL      THEN 99
+                 WHEN s.sent_date  IS NOT NULL      THEN 5
+                 WHEN s.printed_at IS NOT NULL      THEN 4
+                 WHEN s.intake_state = 'INSPECTING' THEN 2
+                 WHEN s.intake_state = 'RECEIVED'   THEN 1
+                 ELSE 3 END
+            """;
+
+    /** 주문 식별 키 식(SQL). {@code OrderProgress.orderKey} 와 같아야 한다. */
+    String ORDER_KEY = "COALESCE(s.entry_no, CONCAT('#', s.id))";
+
+    /**
+     * 주문조회(§2-1) <b>주문 단위</b> 키 페이지.
+     *
+     * <p>근거: 10/27 명세 §1 — "조회 대상을 <b>새 특약점 주문 + 매출에서 수기 등록한 주문</b>으로
+     * 바꾼다. DSRE에서 운영하는 상품을 끌어오는 구조가 아니다." · §2-1 "수기 주문과
+     * 온라인(특약점) 주문을 <b>함께</b> 보여준다".
+     *
+     * <p>★<b>왜 키만 먼저 뽑나.</b> 주문 하나가 발송 여러 건으로 갈릴 수 있어(§3-6)
+     * 발송 단위로 페이징하면 같은 주문이 두 줄로 나오고 페이지 경계에서 쪼개진다.
+     * 키로 페이징하고 그 키들의 발송을 모아 한 줄로 만든다.
+     *
+     * <p>‼️<b>삭제된 발송도 읽는다</b>({@code @SQLRestriction} 우회 네이티브) — 레거시처럼
+     * 삭제 주문도 목록에 남기고 표시만 한다. 숨기면 담당자가 같은 주문을 다시 넣는다.
+     */
+    @Query(value = "SELECT " + ORDER_KEY + " AS okey"
+            + " FROM shipment s JOIN partners p ON p.id = s.partner_id"
+            + " WHERE s.trade_date BETWEEN :from AND :to"
+            + "   AND (CAST(:partnerId AS SIGNED) IS NULL OR p.id = :partnerId)"
+            + "   AND (:partnerCode IS NULL OR p.code = :partnerCode)"
+            + "   AND (:keyword IS NULL OR LOWER(p.name) LIKE :keyword"
+            + "        OR LOWER(COALESCE(s.school_name,'')) LIKE :keyword"
+            + "        OR LOWER(COALESCE(s.entry_no,'')) LIKE :keyword)"
+            + " GROUP BY okey"
+            + " HAVING (CAST(:stateRank AS SIGNED) IS NULL"
+            + "         OR MIN(" + ORDER_STATE_RANK + ") = :stateRank)"
+            + " ORDER BY MAX(s.trade_date) DESC, MIN(p.code), MIN(s.trade_seq), okey",
+            countQuery = "SELECT COUNT(*) FROM (SELECT " + ORDER_KEY + " AS okey"
+            + " FROM shipment s JOIN partners p ON p.id = s.partner_id"
+            + " WHERE s.trade_date BETWEEN :from AND :to"
+            + "   AND (CAST(:partnerId AS SIGNED) IS NULL OR p.id = :partnerId)"
+            + "   AND (:partnerCode IS NULL OR p.code = :partnerCode)"
+            + "   AND (:keyword IS NULL OR LOWER(p.name) LIKE :keyword"
+            + "        OR LOWER(COALESCE(s.school_name,'')) LIKE :keyword"
+            + "        OR LOWER(COALESCE(s.entry_no,'')) LIKE :keyword)"
+            + " GROUP BY okey"
+            + " HAVING (CAST(:stateRank AS SIGNED) IS NULL"
+            + "         OR MIN(" + ORDER_STATE_RANK + ") = :stateRank)) g",
+            nativeQuery = true)
+    org.springframework.data.domain.Page<String> findOrderKeyPage(
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to,
+            @Param("partnerId") Long partnerId,
+            @Param("partnerCode") String partnerCode,
+            @Param("keyword") String keyword,
+            @Param("stateRank") Integer stateRank,
+            org.springframework.data.domain.Pageable pageable);
+
+    /** 주문 키들에 묶인 발송 건 전부(삭제분 포함). {@link #findOrderKeyPage} 와 짝이다. */
+    @Query(value = "SELECT s.* FROM shipment s WHERE " + ORDER_KEY + " IN (:keys)",
+            nativeQuery = true)
+    List<Shipment> findByOrderKeys(@Param("keys") Collection<String> keys);
 }
