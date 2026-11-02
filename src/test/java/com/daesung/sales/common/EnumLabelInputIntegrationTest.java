@@ -79,6 +79,7 @@ class EnumLabelInputIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "E2090A");
         b.put("catName", "한글분류");
+        b.put("salesDivision", "교재");
         Long book = createId("/masters/products", b);
 
         post("/stock/inbound", Map.of("processedDate", "2090-01-05", "supplierClientId", sup,

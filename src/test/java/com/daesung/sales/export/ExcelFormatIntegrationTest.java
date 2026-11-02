@@ -46,7 +46,8 @@ class ExcelFormatIntegrationTest extends IntegrationTestSupport {
         Long wh = createId("/masters/warehouses", Map.of("code", "XFW" + SFX, "name", "물류", "type", "MAIN"));
         Long book = createId("/masters/products", Map.of("code", "XFB" + SFX, "name", "서식도서",
                 "contentType", "SELF", "price", 10000, "supplyRate", 70,
-                "catCode", "A" + YEAR + "A", "catName", "서식분류"));
+                "catCode", "A" + YEAR + "A", "catName", "서식분류",
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-05", "supplierClientId", sup,
                 "destinationWarehouseId", wh,
                 "items", List.of(Map.of("productId", book, "unitCost", 3000, "qty", 500))));

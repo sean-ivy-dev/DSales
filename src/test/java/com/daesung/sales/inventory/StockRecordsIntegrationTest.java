@@ -39,7 +39,8 @@ class StockRecordsIntegrationTest extends IntegrationTestSupport {
         mainWh = createId("/masters/warehouses", Map.of("code", "SRW" + SFX, "name", "물류창고", "type", "MAIN"));
         subWh = createId("/masters/warehouses", Map.of("code", "SRX" + SFX, "name", "보조창고", "type", "MAIN"));
         product = createId("/masters/products", Map.of("code", "SRB" + SFX, "name", "내역도서",
-                "contentType", "SELF", "price", 10000, "supplyRate", 70));
+                "contentType", "SELF", "price", 10000, "supplyRate", 70,
+                "salesDivision", "교재"));
 
         // 매입입고 60 → 입고구분·단가가 실려야 한다
         post("/stock/inbound", Map.of("processedDate", YEAR + "-05-01", "supplierClientId", sup,
@@ -88,7 +89,8 @@ class StockRecordsIntegrationTest extends IntegrationTestSupport {
         // ★전용 도서를 쓴다 — 공유 도서에 행을 더하면 다른 테스트의 건수 검증이 깨진다
         //   (실제로 그렇게 깨뜨렸다).
         Long solo = createId("/masters/products", Map.of("code", "SRN" + SFX, "name", "입고처없음도서",
-                "contentType", "SELF", "price", 10000, "supplyRate", 70));
+                "contentType", "SELF", "price", 10000, "supplyRate", 70,
+                "salesDivision", "교재"));
 
         // ‼️fetch join 을 INNER 로 걸면 이 행이 통째로 사라진다. LEFT 여야 한다.
         assertThat(post("/stock/inbound", Map.of(

@@ -60,6 +60,7 @@ class MaterialStockIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "X2092A01");
         b.put("catName", "격리검증분류");
+        b.put("salesDivision", "교재");
         book = createId("/masters/products", b);
 
         material = createId("/masters/materials", Map.of(

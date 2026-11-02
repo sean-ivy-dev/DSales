@@ -59,6 +59,7 @@ class ProductLogisRateIntegrationTest extends IntegrationTestSupport {
         b.put("catCode", "P" + YEAR + "A");
         b.put("catName", "단가분류");
         b.put("priceVisible", priceVisible);
+        b.put("salesDivision", "교재");
         return createId("/masters/products", b);
     }
 

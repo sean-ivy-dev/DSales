@@ -57,12 +57,14 @@ class UnshippedSalesIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "U" + YEAR + "A");
         b.put("catName", "미출고분류");
+        b.put("salesDivision", "교재");
         stocked = createId("/masters/products", b);
 
         // 문항사용료처럼 실물이 없는 상품 — 재고를 세지 않는다.
         Map<String, Object> b2 = new HashMap<>(b);
         b2.put("code", "USF" + SFX);
         b2.put("name", "문항사용료");
+        b2.put("salesDivision", "교재");
         b2.put("stockManaged", false);
         unstocked = createId("/masters/products", b2);
 

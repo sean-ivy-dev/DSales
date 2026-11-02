@@ -63,10 +63,13 @@ class SalesReportIntegrationTest extends IntegrationTestSupport {
     }
 
     private Long product(String code, String catCode, String catName) {
-        return createId("/masters/products", Map.of(
-                "code", code, "name", code + " 도서", "contentType", "SELF", "set", false,
-                "price", 10000, "taxFree", false, "grade", "고3",
-                "catCode", catCode, "catName", catName, "useYn", true));
+        // ‼️Map.of 는 10쌍이 한계다 — 세부구분(필수)까지 11쌍이라 HashMap 을 쓴다.
+        Map<String, Object> b = new java.util.HashMap<>();
+        b.put("code", code); b.put("name", code + " 도서"); b.put("contentType", "SELF");
+        b.put("set", false); b.put("price", 10000); b.put("taxFree", false); b.put("grade", "고3");
+        b.put("catCode", catCode); b.put("catName", catName); b.put("useYn", true);
+        b.put("salesDivision", "교재");
+        return createId("/masters/products", b);
     }
 
     private void inbound(Long whId, Long productId) {
@@ -84,10 +87,12 @@ class SalesReportIntegrationTest extends IntegrationTestSupport {
     }
 
     private Long externalProduct(String code) {
-        return createId("/masters/products", Map.of(
-                "code", code, "name", code + " 외부콘텐츠", "contentType", "EXTERNAL", "set", false,
-                "price", 10000, "taxFree", false, "grade", "고3",
-                "catCode", "E2026E01", "catName", "이감국어", "useYn", true));
+        Map<String, Object> b = new java.util.HashMap<>();
+        b.put("code", code); b.put("name", code + " 외부콘텐츠"); b.put("contentType", "EXTERNAL");
+        b.put("set", false); b.put("price", 10000); b.put("taxFree", false); b.put("grade", "고3");
+        b.put("catCode", "E2026E01"); b.put("catName", "이감국어"); b.put("useYn", true);
+        b.put("salesDivision", "교재");
+        return createId("/masters/products", b);
     }
 
     /**

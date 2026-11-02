@@ -43,7 +43,8 @@ class ReportableTargetIntegrationTest extends IntegrationTestSupport {
                 Map.of("code", "RTW" + SFX, "name", "물류", "type", "MAIN"));
         Long book = createId("/masters/products", Map.of(
                 "code", "RTB" + SFX, "name", "신고대상검증도서", "contentType", "SELF",
-                "price", 10000, "supplyRate", 70, "catCode", "R2088A01", "catName", "신고검증"));
+                "price", 10000, "supplyRate", 70, "catCode", "R2088A01", "catName", "신고검증",
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-02",
                 "supplierClientId", sup, "destinationWarehouseId", wh,
                 "items", List.of(Map.of("productId", book, "unitCost", 1000, "qty", 999))));

@@ -67,6 +67,7 @@ class DisposalUploadIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "U2093A01");
         b.put("catName", "업로드검증");
+        b.put("salesDivision", "교재");
         return createId("/masters/products", b);
     }
 

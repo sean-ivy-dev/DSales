@@ -59,6 +59,7 @@ class MultiSelectFilterIntegrationTest extends IntegrationTestSupport {
         // 분류코드 형식: [영문1자][연도4자][영문·숫자1~3자]
         b.put("catCode", "M" + YEAR + (System.nanoTime() % 100));
         b.put("catName", "다중분류");
+        b.put("salesDivision", "교재");
         book = createId("/masters/products", b);
 
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-05", "supplierClientId", sup,

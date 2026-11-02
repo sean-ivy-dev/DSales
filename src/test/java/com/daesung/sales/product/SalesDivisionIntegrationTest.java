@@ -106,16 +106,17 @@ class SalesDivisionIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("세부구분 미지정 상품은 통과하고 대분류는 미분류(null)로 나간다")
-    void 미지정은_허용_미분류() {
-        long productId = createId("/masters/products", Map.of(
+    @DisplayName("★세부구분 미지정은 **더 이상 등록할 수 없다**(G-3로 뒤집힘)")
+    void 미지정은_등록거부() {
+        // ‼️**뒤집힌 테스트다.** 예전엔 "미지정 상품은 통과하고 대분류는 미분류로 나간다"를
+        //   고정했다. 10/27 §7-C 3번("신규 상품에서 미분류가 생기지 않게")과 프론트 G-3로
+        //   **등록 자체를 막는 쪽**으로 바뀌었다. 미분류 상품은 이제 이관분으로만 남는다.
+        JsonNode r = post("/masters/products", Map.of(
                 "code", "PN" + sfx, "name", "미지정도서" + sfx,
                 "contentType", "SELF", "set", false, "price", 1000, "taxFree", true));
 
-        // 응답이 null 필드를 생략하므로(NON_NULL) "값이 없다"는 hasNonNull로 본다.
-        JsonNode p = data(get("/masters/products/" + productId));
-        assertThat(p.hasNonNull("majorCategory")).isFalse();
-        assertThat(p.hasNonNull("majorCategoryName")).isFalse();
+        assertThat(r.path("success").asBoolean()).as("%s", r).isFalse();
+        assertThat(r.path("error").path("message").asText()).contains("세부구분");
     }
 
     @Test

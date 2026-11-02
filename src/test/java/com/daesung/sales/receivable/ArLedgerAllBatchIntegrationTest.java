@@ -46,7 +46,8 @@ class ArLedgerAllBatchIntegrationTest extends IntegrationTestSupport {
                 Map.of("code", "ABW" + SFX, "name", "물류", "type", "MAIN"));
         Long book = createId("/masters/products", Map.of("code", "ABB" + SFX, "name", "배치도서",
                 "contentType", "SELF", "price", 10000, "supplyRate", 70,
-                "catCode", "A" + YEAR + "A", "catName", "배치분류"));
+                "catCode", "A" + YEAR + "A", "catName", "배치분류",
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-05", "supplierClientId", sup,
                 "destinationWarehouseId", wh,
                 "items", List.of(Map.of("productId", book, "unitCost", 3000, "qty", 9000))));

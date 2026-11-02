@@ -43,13 +43,17 @@ class MaterialMasterIntegrationTest extends IntegrationTestSupport {
         token();
         // 세트 2개 + 회차 2개(모두 products — 회차도 단품으로 팔린다)
         setA = createId("/masters/products", Map.of("code", "SETA" + SFX, "name", "국어 시즌1 SET",
-                "contentType", "SELF", "price", 40000, "supplyRate", 70));
+                "contentType", "SELF", "price", 40000, "supplyRate", 70,
+                "salesDivision", "교재"));
         setB = createId("/masters/products", Map.of("code", "SETB" + SFX, "name", "수학 시즌1 SET",
-                "contentType", "SELF", "price", 40000, "supplyRate", 70));
+                "contentType", "SELF", "price", 40000, "supplyRate", 70,
+                "salesDivision", "교재"));
         round1 = createId("/masters/products", Map.of("code", "RD1" + SFX, "name", "1회",
-                "contentType", "SELF", "price", 10000, "supplyRate", 70));
+                "contentType", "SELF", "price", 10000, "supplyRate", 70,
+                "salesDivision", "교재"));
         round2 = createId("/masters/products", Map.of("code", "RD2" + SFX, "name", "2회",
-                "contentType", "SELF", "price", 10000, "supplyRate", 70));
+                "contentType", "SELF", "price", 10000, "supplyRate", 70,
+                "salesDivision", "교재"));
 
         JsonNode omrRes = data(post("/masters/materials", Map.of(
                 "name", "국어 OMR" + SFX, "materialType", "OMR")));

@@ -56,6 +56,7 @@ class UploadAndFilterIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", CAT);
         b.put("catName", "업로드분류");
+        b.put("salesDivision", "교재");
         createId("/masters/products", b);
 
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-05", "supplierClientId", sup,

@@ -112,7 +112,8 @@ class VerificationScenarioIntegrationTest extends IntegrationTestSupport {
     @DisplayName("S-5 교재 외 콘텐츠(외부콘텐츠)도 동일 방정식이 성립한다")
     void s5_수불부_방정식_외부콘텐츠() {
         Long p = createId("/masters/products", Map.of(
-                "code", "VS-S5B", "name", "외부콘텐츠", "contentType", "EXTERNAL", "price", 20000));
+                "code", "VS-S5B", "name", "외부콘텐츠", "contentType", "EXTERNAL", "price", 20000,
+                "salesDivision", "교재"));
         assertLedgerEquation(p, "VS-S5B");
     }
 
@@ -202,7 +203,8 @@ class VerificationScenarioIntegrationTest extends IntegrationTestSupport {
         return createId("/masters/products",
                 Map.of("code", code, "name", code, "contentType", "SELF", "price", 20000,
                         // ★위탁출고는 공급률이 없으면 등록이 막힌다(나갈 때 조건 확정).
-                        "supplyRate", 75));
+                        "supplyRate", 75,
+                "salesDivision", "교재"));
     }
 
     private void inbound(Long p, int qty) {

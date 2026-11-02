@@ -64,6 +64,7 @@ class ConsignLedgerParityIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "C" + YEAR + "A");
         b.put("catName", "위탁모수분류");
+        b.put("salesDivision", "교재");
         book = createId("/masters/products", b);
 
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-05", "supplierClientId", sup,

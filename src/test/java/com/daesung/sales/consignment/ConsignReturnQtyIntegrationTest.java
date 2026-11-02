@@ -44,7 +44,8 @@ class ConsignReturnQtyIntegrationTest extends IntegrationTestSupport {
         consignWh = createId("/masters/warehouses", Map.of("code", "CRC" + SFX, "name", "위탁창고",
                 "type", "CONSIGN", "ownerClientId", partner));
         product = createId("/masters/products", Map.of("code", "CRB" + SFX, "name", "위탁도서",
-                "contentType", "SELF", "price", 10000, "supplyRate", 75));
+                "contentType", "SELF", "price", 10000, "supplyRate", 75,
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of("processedDate", "2052-03-01", "supplierClientId", sup,
                 "destinationWarehouseId", mainWh,
                 "items", List.of(Map.of("productId", product, "unitCost", 3000, "qty", 500))));

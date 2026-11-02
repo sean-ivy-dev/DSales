@@ -75,6 +75,7 @@ class BomWorkStatusIntegrationTest extends IntegrationTestSupport {
         m.put("supplyRate", 70);
         m.put("catCode", CAT);
         m.put("catName", "조립분류");
+        m.put("salesDivision", "교재");
         return createId("/masters/products", m);
     }
 

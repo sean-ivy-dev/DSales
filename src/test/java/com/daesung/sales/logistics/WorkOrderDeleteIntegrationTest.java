@@ -52,6 +52,7 @@ class WorkOrderDeleteIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "W2098A01");
         b.put("catName", "삭제검증");
+        b.put("salesDivision", "교재");
         Long book = createId("/masters/products", b);
 
         post("/stock/inbound", Map.of("processedDate", DATE, "supplierClientId", supplier,

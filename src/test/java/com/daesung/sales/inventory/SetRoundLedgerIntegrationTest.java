@@ -77,6 +77,7 @@ class SetRoundLedgerIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "S" + YEAR + "A");
         b.put("catName", "드릴다운분류");
+        b.put("salesDivision", "교재");
         return createId("/masters/products", b);
     }
 

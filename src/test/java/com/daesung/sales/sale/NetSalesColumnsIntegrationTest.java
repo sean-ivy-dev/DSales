@@ -46,10 +46,12 @@ class NetSalesColumnsIntegrationTest extends IntegrationTestSupport {
 
         selfBook = createId("/masters/products", Map.of("code", "NSA" + SFX, "name", "자체교재",
                 "contentType", "SELF", "price", 10000, "supplyRate", 70,
-                "catCode", "A2053" + CAT, "catName", "국어"));
+                "catCode", "A2053" + CAT, "catName", "국어",
+                "salesDivision", "교재"));
         extBook = createId("/masters/products", Map.of("code", "NSB" + SFX, "name", "외부콘텐츠",
                 "contentType", "EXTERNAL", "price", 20000, "supplyRate", 80,
-                "catCode", "B2053" + CAT, "catName", "수학"));
+                "catCode", "B2053" + CAT, "catName", "수학",
+                "salesDivision", "교재"));
 
         // 정상입고 200(원가 무관) + 매입입고 50@6000(외부콘텐츠 원가)
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-10", "supplierClientId", sup,

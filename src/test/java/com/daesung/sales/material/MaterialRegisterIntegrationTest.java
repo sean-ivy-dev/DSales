@@ -47,6 +47,7 @@ class MaterialRegisterIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "M2089A");
         b.put("catName", "자재분류");
+        b.put("salesDivision", "교재");
         return createId("/masters/products", b);
     }
 

@@ -45,7 +45,8 @@ class ArStatusSubtotalGroupIntegrationTest extends IntegrationTestSupport {
         Long sup = createId("/masters/clients", Map.of("code", "SGS" + SFX, "name", "인쇄", "type", "NORMAL"));
         wh = createId("/masters/warehouses", Map.of("code", "SGW" + SFX, "name", "물류", "type", "MAIN"));
         book = createId("/masters/products", Map.of("code", "SGB" + SFX, "name", "소계도서",
-                "contentType", "SELF", "price", 10000, "supplyRate", 75));
+                "contentType", "SELF", "price", 10000, "supplyRate", 75,
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-05", "supplierClientId", sup,
                 "destinationWarehouseId", wh,
                 "items", List.of(Map.of("productId", book, "unitCost", 3000, "qty", 500))));

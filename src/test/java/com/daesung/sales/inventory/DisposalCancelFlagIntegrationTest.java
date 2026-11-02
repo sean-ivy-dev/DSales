@@ -59,6 +59,7 @@ class DisposalCancelFlagIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "D2099A01");
         b.put("catName", "취소표시분류");
+        b.put("salesDivision", "교재");
         Long id = createId("/masters/products", b);
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-05", "supplierClientId", supplier,
                 "destinationWarehouseId", warehouse,

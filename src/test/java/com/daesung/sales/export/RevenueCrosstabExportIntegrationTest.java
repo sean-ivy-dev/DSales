@@ -55,7 +55,8 @@ class RevenueCrosstabExportIntegrationTest extends IntegrationTestSupport {
         Long product = createId("/masters/products", Map.of(
                 "code", "RXB" + SFX, "name", "과세도서", "contentType", "SELF",
                 "price", 10000, "taxFree", false, "useYn", true,
-                "catCode", "R2071R01", "catName", "크로스탭"));
+                "catCode", "R2071R01", "catName", "크로스탭",
+                "salesDivision", "교재"));
 
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-02",
                 "supplierClientId", sup, "destinationWarehouseId", wh,

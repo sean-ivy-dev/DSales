@@ -45,6 +45,7 @@ class ConcurrentEditIntegrationTest extends IntegrationTestSupport {
         b.put("taxFree", false);
         b.put("useYn", true);
         b.put("set", false);
+        b.put("salesDivision", "교재");
         product = createId("/masters/products", b);
     }
 

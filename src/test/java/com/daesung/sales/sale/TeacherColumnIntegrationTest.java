@@ -62,6 +62,7 @@ class TeacherColumnIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "T" + YEAR + "A");
         b.put("catName", "교사용분류");
+        b.put("salesDivision", "교재");
         Long book = createId("/masters/products", b);
 
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-05", "supplierClientId", sup,

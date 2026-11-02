@@ -56,11 +56,13 @@ class FrontFeedbackIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "F" + YEAR + "A");
         b.put("catName", "피드백분류");
+        b.put("salesDivision", "교재");
         Long book = createId("/masters/products", b);
 
         // ★정렬을 검증하려면 행이 둘 이상이어야 한다 — 한 종이면 순서가 바뀔 수가 없다.
         Map<String, Object> b2 = new HashMap<>(b);
         b2.put("code", bookCode + "B");
+        b2.put("salesDivision", "교재");
         b2.put("name", "피드백도서2");
         Long book2 = createId("/masters/products", b2);
 

@@ -75,6 +75,7 @@ class SalesSearchSchoolCouponIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "S2094A01");
         b.put("catName", "학교검증분류");
+        b.put("salesDivision", "교재");
         return createId("/masters/products", b);
     }
 

@@ -67,7 +67,8 @@ class StatusHistoryIntegrationTest extends IntegrationTestSupport {
     @DisplayName("매출 취소 — 취소 시점·변경자가 남는다")
     void 매출취소_이력() {
         Long p = createId("/masters/products",
-                Map.of("code", "SH-BK" + SFX, "name", "이력도서", "contentType", "SELF", "price", 10000));
+                Map.of("code", "SH-BK" + SFX, "name", "이력도서", "contentType", "SELF", "price", 10000,
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of(
                 "processedDate", "2026-06-01", "supplierClientId", supplier, "destinationWarehouseId", warehouse,
                 "items", List.of(Map.of("productId", p, "unitCost", 3000, "qty", 100))));

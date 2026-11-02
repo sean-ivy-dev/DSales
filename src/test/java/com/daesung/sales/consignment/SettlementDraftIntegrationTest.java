@@ -41,7 +41,8 @@ class SettlementDraftIntegrationTest extends IntegrationTestSupport {
         Long consignWh = createId("/masters/warehouses", Map.of("code", "DRC" + SFX, "name", "위탁창고",
                 "type", "CONSIGN", "ownerClientId", partner));
         product = createId("/masters/products", Map.of("code", "DRB" + SFX, "name", "위탁도서",
-                "contentType", "SELF", "price", 10000, "supplyRate", 70));
+                "contentType", "SELF", "price", 10000, "supplyRate", 70,
+                "salesDivision", "교재"));
 
         post("/stock/inbound", Map.of("processedDate", YEAR + "-03-01", "supplierClientId", sup,
                 "destinationWarehouseId", mainWh,

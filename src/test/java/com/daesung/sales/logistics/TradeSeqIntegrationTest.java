@@ -45,7 +45,8 @@ class TradeSeqIntegrationTest extends IntegrationTestSupport {
         wh = createId("/masters/warehouses",
                 Map.of("code", "TSW" + SFX, "name", "물류", "type", "MAIN"));
         book = createId("/masters/products", Map.of("code", "TSB" + SFX, "name", "거래순번도서",
-                "contentType", "SELF", "price", 10000, "supplyRate", 75));
+                "contentType", "SELF", "price", 10000, "supplyRate", 75,
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of("processedDate", "2034-05-01", "supplierClientId", sup,
                 "destinationWarehouseId", wh,
                 "items", List.of(Map.of("productId", book, "unitCost", 3000, "qty", 500))));

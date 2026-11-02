@@ -47,7 +47,8 @@ class ArPurchaserExclusionIntegrationTest extends IntegrationTestSupport {
         Long wh = createId("/masters/warehouses",
                 Map.of("code", "PXW" + SFX, "name", "물류", "type", "MAIN"));
         Long book = createId("/masters/products", Map.of("code", "PXP" + SFX, "name", "제외도서",
-                "contentType", "SELF", "price", 10000, "supplyRate", 70));
+                "contentType", "SELF", "price", 10000, "supplyRate", 70,
+                "salesDivision", "교재"));
 
         // ★매입입고 — 이것이 '매입처' 판정의 유일한 근거다(정상입고는 매입처가 아니다).
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-05",

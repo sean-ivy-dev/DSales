@@ -54,6 +54,7 @@ class VoucherCancelIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "V" + YEAR + "A");
         b.put("catName", "취소분류");
+        b.put("salesDivision", "교재");
         book = createId("/masters/products", b);
     }
 

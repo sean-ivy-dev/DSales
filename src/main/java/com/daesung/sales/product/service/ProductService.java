@@ -142,6 +142,14 @@ public class ProductService {
         if (req.name() != null && req.name().isBlank()) {
             throw new BusinessException(ErrorCode.INVALID_INPUT, "상품명은 비울 수 없습니다.");
         }
+        // ★수정에서 세부구분을 **비우는 것**만 막는다(프론트 G-3 "등록·수정 때 필수").
+        //   ‼️null 은 막지 않는다 — 이 화면은 부분 수정이라 null = "안 보냈다 = 유지"다.
+        //   필수로 쳐서 null 까지 막으면 정가만 고치려 보낸 요청이 거부된다.
+        //   ""(비우겠다)와 null(안 보냄)은 다른 의사표시라 여기서 갈라 준다(상품명과 같은 규칙).
+        if (req.salesDivision() != null && req.salesDivision().isBlank()) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "세부구분은 비울 수 없습니다 — 비우면 그 상품 매출이 미분류로 떨어집니다.");
+        }
         salesDivisionService.validateCode(req.salesDivision());
         Map<String, String> before = product.auditSnapshot();
         product.update(req.name(), req.contentType(), req.set(),

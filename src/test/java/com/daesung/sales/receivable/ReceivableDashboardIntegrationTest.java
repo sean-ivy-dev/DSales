@@ -31,7 +31,8 @@ class ReceivableDashboardIntegrationTest extends IntegrationTestSupport {
         Long supplier = createId("/masters/clients", Map.of("code", "AR-SUP", "name", "입고공급사", "type", "NORMAL"));
         Long wh = createId("/masters/warehouses", Map.of("code", "AR-WH", "name", "채권창고", "type", "MAIN"));
         Long p = createId("/masters/products",
-                Map.of("code", "AR-BK", "name", "채권도서", "contentType", "SELF", "price", 10000));
+                Map.of("code", "AR-BK", "name", "채권도서", "contentType", "SELF", "price", 10000,
+                "salesDivision", "교재"));
         Long partner = createId("/masters/clients", Map.of("code", "AR-CUST", "name", "채권거래처", "type", "NORMAL"));
         // 담보 200,000 설정
         put("/masters/clients/" + partner, Map.of(
@@ -71,7 +72,8 @@ class ReceivableDashboardIntegrationTest extends IntegrationTestSupport {
         Long supplier = createId("/masters/clients", Map.of("code", "LG-SUP", "name", "입고공급사2", "type", "NORMAL"));
         Long wh = createId("/masters/warehouses", Map.of("code", "LG-WH", "name", "장부창고", "type", "MAIN"));
         Long p = createId("/masters/products",
-                Map.of("code", "LG-BK", "name", "장부도서", "contentType", "SELF", "price", 10000));
+                Map.of("code", "LG-BK", "name", "장부도서", "contentType", "SELF", "price", 10000,
+                "salesDivision", "교재"));
         Long partner = createId("/masters/clients", Map.of("code", "LG-CUST", "name", "장부거래처", "type", "NORMAL"));
         inbound(wh, supplier, p);
         post("/sales/entries", Map.of(
@@ -104,7 +106,8 @@ class ReceivableDashboardIntegrationTest extends IntegrationTestSupport {
         Long wh = createId("/masters/warehouses", Map.of("code", "ALW" + sfx, "name", "창고", "type", "MAIN"));
         Long pr = createId("/masters/products", Map.of("code", "ALB" + sfx, "name", "국어교재",
                 "contentType", "SELF", "price", 10000, "taxFree", false,
-                "catCode", "H2050H01", "catName", "교재분류"));
+                "catCode", "H2050H01", "catName", "교재분류",
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of("processedDate", "2050-01-01", "supplierClientId", sup,
                 "destinationWarehouseId", wh,
                 "items", List.of(Map.of("productId", pr, "unitCost", 3000, "qty", 500))));
@@ -234,7 +237,8 @@ class ReceivableDashboardIntegrationTest extends IntegrationTestSupport {
         Long supplier = createId("/masters/clients", Map.of("code", "DB-SUP", "name", "입고공급사3", "type", "NORMAL"));
         Long wh = createId("/masters/warehouses", Map.of("code", "DB-WH", "name", "대시창고", "type", "MAIN"));
         Long mp = createId("/masters/products",
-                Map.of("code", "DB-BK", "name", "대시도서", "contentType", "SELF", "price", 10000));
+                Map.of("code", "DB-BK", "name", "대시도서", "contentType", "SELF", "price", 10000,
+                "salesDivision", "교재"));
         Long partner = createId("/masters/clients", Map.of("code", "DB-CUST", "name", "대시거래처", "type", "NORMAL"));
         inbound(wh, supplier, mp);
         // 6월 순매출 100,000 (공급률100 × 10부)
@@ -374,7 +378,8 @@ class ReceivableDashboardIntegrationTest extends IntegrationTestSupport {
         Long pt = createId("/masters/clients", Map.of("code", "DSP" + sfx, "name", "스냅처", "type", "NORMAL"));
         Long wh = createId("/masters/warehouses", Map.of("code", "DSW" + sfx, "name", "스냅창고", "type", "MAIN"));
         Long pr = createId("/masters/products", Map.of("code", "DSB" + sfx, "name", "스냅도서",
-                "contentType", "SELF", "price", 10000, "supplyRate", 100));
+                "contentType", "SELF", "price", 10000, "supplyRate", 100,
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of("processedDate", "2029-03-01", "supplierClientId", sup,
                 "destinationWarehouseId", wh,
                 "items", List.of(Map.of("productId", pr, "unitCost", 3000, "qty", 500))));
@@ -406,7 +411,8 @@ class ReceivableDashboardIntegrationTest extends IntegrationTestSupport {
         Long pt = createId("/masters/clients", Map.of("code", "CYP" + sfx, "name", "비교처", "type", "NORMAL"));
         Long wh = createId("/masters/warehouses", Map.of("code", "CYW" + sfx, "name", "창고", "type", "MAIN"));
         Long pr = createId("/masters/products", Map.of("code", "CYB" + sfx, "name", "도서",
-                "contentType", "SELF", "price", 10000, "supplyRate", 100));
+                "contentType", "SELF", "price", 10000, "supplyRate", 100,
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of("processedDate", "2044-01-01", "supplierClientId", sup,
                 "destinationWarehouseId", wh,
                 "items", List.of(Map.of("productId", pr, "unitCost", 3000, "qty", 100))));
@@ -437,7 +443,8 @@ class ReceivableDashboardIntegrationTest extends IntegrationTestSupport {
         Long pt = createId("/masters/clients", Map.of("code", "ACP" + sfx, "name", "누적처", "type", "NORMAL"));
         Long wh = createId("/masters/warehouses", Map.of("code", "ACW" + sfx, "name", "창고", "type", "MAIN"));
         Long pr = createId("/masters/products", Map.of("code", "ACB" + sfx, "name", "도서",
-                "contentType", "SELF", "price", 10000, "supplyRate", 100));
+                "contentType", "SELF", "price", 10000, "supplyRate", 100,
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of("processedDate", year + "-01-01", "supplierClientId", sup,
                 "destinationWarehouseId", wh,
                 "items", List.of(Map.of("productId", pr, "unitCost", 3000, "qty", 900))));

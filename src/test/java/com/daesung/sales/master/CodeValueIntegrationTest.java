@@ -47,6 +47,7 @@ class CodeValueIntegrationTest extends IntegrationTestSupport {
         if (productType != null) {
             m.put("productType", productType);
         }
+        m.put("salesDivision", "교재");
         return post("/masters/products", m);
     }
 

@@ -71,6 +71,7 @@ class SetStockIntegrationTest extends IntegrationTestSupport {
         b.put("taxFree", false);
         b.put("useYn", true);
         b.put("set", true);
+        b.put("salesDivision", "교재");
         return createId("/masters/products", b);
     }
 

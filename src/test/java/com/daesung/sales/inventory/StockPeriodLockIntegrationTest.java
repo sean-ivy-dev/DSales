@@ -59,6 +59,7 @@ class StockPeriodLockIntegrationTest extends IntegrationTestSupport {
         b.put("taxFree", false);
         b.put("useYn", true);
         b.put("set", false);
+        b.put("salesDivision", "교재");
         book = createId("/masters/products", b);
 
         assertThat(inbound(YEAR + "-03-02").path("success").asBoolean()).isTrue();

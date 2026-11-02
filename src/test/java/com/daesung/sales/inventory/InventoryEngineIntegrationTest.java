@@ -69,7 +69,8 @@ class InventoryEngineIntegrationTest extends IntegrationTestSupport {
     @DisplayName("BOM 조립/해체 — 완제품+구성품 재고 변환")
     void bom조립해체() {
         Long parent = createId("/masters/products",
-                Map.of("code", "IE-SET", "name", "세트", "contentType", "SELF", "set", true));
+                Map.of("code", "IE-SET", "name", "세트", "contentType", "SELF", "set", true,
+                "salesDivision", "교재"));
         Long c1 = product("IE-C1");
         Long c2 = product("IE-C2");
         // 세트 1개 = c1 2개 + c2 1개
@@ -158,7 +159,8 @@ class InventoryEngineIntegrationTest extends IntegrationTestSupport {
 
     private Long product(String code) {
         return createId("/masters/products",
-                Map.of("code", code, "name", code, "contentType", "SELF", "price", 10000));
+                Map.of("code", code, "name", code, "contentType", "SELF", "price", 10000,
+                "salesDivision", "교재"));
     }
 
     private void inbound(Long wh, Long productId, int qty) {

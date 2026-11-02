@@ -80,6 +80,7 @@ class RemainingFeedbackIntegrationTest extends IntegrationTestSupport {
         b.put("catCode", "F2104A01");
         b.put("catName", "잔여검증분류");
         b.put("stockManaged", stockManaged);
+        b.put("salesDivision", "교재");
         return createId("/masters/products", b);
     }
 

@@ -39,7 +39,8 @@ class RoundWorkStatusIntegrationTest extends IntegrationTestSupport {
         warehouse = createId("/masters/warehouses", Map.of("code", "RW-WH" + SFX, "name", "회차창고", "type", "MAIN"));
         product = createId("/masters/products", Map.of(
                 "code", "RW-BK" + SFX, "name", "회차도서", "contentType", "SELF", "price", 10000,
-                "catCode", CAT, "catName", "회차분류"));
+                "catCode", CAT, "catName", "회차분류",
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of(
                 "processedDate", "2026-06-01", "supplierClientId", supplier, "destinationWarehouseId", warehouse,
                 "items", List.of(Map.of("productId", product, "unitCost", 3000, "qty", 1000))));

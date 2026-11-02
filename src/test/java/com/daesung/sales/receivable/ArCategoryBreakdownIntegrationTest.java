@@ -30,6 +30,9 @@ import org.junit.jupiter.api.TestInstance;
 @DisplayName("외상매출현황 상품군별 분해")
 class ArCategoryBreakdownIntegrationTest extends IntegrationTestSupport {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
     private static final String SFX = "-AC" + (System.nanoTime() % 1_000_000L);
     private static final int YEAR = 2094;
     private static final String RANGE = "?fromDate=" + YEAR + "-01-01&toDate=" + YEAR + "-12-31";
@@ -78,10 +81,14 @@ class ArCategoryBreakdownIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "A" + YEAR + "A");
         b.put("catName", "상품군분류");
-        if (division != null) {
-            b.put("salesDivision", division);
+        // ‼️**세부구분 없이는 등록할 수 없다**(G-3). 미분류 상품은 이제 **이관분으로만** 생기므로,
+        //   정상 등록한 뒤 SQL로 비워 그 상태를 만든다 — 운영에서 미분류가 남아 있는 모습 그대로다.
+        b.put("salesDivision", (division != null) ? division : "교재");
+        Long id = createId("/masters/products", b);
+        if (division == null) {
+            jdbc.update("UPDATE products SET sales_division = NULL WHERE id = ?", id);
         }
-        return createId("/masters/products", b);
+        return id;
     }
 
     private void sell(Long wh, Long product, String shipmentType, int qty) {

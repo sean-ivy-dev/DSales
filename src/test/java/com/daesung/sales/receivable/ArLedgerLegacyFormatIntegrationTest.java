@@ -54,7 +54,8 @@ class ArLedgerLegacyFormatIntegrationTest extends IntegrationTestSupport {
         wh = createId("/masters/warehouses", Map.of("code", "LGW" + SFX, "name", "물류", "type", "MAIN"));
         book = createId("/masters/products", Map.of("code", "LGB" + SFX, "name", "양식도서",
                 "contentType", "SELF", "price", 10000, "supplyRate", 70,
-                "catCode", "A" + YEAR + "A", "catName", "양식분류"));
+                "catCode", "A" + YEAR + "A", "catName", "양식분류",
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-05", "supplierClientId", sup,
                 "destinationWarehouseId", wh,
                 "items", List.of(Map.of("productId", book, "unitCost", 3000, "qty", 500))));

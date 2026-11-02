@@ -59,6 +59,7 @@ class NegativeStockBlockIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "N" + YEAR + "A");
         b.put("catName", "음수분류");
+        b.put("salesDivision", "교재");
         book = createId("/masters/products", b);
 
         // 딱 100부만 넣는다 — 경계가 분명해야 "막혔다"가 무슨 뜻인지 읽힌다.
@@ -70,6 +71,7 @@ class NegativeStockBlockIntegrationTest extends IntegrationTestSupport {
         Map<String, Object> sb = new HashMap<>(b);
         sb.put("code", "NSSET" + SFX);
         sb.put("name", "음수세트");
+        sb.put("salesDivision", "교재");
         sb.put("set", true);
         setBook = createId("/masters/products", sb);
         put("/masters/products/" + setBook + "/bom",
@@ -118,6 +120,7 @@ class NegativeStockBlockIntegrationTest extends IntegrationTestSupport {
         b.put("contentType", "SELF");
         b.put("price", 10000);
         b.put("supplyRate", 70);
+        b.put("salesDivision", "교재");
         b.put("catCode", "N" + YEAR + "A");
         b.put("catName", "음수분류");
         Long p = createId("/masters/products", b);

@@ -157,7 +157,8 @@ class ConsignSettlementScenarioTest extends IntegrationTestSupport {
         // 매출등록(createEntries)은 처음부터 같은 조건으로 막고 있었다 — 규칙을 맞춘다.
         Long p = createId("/masters/products", Map.of(
                 "code", "CS-NORATE" + SFX, "name", "공급률없는도서",
-                "contentType", "SELF", "price", 20000));   // ← supplyRate 없음
+                "contentType", "SELF", "price", 20000,
+                "salesDivision", "교재"));   // ← supplyRate 없음
         post("/stock/inbound", Map.of(
                 "processedDate", "2026-06-01", "supplierClientId", supplier,
                 "destinationWarehouseId", mainWh,
@@ -185,7 +186,8 @@ class ConsignSettlementScenarioTest extends IntegrationTestSupport {
                 Map.of("code", code + SFX, "name", code, "contentType", "SELF", "price", 20000,
                         // ★공급률이 있어야 위탁출고가 등록된다 — 나갈 때 조건이 정해져야
                         //   나중에 정산할 수 있다(매출등록과 같은 규칙).
-                        "supplyRate", 75));
+                        "supplyRate", 75,
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of(
                 "processedDate", "2026-06-01", "supplierClientId", supplier, "destinationWarehouseId", mainWh,
                 "items", List.of(Map.of("productId", p, "unitCost", 3000, "qty", qty))));
@@ -232,7 +234,8 @@ class ConsignSettlementScenarioTest extends IntegrationTestSupport {
         Long cw = createId("/masters/warehouses", Map.of("code", "RQC" + sfx, "name", "위탁",
                 "type", "CONSIGN", "ownerClientId", pt));
         Long bk = createId("/masters/products", Map.of("code", "RQB" + sfx, "name", "디파인수학",
-                "contentType", "SELF", "price", 20000, "supplyRate", 75));
+                "contentType", "SELF", "price", 20000, "supplyRate", 75,
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of("processedDate", "2034-08-01", "supplierClientId", sup,
                 "destinationWarehouseId", mw,
                 "items", List.of(Map.of("productId", bk, "unitCost", 5000, "qty", 500))));
@@ -285,7 +288,8 @@ class ConsignSettlementScenarioTest extends IntegrationTestSupport {
         Long cw = createId("/masters/warehouses", Map.of("code", "ROC" + sfx, "name", "위탁",
                 "type", "CONSIGN", "ownerClientId", pt));
         Long bk = createId("/masters/products", Map.of("code", "ROB" + sfx, "name", "도서",
-                "contentType", "SELF", "price", 10000, "supplyRate", 75));
+                "contentType", "SELF", "price", 10000, "supplyRate", 75,
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of("processedDate", "2034-08-01", "supplierClientId", sup,
                 "destinationWarehouseId", mw,
                 "items", List.of(Map.of("productId", bk, "unitCost", 3000, "qty", 200))));
@@ -337,7 +341,8 @@ class ConsignSettlementScenarioTest extends IntegrationTestSupport {
         Long cw = createId("/masters/warehouses", Map.of("code", "CIC" + sfx, "name", "위탁",
                 "type", "CONSIGN", "ownerClientId", pt));
         Long bk = createId("/masters/products", Map.of("code", "CIB" + sfx, "name", "도서",
-                "contentType", "SELF", "price", 10000, "supplyRate", 75));
+                "contentType", "SELF", "price", 10000, "supplyRate", 75,
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of("processedDate", "2035-01-01", "supplierClientId", sup,
                 "destinationWarehouseId", mw,
                 "items", List.of(Map.of("productId", bk, "unitCost", 3000, "qty", 300))));

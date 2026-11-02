@@ -55,6 +55,7 @@ class SummaryFilterIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "S" + YEAR + "A");
         b.put("catName", "정리분류");
+        b.put("salesDivision", "교재");
         Long book = createId("/masters/products", b);
 
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-05", "supplierClientId", sup,

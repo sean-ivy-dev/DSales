@@ -79,6 +79,7 @@ class KeywordSearchIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "K" + YEAR + "A");
         b.put("catName", "키워드분류");
+        b.put("salesDivision", "교재");
         return createId("/masters/products", b);
     }
 

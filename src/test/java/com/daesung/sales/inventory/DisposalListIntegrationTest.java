@@ -36,7 +36,8 @@ class DisposalListIntegrationTest extends IntegrationTestSupport {
         wh = createId("/masters/warehouses", Map.of("code", "DPW" + SFX, "name", "폐기창고", "type", "MAIN"));
         product = createId("/masters/products", Map.of("code", "DPB" + SFX, "name", "폐기도서",
                 "contentType", "SELF", "price", 10000, "supplyRate", 70,
-                "catCode", "D2056" + (System.nanoTime() % 100), "catName", "폐기분류"));
+                "catCode", "D2056" + (System.nanoTime() % 100), "catName", "폐기분류",
+                "salesDivision", "교재"));
 
         post("/stock/inbound", Map.of("processedDate", YEAR + "-04-01", "supplierClientId", sup,
                 "destinationWarehouseId", wh,

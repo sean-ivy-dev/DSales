@@ -58,6 +58,7 @@ class ClientReply1002IntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "C2105A01");
         b.put("catName", "회신검증분류");
+        b.put("salesDivision", "교재");
         external = createId("/masters/products", b);
 
         schoolMega = "CRM" + SFX;
@@ -304,6 +305,7 @@ class ClientReply1002IntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "C2105B01");
         b.put("catName", "자재검증분류");
+        b.put("salesDivision", "교재");
         b.put("priceVisible", priceVisible);
         return createId("/masters/products", b);
     }

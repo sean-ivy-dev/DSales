@@ -102,6 +102,7 @@ class StandaloneLogisCostIntegrationTest extends IntegrationTestSupport {
         b.put("useYn", true);
         b.put("set", false);
         b.put("ledgerVisible", ledgerVisible);
+        b.put("salesDivision", "교재");
         return createId("/masters/products", b);
     }
 

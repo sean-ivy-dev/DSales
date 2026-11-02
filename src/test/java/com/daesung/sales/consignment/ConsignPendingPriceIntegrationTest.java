@@ -59,6 +59,7 @@ class ConsignPendingPriceIntegrationTest extends IntegrationTestSupport {
         b.put("taxFree", true);          // 세액은 수동입력이라 면세로 두어 금액만 본다
         b.put("catCode", "C" + YEAR + (System.nanoTime() % 100));
         b.put("catName", "위탁분류");
+        b.put("salesDivision", "교재");
         book = createId("/masters/products", b);
 
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-05", "supplierClientId", sup,

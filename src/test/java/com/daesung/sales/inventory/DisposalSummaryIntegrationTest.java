@@ -41,10 +41,12 @@ class DisposalSummaryIntegrationTest extends IntegrationTestSupport {
         // 같은 분류의 도서 2권 — 요약이 둘을 합쳐야 한다
         bookA = createId("/masters/products", Map.of("code", "DSA" + SFX, "name", "폐기도서A",
                 "contentType", "SELF", "price", 10000, "supplyRate", 70,
-                "catCode", CAT, "catName", "폐기분류"));
+                "catCode", CAT, "catName", "폐기분류",
+                "salesDivision", "교재"));
         bookB = createId("/masters/products", Map.of("code", "DSB" + SFX, "name", "폐기도서B",
                 "contentType", "SELF", "price", 10000, "supplyRate", 70,
-                "catCode", CAT, "catName", "폐기분류"));
+                "catCode", CAT, "catName", "폐기분류",
+                "salesDivision", "교재"));
 
         post("/stock/inbound", Map.of("processedDate", YEAR + "-04-01", "supplierClientId", sup,
                 "destinationWarehouseId", wh,

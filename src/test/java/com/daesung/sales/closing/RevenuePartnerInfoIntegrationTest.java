@@ -47,7 +47,8 @@ class RevenuePartnerInfoIntegrationTest extends IntegrationTestSupport {
         Long book = createId("/masters/products", Map.of(
                 "code", "RPB" + SFX, "name", "검증교재", "contentType", "SELF",
                 "price", 10000, "taxFree", false, "grade", "고3",
-                "catCode", "R2091A01", "catName", "검증분류", "useYn", true));
+                "catCode", "R2091A01", "catName", "검증분류", "useYn", true,
+                "salesDivision", "교재"));
 
         post("/stock/inbound", Map.of("processedDate", FROM, "supplierClientId", supplier,
                 "destinationWarehouseId", wh,

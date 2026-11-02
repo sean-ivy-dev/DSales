@@ -41,7 +41,12 @@ public record ProductCreateRequest(
         @Schema(description = "사용 여부(미지정 시 true)", example = "true")
         Boolean useYn,
 
-        @Schema(description = "세부구분(구 '매출구분' — 발주처 2026-08-31 명칭 통일). 매출액정리·순매출조회 집계기준", example = "정상")
+        @Schema(description = """
+                세부구분(구 '매출구분' — 발주처 2026-08-31 명칭 통일). 매출액정리·순매출조회 집계기준.
+                ★**필수**(10/27 §7-C 3번 "신규 상품에서 미분류가 생기지 않게", 프론트 G-3).
+                여기서 비우면 그 상품의 매출이 전부 '미분류'로 떨어져 외상매출현황 상품군이 비게 된다.""",
+                example = "정상", requiredMode = Schema.RequiredMode.REQUIRED)
+        @NotBlank(message = "세부구분은 필수입니다 — 비우면 그 상품 매출이 미분류로 떨어집니다")
         String salesDivision,
 
         @Schema(description = "상품년도(32p)", example = "2026")

@@ -47,6 +47,7 @@ class ProductPartialUpdateTest extends IntegrationTestSupport {
         m.put("catName", "부분분류");
         m.put("productYear", 2069);
         m.put("productType", "교재");
+        m.put("salesDivision", "교재");
         id = createId("/masters/products", m);
     }
 

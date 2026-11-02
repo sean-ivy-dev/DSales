@@ -52,9 +52,11 @@ class MaterialLedgerIntegrationTest extends IntegrationTestSupport {
         Long wh = createId("/masters/warehouses", Map.of("code", "MLW" + SFX, "name", "물류창고", "type", "MAIN"));
 
         setP = createId("/masters/products", Map.of("code", "MLSET" + SFX, "name", "국어 시즌1 SET",
-                "contentType", "SELF", "price", 40000, "supplyRate", 70));
+                "contentType", "SELF", "price", 40000, "supplyRate", 70,
+                "salesDivision", "교재"));
         round1 = createId("/masters/products", Map.of("code", "MLR1" + SFX, "name", "1회",
-                "contentType", "SELF", "price", 10000, "supplyRate", 70));
+                "contentType", "SELF", "price", 10000, "supplyRate", 70,
+                "salesDivision", "교재"));
 
         paper = data(post("/masters/materials", Map.of("code", "MLPP" + SFX,
                 "name", "국어 시즌1_01회", "materialType", "EXAM_PAPER"))).path("id").asLong();

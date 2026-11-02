@@ -55,6 +55,7 @@ class SaleDeleteIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "D" + YEAR + "A");
         b.put("catName", "삭제분류");
+        b.put("salesDivision", "교재");
         book = createId("/masters/products", b);
 
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-05", "supplierClientId", sup,

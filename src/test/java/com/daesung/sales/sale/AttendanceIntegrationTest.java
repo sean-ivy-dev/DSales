@@ -31,7 +31,8 @@ class AttendanceIntegrationTest extends IntegrationTestSupport {
         Long wh = createId("/masters/warehouses", Map.of("code", "ATW" + SFX, "name", "물류", "type", "MAIN"));
         Long book = createId("/masters/products", Map.of("code", "ATB" + SFX, "name", "응시도서",
                 "contentType", "SELF", "price", 10000, "supplyRate", 100, "grade", "3",
-                "productType", "교재"));
+                "productType", "교재",
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-01", "supplierClientId", sup,
                 "destinationWarehouseId", wh,
                 "items", List.of(Map.of("productId", book, "unitCost", 3000, "qty", 9999))));

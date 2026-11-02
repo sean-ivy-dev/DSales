@@ -25,7 +25,8 @@ class SoftDeleteIntegrationTest extends IntegrationTestSupport {
 
     private long product(String code, String name) {
         return createId("/masters/products",
-                Map.of("code", code, "name", name, "contentType", "SELF", "price", 10000));
+                Map.of("code", code, "name", name, "contentType", "SELF", "price", 10000,
+                "salesDivision", "교재"));
     }
 
     private long countBom(long parentId, boolean deletedOnly) {

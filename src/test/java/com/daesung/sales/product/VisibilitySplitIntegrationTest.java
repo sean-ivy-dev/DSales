@@ -56,6 +56,7 @@ class VisibilitySplitIntegrationTest extends IntegrationTestSupport {
         m.put("supplyRate", 70);
         m.put("catCode", CAT);
         m.put("catName", "분리분류");
+        m.put("salesDivision", "교재");
         return createId("/masters/products", m);
     }
 

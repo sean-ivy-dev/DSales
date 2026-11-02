@@ -29,6 +29,9 @@ import org.junit.jupiter.api.TestInstance;
 @DisplayName("미분류 매출 목록(10/27 피드백 §7-C-5)")
 class UnclassifiedSalesIntegrationTest extends IntegrationTestSupport {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
     private static final String SFX = "-UC" + (System.nanoTime() % 1_000_000L);
     private static final int YEAR = 2085;
     private static final String RANGE = "?fromDate=" + YEAR + "-01-01&toDate=" + YEAR + "-12-31";
@@ -47,7 +50,11 @@ class UnclassifiedSalesIntegrationTest extends IntegrationTestSupport {
         emptyCode = "UCE" + SFX;       // 세부구분 없음 → EMPTY
         okCode = "UCO" + SFX;          // 정상 매핑 → 목록에 안 나와야 한다
 
-        Long pEmpty = book(emptyCode, "미분류도서(빈값)", null);
+        // ‼️**세부구분 없이는 더 이상 등록할 수 없다**(G-3 — 10/27 §7-C 3번).
+        //   그래서 정상 등록한 뒤 **SQL로 비워** 이관분을 흉내 낸다 — 운영에서 미분류가
+        //   생길 수 있는 길이 이제 그것뿐이고, 테스트도 그 사실을 그대로 반영해야 한다.
+        Long pEmpty = book(emptyCode, "미분류도서(빈값)", "교재");
+        jdbc.update("UPDATE products SET sales_division = NULL WHERE id = ?", pEmpty);
         Long pOk = book(okCode, "정상도서", "교재");
 
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-05", "supplierClientId", sup,
@@ -69,9 +76,7 @@ class UnclassifiedSalesIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "A" + YEAR + "A");
         b.put("catName", "미분류분류");
-        if (division != null) {
-            b.put("salesDivision", division);
-        }
+        b.put("salesDivision", division);
         return createId("/masters/products", b);
     }
 
@@ -109,7 +114,7 @@ class UnclassifiedSalesIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("★UNKNOWN은 API로 만들 수 없다 — 모르는 세부구분은 상품 등록이 거부한다")
+    @DisplayName("★미분류는 API로 만들 수 없다 — 모르는 값도, 빈 값도 등록이 거부한다")
     void 모르는값은_등록거부() {
         // ‼️그래서 UNKNOWN(세부구분 값은 있는데 마스터에 없음)은 **이관 데이터에만** 존재한다.
         //   신규 등록 경로는 이미 막혀 있다(ProductService 가 salesDivisionService.validateCode 호출).

@@ -48,10 +48,12 @@ class MaterialPerRoundIntegrationTest extends IntegrationTestSupport {
         Long wh = createId("/masters/warehouses", Map.of("code", "PRW" + SFX, "name", "물류창고", "type", "MAIN"));
 
         setP = createId("/masters/products", Map.of("code", "PRSET" + SFX, "name", "국어 시즌1 SET",
-                "contentType", "SELF", "price", 40000, "supplyRate", 70));
+                "contentType", "SELF", "price", 40000, "supplyRate", 70,
+                "salesDivision", "교재"));
         for (int i = 1; i <= 4; i++) {
             rounds.add(createId("/masters/products", Map.of("code", "PRR" + i + SFX, "name", i + "회",
-                    "contentType", "SELF", "price", 10000, "supplyRate", 70)));
+                    "contentType", "SELF", "price", 10000, "supplyRate", 70,
+                "salesDivision", "교재")));
         }
 
         omr = data(post("/masters/materials", Map.of("code", "PROM" + SFX,

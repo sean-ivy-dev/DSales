@@ -57,7 +57,8 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
 
         // 미지정 시 기본값(수불부노출 true, Web게시 false)
         JsonNode def = data(post("/masters/products", Map.of(
-                "code", "MF-BK2", "name", "기본값 도서", "contentType", "SELF")));
+                "code", "MF-BK2", "name", "기본값 도서", "contentType", "SELF",
+                "salesDivision", "교재")));
         assertThat(def.path("ledgerVisible").asBoolean()).isTrue();
         assertThat(def.path("webVisible").asBoolean()).isFalse();
     }
@@ -108,7 +109,8 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
         Long wh2 = createId("/masters/warehouses",
                 Map.of("code", "DCW2" + u, "name", "받는창고", "type", "MAIN"));
         Long book = createId("/masters/products",
-                Map.of("code", "DCB" + u, "name", "중지도서", "contentType", "SELF"));
+                Map.of("code", "DCB" + u, "name", "중지도서", "contentType", "SELF",
+                "salesDivision", "교재"));
         post("/stock/inbound", Map.of("processedDate", "2026-04-01", "supplierClientId", sup,
                 "destinationWarehouseId", wh,
                 "items", List.of(Map.of("productId", book, "unitCost", 1000, "qty", 10))));
@@ -162,9 +164,11 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
         Long wh = createId("/masters/warehouses",
                 Map.of("code", "MF-LWH", "name", "수불부창고", "type", "MAIN"));
         Long visible = createId("/masters/products", Map.of(
-                "code", "MF-VIS", "name", "노출도서", "contentType", "SELF", "ledgerVisible", true));
+                "code", "MF-VIS", "name", "노출도서", "contentType", "SELF", "ledgerVisible", true,
+                "salesDivision", "교재"));
         Long hidden = createId("/masters/products", Map.of(
-                "code", "MF-HID", "name", "비노출도서", "contentType", "SELF", "ledgerVisible", false));
+                "code", "MF-HID", "name", "비노출도서", "contentType", "SELF", "ledgerVisible", false,
+                "salesDivision", "교재"));
         inbound(wh, visible);
         inbound(wh, hidden);
 
@@ -179,7 +183,8 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
                 Map.of("code", "MF-MSWH", "name", "모의고사창고", "type", "MAIN"));
         // 재고관리 안 함(모의고사) — 입고 전혀 없음
         Long exam = createId("/masters/products", Map.of(
-                "code", "MF-EXAM", "name", "더프모의고사", "contentType", "SELF", "stockManaged", false));
+                "code", "MF-EXAM", "name", "더프모의고사", "contentType", "SELF", "stockManaged", false,
+                "salesDivision", "교재"));
 
         // 입고 0인데도 정상출고 매출 성공(NEGATIVE_STOCK 안 남)
         JsonNode r = post("/sales/entries", Map.of(
@@ -198,7 +203,8 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
         //   차단을 넣었다가 발주처 기준으로 되돌렸다 — 막는 쪽으로 다시 바꾸기 전에 원문을 확인할 것.
         //   막지 않는 대신 응답 warnings[] 로 알린다.
         Long book = createId("/masters/products",
-                Map.of("code", "MF-BOOK", "name", "일반교재", "contentType", "SELF"));
+                Map.of("code", "MF-BOOK", "name", "일반교재", "contentType", "SELF",
+                "salesDivision", "교재"));
         JsonNode passed = post("/sales/entries", Map.of(
                 "salesDate", "2026-04-15", "partnerId", ownerFallback(), "warehouseId", wh,
                 "items", List.of(Map.of("productId", book, "shipmentType", "NORMAL_SHIP",
@@ -250,7 +256,8 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
         Long consign = createId("/masters/warehouses", Map.of("code", "CS-CONS", "name", "위탁창고",
                 "type", "CONSIGN", "ownerClientId", partner));   // 위탁창고는 소속 거래처 필수
         Long p = createId("/masters/products",
-                Map.of("code", "CS-BK", "name", "위탁도서", "contentType", "SELF", "price", 10000, "supplyRate", 75));
+                Map.of("code", "CS-BK", "name", "위탁도서", "contentType", "SELF", "price", 10000, "supplyRate", 75,
+                "salesDivision", "교재"));
         inbound(main, p);   // 물류창고 재고 100
 
         // 위탁출고 100 (물류→위탁)
@@ -291,7 +298,8 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
         Long partner = createId("/masters/clients", Map.of("code", "CX-CUST", "name", "취소거래처", "type", "NORMAL"));
         Long consign = createId("/masters/warehouses", Map.of("code", "CX-CONS", "name", "위탁",
                 "type", "CONSIGN", "ownerClientId", partner));   // 위탁창고는 소속 거래처 필수
-        Long p = createId("/masters/products", Map.of("code", "CX-BK", "name", "취소도서", "contentType", "SELF", "price", 10000, "supplyRate", 75));
+        Long p = createId("/masters/products", Map.of("code", "CX-BK", "name", "취소도서", "contentType", "SELF", "price", 10000, "supplyRate", 75,
+                "salesDivision", "교재"));
         inbound(main, p);
 
         Long coId = data(post("/consignment/out", Map.of(
@@ -342,7 +350,8 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
         // ★정가·공급률이 있어야 위탁출고가 등록된다 — 나갈 때 조건이 정해져야 정산할 수 있다.
         //   예전엔 둘 다 비어도 출고가 됐고, 그 미결은 정산 때 가서야 막혔다(이미 물건이 나간 뒤다).
         Long p = createId("/masters/products", Map.of("code", "CR-BK", "name", "위탁반품도서",
-                "contentType", "SELF", "price", 10000, "supplyRate", 75));
+                "contentType", "SELF", "price", 10000, "supplyRate", 75,
+                "salesDivision", "교재"));
         inbound(main, p);   // 물류 100
 
         // 위탁출고 100 → 물류 0, 위탁 100
@@ -384,7 +393,8 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
         Long consign = createId("/masters/warehouses", Map.of("code", "CC-CONS", "name", "위탁",
                 "type", "CONSIGN", "ownerClientId", partner));   // 위탁창고는 소속 거래처 필수
         Long p = createId("/masters/products",
-                Map.of("code", "CC-BK", "name", "위탁동시성도서", "contentType", "SELF", "price", 10000, "supplyRate", 75));
+                Map.of("code", "CC-BK", "name", "위탁동시성도서", "contentType", "SELF", "price", 10000, "supplyRate", 75,
+                "salesDivision", "교재"));
         inbound(main, p);   // 물류 100
 
         // 위탁출고 100 → 미결 잔여 100
@@ -455,7 +465,8 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
     void 반품교재식_범위검증() {
         Long wh = createId("/masters/warehouses", Map.of("code", "RB-WH", "name", "반품창고", "type", "MAIN"));
         Long p = createId("/masters/products",
-                Map.of("code", "RB-BK", "name", "교재반품도서", "contentType", "SELF", "price", 10000));
+                Map.of("code", "RB-BK", "name", "교재반품도서", "contentType", "SELF", "price", 10000,
+                "salesDivision", "교재"));
         Long partner = createId("/masters/clients", Map.of("code", "RB-CUST", "name", "교재반품거래처", "type", "NORMAL"));
         inbound(wh, p);   // 물류 100
 
@@ -528,7 +539,8 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
         // 도서: 분류(대분류)·학년 세팅
         Long p = createId("/masters/products", Map.of(
                 "code", "NV-BK", "name", "노출도서", "contentType", "SELF", "price", 10000,
-                "grade", "고2", "catCode", "S2026A02", "catName", "국어모의고사"));
+                "grade", "고2", "catCode", "S2026A02", "catName", "국어모의고사",
+                "salesDivision", "교재"));
         Long partner = createId("/masters/clients", Map.of(
                 "code", "NV-CUST", "name", "진주 노출도서", "cityName", "진주", "name1", "노출도서",
                 "region", "경남", "clientCategory", "특약점", "type", "NORMAL"));
@@ -567,7 +579,8 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
         //   (도서코드가 전역 고유)로는 어떤 값도 맞지 않아 업로드가 100% 실패했다(2026-09-11 발견).
         createId("/masters/products", Map.of("code", "01", "name", "업로드도서",
                 "contentType", "SELF", "price", 10000,
-                "catCode", "U2026A", "catName", "업로드분류"));
+                "catCode", "U2026A", "catName", "업로드분류",
+                "salesDivision", "교재"));
         createId("/masters/clients", Map.of("code", "UPCUST", "name", "업로드거래처", "type", "NORMAL"));
 
         JsonNode r = uploadXlsx(buildUploadXlsx());
@@ -725,8 +738,12 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
         assertThat(data(r).path("items").get(0).path("supplyAmount").asLong()).isEqualTo(70_000);
 
         // 매핑 없는 상품 + 공급률 미입력 → 오류
+        // ‼️세부구분은 필수가 됐지만(G-3) **매핑이 걸린 대분류를 주면 안 된다** —
+        //   위에서 거래처×TEXTBOOK 에 70%를 매핑해 두었으므로 '교재'를 주면 자동적용에 성공해
+        //   이 테스트가 보려던 "매핑 없음 → 오류"가 사라진다. 다른 대분류를 쓴다.
         Long p2 = createId("/masters/products",
-                Map.of("code", "AP-NOBK", "name", "매핑없음도서", "contentType", "SELF", "price", 10000));
+                Map.of("code", "AP-NOBK", "name", "매핑없음도서", "contentType", "SELF", "price", 10000,
+                "salesDivision", "모의고사"));
         inbound(wh, p2);
         JsonNode fail = post("/sales/entries", Map.of(
                 "salesDate", "2026-04-20", "partnerId", partner, "warehouseId", wh,
@@ -763,16 +780,19 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
         // 법인마다 뒤 자릿수가 다르다 — 교재 6자(A2026A), 연구소 8자(M2026A01). 둘 다 허용해야 한다.
         assertThat(post("/masters/products", Map.of(
                 "code", "CC-OK6", "name", "6자형식", "contentType", "SELF",
-                "catCode", "A2026A")).path("success").asBoolean())
+                "catCode", "A2026A",
+                "salesDivision", "교재")).path("success").asBoolean())
                 .as("교재 법인 6자 형식은 통과해야 함").isTrue();
         assertThat(post("/masters/products", Map.of(
                 "code", "CC-OK8", "name", "8자형식", "contentType", "SELF",
-                "catCode", "M2026A01")).path("success").asBoolean())
+                "catCode", "M2026A01",
+                "salesDivision", "교재")).path("success").asBoolean())
                 .as("연구소 8자 형식은 통과해야 함").isTrue();
 
         // 연도가 빠진 옛 표기(A01)는 리포트 집계축을 깨뜨린다 → 거부
         JsonNode noYear = post("/masters/products", Map.of(
-                "code", "CC-BAD1", "name", "연도없음", "contentType", "SELF", "catCode", "A01"));
+                "code", "CC-BAD1", "name", "연도없음", "contentType", "SELF", "catCode", "A01",
+                "salesDivision", "교재"));
         assertThat(noYear.path("success").asBoolean()).as("연도 없는 코드: %s", noYear).isFalse();
         assertThat(noYear.path("error").path("code").asText()).isEqualTo("INVALID_INPUT");
 
@@ -780,13 +800,15 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
         for (String bad : new String[] {"a2026A01", "A2026A0123", "A2026-01", "2026A01"}) {
             assertThat(post("/masters/products", Map.of(
                     "code", "CC-BAD-" + bad.hashCode(), "name", "불량", "contentType", "SELF",
-                    "catCode", bad)).path("success").asBoolean())
+                    "catCode", bad,
+                "salesDivision", "교재")).path("success").asBoolean())
                     .as("거부돼야 할 코드: %s", bad).isFalse();
         }
 
         // 미입력은 허용 — 분류를 나중에 지정하는 상품이 있다
         assertThat(post("/masters/products", Map.of(
-                "code", "CC-NULL", "name", "분류미지정", "contentType", "SELF")).path("success").asBoolean())
+                "code", "CC-NULL", "name", "분류미지정", "contentType", "SELF",
+                "salesDivision", "교재")).path("success").asBoolean())
                 .as("분류코드 미입력은 허용").isTrue();
     }
 
@@ -838,9 +860,11 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
         Long partner = createId("/masters/clients", Map.of("code", "TX-CUST", "name", "세액거래처", "type", "NORMAL"));
         // 과세 상품(taxFree=false)
         Long taxable = createId("/masters/products", Map.of(
-                "code", "TX-TAXABLE", "name", "과세도서", "contentType", "SELF", "price", 10000, "taxFree", false));
+                "code", "TX-TAXABLE", "name", "과세도서", "contentType", "SELF", "price", 10000, "taxFree", false,
+                "salesDivision", "교재"));
         Long free = createId("/masters/products", Map.of(
-                "code", "TX-FREE", "name", "면세도서", "contentType", "SELF", "price", 10000, "taxFree", true));
+                "code", "TX-FREE", "name", "면세도서", "contentType", "SELF", "price", 10000, "taxFree", true,
+                "salesDivision", "교재"));
         inbound(wh, taxable);
         inbound(wh, free);
 
@@ -1031,7 +1055,8 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
         // 특히 재고관리가 꺼지면 매출을 넣어도 재고가 차감되지 않는데 오류조차 나지 않는다.
         String sfx = "-FX" + (System.nanoTime() % 1_000_000L);
         Long id = createId("/masters/products", Map.of("code", "FX" + sfx, "name", "플래그도서",
-                "contentType", "SELF", "price", 10000));
+                "contentType", "SELF", "price", 10000,
+                "salesDivision", "교재"));
 
         put("/masters/products/" + id, Map.of("name", "플래그도서(수정)",
                 "contentType", "SELF", "price", 12000));
@@ -1072,7 +1097,8 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
         List<Long> ids = new ArrayList<>();
         for (int i = 1; i <= 3; i++) {
             ids.add(createId("/masters/products", Map.of("code", "BF" + i + sfx,
-                    "name", "일괄도서" + i, "contentType", "SELF", "price", 10000)));
+                    "name", "일괄도서" + i, "contentType", "SELF", "price", 10000,
+                "salesDivision", "교재")));
         }
 
         JsonNode r = data(put("/masters/products/flags",
@@ -1120,7 +1146,8 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
         // 전 건을 훑고 아무것도 안 하는 요청이라, 조용히 성공시키면 담당자가 적용됐다고 오해한다.
         String sfx = "-BN" + (System.nanoTime() % 1_000_000L);
         Long id = createId("/masters/products", Map.of("code", "BN" + sfx,
-                "name", "무항목", "contentType", "SELF", "price", 1000));
+                "name", "무항목", "contentType", "SELF", "price", 1000,
+                "salesDivision", "교재"));
 
         assertThat(exchangeRaw(HttpMethod.PUT, "/masters/products/flags",
                 Map.of("productIds", List.of(id)), token(), null).getStatusCode().value())
@@ -1136,7 +1163,8 @@ class MasterFieldIntegrationTest extends IntegrationTestSupport {
         Long wh = createId("/masters/warehouses", Map.of("code", "GPW" + sfx,
                 "name", "본사물류창고", "type", "MAIN", "memo", "본사 1층"));
         Long pr = createId("/masters/products", Map.of("code", "GPB" + sfx, "name", "도서",
-                "contentType", "SELF", "price", 10000, "supplyRate", 75));
+                "contentType", "SELF", "price", 10000, "supplyRate", 75,
+                "salesDivision", "교재"));
 
         // 31p 창고 — 사용여부 기본 true, 비고 저장
         JsonNode w = data(get("/masters/warehouses/" + wh));

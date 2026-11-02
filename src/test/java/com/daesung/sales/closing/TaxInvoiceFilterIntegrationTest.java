@@ -60,6 +60,7 @@ class TaxInvoiceFilterIntegrationTest extends IntegrationTestSupport {
         m.put("taxFree", taxFree);
         m.put("catCode", "T" + YEAR + (System.nanoTime() % 100));
         m.put("catName", "필터분류");
+        m.put("salesDivision", "교재");
         return createId("/masters/products", m);
     }
 

@@ -43,6 +43,7 @@ class FieldFeedback1014IntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "F2108A01");
         b.put("catName", "현장검증분류");
+        b.put("salesDivision", "교재");
         product = createId("/masters/products", b);
     }
 
@@ -383,6 +384,7 @@ class FieldFeedback1014IntegrationTest extends IntegrationTestSupport {
         before.put("contentType", "SELF");
         before.put("price", 1000);
         before.put("catCode", "U2108A01");
+        before.put("salesDivision", "교재");
         before.put("catName", "갱신검증분류");
         long oldId = createId("/masters/products", before);
 
@@ -416,7 +418,8 @@ class FieldFeedback1014IntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "S2108A01");
         b.put("catName", "가벼운응답분류");
-        b.put("salesDivision", "교재");
+   
+        b.put("salesDivision", "교재");     b.put("salesDivision", "교재");
         b.put("grade", "3");
         createId("/masters/products", b);
 
@@ -462,6 +465,7 @@ class FieldFeedback1014IntegrationTest extends IntegrationTestSupport {
         b.put("code", "UPA" + SFX);
         b.put("name", "수정이력 없는 도서");
         b.put("contentType", "SELF");
+        b.put("salesDivision", "교재");
         b.put("price", 1000);
         b.put("catCode", "P2108A01");
         b.put("catName", "갱신기준분류");

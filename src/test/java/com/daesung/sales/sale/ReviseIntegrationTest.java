@@ -71,6 +71,7 @@ class ReviseIntegrationTest extends IntegrationTestSupport {
         b.put("catCode", "R2103A01");
         b.put("catName", "수정검증분류");
         b.put("taxFree", taxFree);
+        b.put("salesDivision", "교재");
         Long id = createId("/masters/products", b);
         post("/stock/inbound", Map.of("processedDate", DATE, "supplierClientId", supplier,
                 "destinationWarehouseId", warehouse,

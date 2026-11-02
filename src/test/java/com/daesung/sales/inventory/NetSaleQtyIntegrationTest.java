@@ -58,6 +58,7 @@ class NetSaleQtyIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "Q" + YEAR + "A");
         b.put("catName", "순매출분류");
+        b.put("salesDivision", "교재");
         book = createId("/masters/products", b);
 
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-05", "supplierClientId", sup,

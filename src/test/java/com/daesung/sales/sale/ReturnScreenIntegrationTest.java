@@ -56,6 +56,7 @@ class ReturnScreenIntegrationTest extends IntegrationTestSupport {
         b.put("supplyRate", 70);
         b.put("catCode", "R" + YEAR + (System.nanoTime() % 100));
         b.put("catName", "반품분류");
+        b.put("salesDivision", "교재");
         book = createId("/masters/products", b);
 
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-05", "supplierClientId", sup,
