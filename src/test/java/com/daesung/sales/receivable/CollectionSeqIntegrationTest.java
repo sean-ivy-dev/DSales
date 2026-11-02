@@ -42,6 +42,9 @@ class CollectionSeqIntegrationTest extends IntegrationTestSupport {
     private Long partnerA;
     private Long partnerB;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
     @BeforeAll
     void seed() {
         token();
@@ -106,5 +109,65 @@ class CollectionSeqIntegrationTest extends IntegrationTestSupport {
         JsonNode row = found.path("content").get(0);
         assertThat(row.path("collSeq").asInt()).isEqualTo(seq);
         assertThat(row.path("collAmt").asLong()).as("두 번째로 넣은 그 수금").isEqualTo(22_000);
+    }
+
+    @Test
+    @DisplayName("★★백필한 수금 뒤에도 번호가 이어진다 — 같은 번호가 둘이 되면 안 된다")
+    void 백필뒤에도_번호가_이어진다() {
+        // V108 백필이 뒤집은 지점(대성 테스트 2026-11-02 #53) —
+        //   V104 는 컬럼만 만들고 기존 수금을 채우지 않아, 배포 전 수금이 전부 공란이었다.
+        //   백필은 그걸 채우되 **채번 카운터까지 같이 올려야** 한다. 안 올리면 그 범위의
+        //   다음 수금이 1 부터 다시 나와 같은 번호가 둘이 된다.
+        //
+        // 여기서는 그 상황을 만든다 — 순번을 **일부러 지운 뒤**(백필 전 상태) 백필과 같은
+        // 규칙으로 메우고, 그 다음 등록이 겹치지 않는지 본다.
+        String day = "2097-03-03";
+        long c1 = collect(partnerB, day, 1_000L).path("id").asLong();
+        long c2 = collect(partnerB, day, 2_000L).path("id").asLong();
+
+        // 백필 전 상태 재현: 두 건의 순번을 비운다.
+        jdbc.update("UPDATE collection SET coll_seq = NULL WHERE id IN (?, ?)", c1, c2);
+        // V108 (1)과 같은 규칙으로 메운다.
+        jdbc.update("""
+                UPDATE collection c
+                  JOIN (SELECT x.id,
+                               COALESCE(m.mx,0) + ROW_NUMBER() OVER
+                                 (PARTITION BY x.partner_id, x.coll_date ORDER BY x.id) rn
+                          FROM collection x
+                          LEFT JOIN (SELECT partner_id, coll_date, MAX(coll_seq) mx
+                                       FROM collection WHERE coll_seq IS NOT NULL
+                                      GROUP BY partner_id, coll_date) m
+                                 ON m.partner_id=x.partner_id AND m.coll_date=x.coll_date
+                         WHERE x.coll_seq IS NULL AND x.deleted_at IS NULL) t ON t.id=c.id
+                   SET c.coll_seq = t.rn
+                """);
+        // V108 (2)와 같은 규칙으로 카운터를 맞춘다.
+        jdbc.update("""
+                INSERT INTO seq_registry (seq_name, seq_val)
+                SELECT CONCAT('seq_collection_seq:', partner_id, ':',
+                              DATE_FORMAT(coll_date, '%Y-%m-%d')), MAX(coll_seq)
+                  FROM collection WHERE coll_seq IS NOT NULL
+                 GROUP BY partner_id, coll_date
+                ON DUPLICATE KEY UPDATE seq_val = GREATEST(seq_registry.seq_val, VALUES(seq_val))
+                """);
+
+        Integer s1 = jdbc.queryForObject("SELECT coll_seq FROM collection WHERE id=?",
+                Integer.class, c1);
+        Integer s2 = jdbc.queryForObject("SELECT coll_seq FROM collection WHERE id=?",
+                Integer.class, c2);
+        assertThat(List.of(s1, s2)).as("백필로 1,2 가 채워진다").containsExactly(1, 2);
+
+        // ★다음 수금이 1 로 돌아가지 않는다.
+        int next = collect(partnerB, day, 3_000L).path("collSeq").asInt();
+        assertThat(next).as("백필 뒤에도 이어진다").isEqualTo(3);
+
+        // 그 범위에 같은 번호가 둘인 수금이 없다.
+        Integer dup = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM (
+                  SELECT coll_seq FROM collection
+                   WHERE partner_id = ? AND coll_date = ? AND deleted_at IS NULL
+                   GROUP BY coll_seq HAVING COUNT(*) > 1) d
+                """, Integer.class, partnerB, day);
+        assertThat(dup).as("중복 번호 없음").isZero();
     }
 }
