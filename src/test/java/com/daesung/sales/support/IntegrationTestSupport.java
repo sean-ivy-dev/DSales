@@ -179,6 +179,16 @@ public abstract class IntegrationTestSupport {
         }
     }
 
+    /** 특약점 사이트 서버 간 호출(GET, 바이너리). PDF 다운로드 검증용. */
+    protected ResponseEntity<byte[]> getBytesAsDealerSite(String path, String key) {
+        HttpHeaders h = new HttpHeaders();
+        if (key != null) {
+            h.add("X-Dealer-Site-Key", key);
+        }
+        return rest.exchange("/api/v1" + path, HttpMethod.GET,
+                new org.springframework.http.HttpEntity<>(null, h), byte[].class);
+    }
+
     /** data 노드만 반환(성공 응답 가정). */
     protected JsonNode data(JsonNode apiResponse) {
         return apiResponse.path("data");

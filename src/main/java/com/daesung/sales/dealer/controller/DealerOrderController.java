@@ -3,6 +3,7 @@ package com.daesung.sales.dealer.controller;
 import com.daesung.sales.common.response.ApiResponse;
 import com.daesung.sales.dealer.dto.DealerOrderRequest;
 import com.daesung.sales.dealer.dto.DealerShippedOrderRow;
+import com.daesung.sales.document.dto.PartnerDocumentDtos;
 import com.daesung.sales.logistics.entity.DeliveryType;
 import com.daesung.sales.sale.dto.TransactionStatementResponse;
 import com.daesung.sales.dealer.service.DealerOrderService;
@@ -15,6 +16,7 @@ import java.time.LocalDate;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -41,6 +43,7 @@ public class DealerOrderController {
 
     private final DealerOrderService dealerOrderService;
     private final com.daesung.sales.dealer.service.DealerStatementService dealerStatementService;
+    private final com.daesung.sales.dealer.service.DealerDocumentService dealerDocumentService;
 
     @Operation(summary = "새 주문 접수(특약점 → 매출 주문)", description = """
             특약점 사이트 **[새 주문] 탭**(과목별·모의고사·교재)에서 들어온 주문을
@@ -112,5 +115,53 @@ public class DealerOrderController {
             @Parameter(description = "주문 거래처 코드", example = "A10A195")
             @RequestParam String partnerCode) {
         return ApiResponse.success(dealerStatementService.statement(partnerCode, orderNo));
+    }
+
+    @Operation(summary = "내 PDF 보관함 목록(최근 12개월)", description = """
+            그 거래처의 매출(SALES)·성적(RESULT) PDF 목록을 **기준월** 순으로 내린다.
+
+            근거: 10/26 §7 — "보관·열람: 사이트에서 **월을 골라** 지난달 PDF를 볼 수 있다.
+            범위는 **최근 12개월**이다. 이보다 오래된 파일은 지우지 않는다."
+            §10-3 — "사이트 서버가 매출 API를 서버 간 호출 … 대상은 노출 도서, 거래명세서,
+            송장, **PDF**다."
+
+            · 기본 범위가 **최근 12개월**이다. `fromMonth`·`toMonth`(yyyy-MM)로 좁힐 수 있다.
+            · 오래된 파일은 지우지 않으므로, 범위를 넓게 주면 그 이전 것도 나온다.
+            · 내용(PDF 바이트)은 목록에 담지 않는다 — 수백 개를 함께 읽으면 앱이 넘어간다.
+              파일은 아래 다운로드로 받는다.
+
+            ‼️**DSRE 로 올린 기존 PDF 는 이 목록에 없다.** 그 파일들은 사이트 서버의 공개 폴더
+            (`webapps/DOC/PDF`)에 있고 우리에게 바이트가 없어, 목록에 끼우면 다운로드가 깨진다.
+            §7 "기존 PDF도 계속 보이게 한다"는 **사이트가 자기 폴더 파일을 함께 보여주는 것**으로
+            충족된다(§7 "같은 표를 쓸지 이관할지는 개발에서 판단한다" — 이관하지 않기로 판단했다).""")
+    @GetMapping("/documents")
+    public ApiResponse<List<PartnerDocumentDtos.Row>> documents(
+            @Parameter(description = "거래처 코드", example = "A10A195")
+            @RequestParam String partnerCode,
+            @Parameter(description = "종류 SALES/RESULT. 미지정=전체") @RequestParam(required = false)
+            String docType,
+            @Parameter(description = "기준월 시작(yyyy-MM). 미지정 시 11개월 전")
+            @RequestParam(required = false) String fromMonth,
+            @Parameter(description = "기준월 종료(yyyy-MM). 미지정 시 이번 달")
+            @RequestParam(required = false) String toMonth) {
+        return ApiResponse.success(
+                dealerDocumentService.documents(partnerCode, docType, fromMonth, toMonth));
+    }
+
+    @Operation(summary = "내 PDF 다운로드(인증)", description = """
+            근거: 10/26 §7 '열람 권한' — "서버가 **로그인 거래처 본인 파일인지 확인한 뒤**
+            내려준다. 현행 공개 폴더 직접 링크 방식은 **파일명만 알면 남의 PDF 가 열릴 수 있으니**,
+            확인 후 인증 다운로드로 바꾼다."
+
+            · 본인 파일이 아니면 **"없음"과 같은 답**이다 — "있지만 당신 것이 아니다"는 그 자체로
+              남의 파일 존재를 알려준다(Phase 0 order IDOR 과 같은 유형).
+            · 거래처는 **파일 id 가 아니라 `partnerCode` 로** 판정한다. id 만 믿으면 번호를 바꿔
+              남의 PDF 를 받는다.""")
+    @GetMapping("/documents/{id}")
+    public ResponseEntity<byte[]> downloadDocument(
+            @Parameter(description = "문서 id") @PathVariable Long id,
+            @Parameter(description = "거래처 코드", example = "A10A195")
+            @RequestParam String partnerCode) {
+        return dealerDocumentService.download(partnerCode, id);
     }
 }
