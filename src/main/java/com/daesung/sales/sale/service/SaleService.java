@@ -834,6 +834,23 @@ public class SaleService {
         }
     }
 
+    /**
+     * 대분류가 <b>특강</b>인 세부구분 코드들. 출고/반품 조회에서 특강을 빼는 데 쓴다.
+     *
+     * <p>매출 행에는 세부구분(코드)만 있고 대분류는 마스터에 있어, 쿼리가 대분류를 바로 못 본다.
+     * 코드 목록은 몇 줄이라 한 번 읽어 넘긴다. 비어 있으면 {@code in} 이 아무것도 안 걸러야 하므로
+     * 빈 문자열 하나를 넣는다(빈 컬렉션은 JPQL {@code in} 에서 문법 오류다).
+     */
+    private List<String> lectureDivisionCodes() {
+        List<String> codes = new ArrayList<>();
+        for (SalesDivision d : salesDivisionRepository.findAll()) {
+            if (d.getMajorCategory() == com.daesung.sales.product.entity.MajorCategory.SPECIAL_LECTURE) {
+                codes.add(d.getCode());
+            }
+        }
+        return codes.isEmpty() ? List.of("\u0000") : codes;
+    }
+
     /** 판매채널 조건에 '미분류'가 섞여 있나. 레거시가 별도 분기로 처리하는 값이다(조회.vb:1205). */
     private static boolean hasUnclassifiedChannel(List<String> channels) {
         return channels != null && channels.stream().anyMatch(SaleService::isUnclassified);
@@ -911,6 +928,7 @@ public class SaleService {
                                              List<String> salesChannels,
                                              String keyword,
                                              Integer tradeSeq,
+                                             boolean shippedOnly,
                                              boolean couponCount,
                                              boolean includeCanceled, Pageable pageable) {
         List<SalesCategory> categories = salesCategories;
@@ -963,7 +981,11 @@ public class SaleService {
                 MultiSelect.isAny(salesChannels),
                 hasUnclassifiedChannel(salesChannels),
                 MultiSelect.orPlaceholder(namedChannels(salesChannels), "\u0000"),
-                kw, tradeSeq, includeCanceled, pageable);
+                kw, tradeSeq,
+                // ★출고/반품 조회 전용 조건(프론트 B-1). 특강은 **대분류**로 가르므로
+                //   그 대분류에 속한 세부구분 코드를 모아 넘긴다 — 쿼리가 대분류를 모른다.
+                shippedOnly, lectureDivisionCodes(),
+                includeCanceled, pageable);
         // ★학교/학원 구분은 매출 원장에 없다 — 학교 마스터에서 붙인다.
         //   페이지 안의 학교코드만 모아 **한 번에** 조회한다(행마다 조회하면 N+1이다).
         //   ‼️마스터에 없는 코드는 그냥 null 로 둔다. 거기서 막으면 과거 매출이 조회에서 사라진다.

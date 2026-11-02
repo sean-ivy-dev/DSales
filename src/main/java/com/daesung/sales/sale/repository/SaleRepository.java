@@ -483,6 +483,18 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
             // 거래순번(10/30 프론트 B-2③ — "거래처 + 거래일자 + 거래순번으로 조회").
             // 거래처·기간은 위 조건이 이미 받으므로 여기서는 순번만 더한다.
             + "and (:tradeSeq is null or s.tradeSeq = :tradeSeq) "
+            // ★출고/반품 조회(10/27 §3-3·4-10·4-12, 프론트 B-1) — **실제로 물건이 움직인 건만**.
+            //   §3 머리말이 두 화면을 이렇게 가른다:
+            //     출고/반품 조회 = 실제로 재고가 움직인 출고·반품(물류 작업비 계산 기준)
+            //     통합 매출 조회 = 매출로 인식되는 전체(미출고 콘텐츠·특강 포함)
+            //   빠져야 하는 셋을 **등록 쪽과 같은 규칙**으로 건다 —
+            //     ① 매출만(배송X)  ② 창고 없는 매출  ③ 특강
+            //   ‼️"작업요청서가 있나"로 가르지 않는다. 이 규칙이 생기기 전(10/29) 등록분은
+            //     매출만 건에도 작업요청서가 남아 있어, 그걸 기준 삼으면 과거분이 그대로 샌다.
+            + "and (:shippedOnly = false or ("
+            + "      coalesce(s.onlySales, false) = false "
+            + "      and w.id is not null "
+            + "      and coalesce(s.product.salesDivision, '') not in :lectureDivisions)) "
             + "and (:includeCanceled = true or s.canceled = false)")
     Page<Sale> search(@Param("from") LocalDate from,
                       @Param("to") LocalDate to,
@@ -507,6 +519,8 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
                       @Param("channels") Collection<String> channels,
                       @Param("keyword") String keyword,
                       @Param("tradeSeq") Integer tradeSeq,
+                      @Param("shippedOnly") boolean shippedOnly,
+                      @Param("lectureDivisions") Collection<String> lectureDivisions,
                       @Param("includeCanceled") boolean includeCanceled,
                       Pageable pageable);
 

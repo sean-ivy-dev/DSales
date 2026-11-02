@@ -212,6 +212,15 @@ public class SaleController {
             @RequestParam(required = false) Integer tradeSeq,
             @Parameter(description = "키워드 — 거래처명·도서명·도서코드·매출번호·학교명을 한 번에 훑는다(부분일치)")
             @RequestParam(required = false) String keyword,
+            @Parameter(description = """
+                    **출고/반품 조회** 전용 — 실제로 물건이 움직인 건만 본다(10/27 §3-3·4-10·4-12).
+                    `true` 면 셋을 뺀다: **매출만(배송X) · 창고 없는 매출 · 특강**.
+                    미지정(기본 false)이면 통합 매출 조회 — 지금까지와 똑같이 전부 나온다.
+
+                    ‼️이 규칙이 생기기 전(2026-10-29 이전) 등록분은 「매출만」 체크가 저장되지
+                    않아 걸러지지 않는다. 그때는 작업요청서까지 만들어져 있어 어느 기준으로도
+                    가릴 수 없다 — 소급해 채우면 없던 의도를 만드는 것이라 그대로 둔다.""")
+            @RequestParam(defaultValue = "false") boolean shippedOnly,
             @Parameter(description = "취소건 포함 여부(기본 false)") @RequestParam(defaultValue = "false") boolean includeCanceled,
             @ParameterObject PageRequestDto pageReq) {
         return ApiResponse.success(saleService.search(either(startDate, fromDate), either(endDate, toDate),
@@ -221,7 +230,7 @@ public class SaleController {
                 MultiSelect.merge(partnerId, partnerIds),
                 MultiSelect.merge(warehouseId, warehouseIds),
                 schoolCodes, divisions, productIds, partnerSchools, salesChannels, keyword,
-                tradeSeq, couponCount,
+                tradeSeq, shippedOnly, couponCount,
                 includeCanceled, pageReq.toPageable(SALE_SORTS)));
     }
 
@@ -276,6 +285,8 @@ public class SaleController {
             @RequestParam(required = false) String keyword,
             @Parameter(description = "거래순번(조회와 동일) — 그 거래처의 그 날 몇 번째 주문인가")
             @RequestParam(required = false) Integer tradeSeq,
+            @Parameter(description = "출고/반품 조회 전용(조회와 동일) — 매출만·창고없음·특강을 뺀다")
+            @RequestParam(defaultValue = "false") boolean shippedOnly,
             @RequestParam(defaultValue = "false") boolean includeCanceled) {
         List<Col> cols = List.of(
                 new Col("등록번호", "entryNo"), new Col("순번", "entrySeq"),
@@ -306,7 +317,7 @@ public class SaleController {
                 MultiSelect.merge(partnerId, partnerIds),
                 MultiSelect.merge(warehouseId, warehouseIds),
                 schoolCodes, divisions, productIds, partnerSchools, salesChannels, keyword,
-                tradeSeq, couponCount,
+                tradeSeq, shippedOnly, couponCount,
                 includeCanceled,
                 org.springframework.data.domain.PageRequest.of(0, EXPORT_MAX));
         // ★고른 거래처 수를 머리말에 남긴다(2026-09-28 화면 정리안).
