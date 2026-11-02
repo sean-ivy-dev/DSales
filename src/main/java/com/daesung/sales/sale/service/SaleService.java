@@ -1,6 +1,9 @@
 package com.daesung.sales.sale.service;
 
 import com.daesung.sales.audit.entity.StatusEntityType;
+import com.daesung.sales.consignment.dto.ConsignmentOutRequest;
+import com.daesung.sales.consignment.dto.ConsignmentOutResponse;
+import com.daesung.sales.consignment.service.ConsignmentService;
 import com.daesung.sales.audit.service.StatusHistoryService;
 import com.daesung.sales.common.exception.BusinessException;
 import com.daesung.sales.common.exception.ErrorCode;
@@ -69,6 +72,8 @@ public class SaleService {
     private final StatusHistoryService statusHistoryService;
     private final com.daesung.sales.common.audit.CurrentAuditor currentAuditor;
     private final SequenceService sequenceService;
+    /** 위탁출고 진입점 재사용(명세 §4-1 · 프론트 C-1). 미결 원장·자동이고는 그쪽 로직 그대로. */
+    private final ConsignmentService consignmentService;
     private final com.daesung.sales.logistics.service.ShipmentService shipmentService;
     private final com.daesung.sales.school.repository.SchoolRepository schoolRepository;
 
@@ -94,6 +99,15 @@ public class SaleService {
     public SalesEntryResponse createEntries(SalesEntryRequest req,
                                             String fixedEntryNo, Integer fixedTradeSeq) {
         periodLockService.assertNotLocked(req.salesDate());
+
+        // ★위탁출고는 **여기서 받아** 위탁 경로로 넘긴다(10/27 명세 §4-1 "주문 등록의
+        //   출고유형에 '위탁출고'를 포함", 프론트 C-1). 예전엔 전용 화면(/consignment/out)만
+        //   있었고 이 경로는 "위탁정산으로 처리하세요"로 막았다.
+        //   ‼️미결 원장·자동이고·동시성 락은 그대로 위탁 쪽 로직을 쓴다 — 여기서 다시 짜면
+        //     이중 장부가 둘로 갈린다. **진입점만** 넓히는 것이다.
+        if (hasConsignShip(req)) {
+            return consignEntries(req);
+        }
         Partner partner = partnerRepository.findById(req.partnerId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
                         "거래처가 없습니다. id=" + req.partnerId()));
@@ -833,6 +847,77 @@ public class SaleService {
                                 + "반품 또는 매출 취소로 처리하세요.");
             }
         }
+    }
+
+    /** 요청에 위탁출고가 섞여 있나. */
+    private static boolean hasConsignShip(SalesEntryRequest req) {
+        return req.items() != null && req.items().stream()
+                .anyMatch(i -> i.shipmentType() == ShipmentType.CONSIGN_SHIP);
+    }
+
+    /**
+     * 주문 등록으로 들어온 <b>위탁출고</b>를 위탁 경로로 넘긴다(명세 §4-1, 프론트 C-1).
+     *
+     * <p>★매출등록 요청에는 창고가 <b>하나</b>(출고 창고)인데 위탁출고는
+     * <b>물류창고 → 위탁창고</b> 두 곳이 필요하다. 도착 창고는 창고 마스터의
+     * <b>소속거래처</b>로 찾는다(정본 32p 확장).
+     *
+     * <p><b>거부하는 경우</b> — 조용히 넘기면 물건이 엉뚱한 창고로 간다.
+     * <ul>
+     *   <li>위탁출고와 다른 출고유형을 <b>한 번에 섞어</b> 보냄 — 흐름이 다르다(미결 vs 매출)</li>
+     *   <li>그 거래처의 위탁창고가 <b>없음</b> 또는 <b>둘 이상</b></li>
+     *   <li>출고 창고 미지정 — 위탁출고는 실물이 나가므로 어디서 나가는지 있어야 한다</li>
+     * </ul>
+     */
+    private SalesEntryResponse consignEntries(SalesEntryRequest req) {
+        boolean allConsign = req.items().stream()
+                .allMatch(i -> i.shipmentType() == ShipmentType.CONSIGN_SHIP);
+        if (!allConsign) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "위탁출고는 다른 출고유형과 같이 등록할 수 없습니다 — 흐름이 다릅니다"
+                            + "(위탁은 미결로 남고 정산에서 매출이 확정됩니다). 따로 등록하세요.");
+        }
+        if (req.warehouseId() == null) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "위탁출고는 출고 창고를 지정해야 합니다 — 실물이 나가는 거래입니다.");
+        }
+        List<Warehouse> consignWarehouses =
+                warehouseRepository.findConsignWarehouses(req.partnerId());
+        if (consignWarehouses.isEmpty()) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "그 거래처의 위탁창고가 없습니다. 창고관리에서 **소속거래처**를 그 거래처로 둔"
+                            + " 위탁창고를 먼저 등록하세요.");
+        }
+        if (consignWarehouses.size() > 1) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "그 거래처의 위탁창고가 " + consignWarehouses.size() + "개입니다 — 어디로 보낼지"
+                            + " 정할 수 없습니다. 위탁출고 화면에서 창고를 직접 고르세요.");
+        }
+
+        List<ConsignmentOutRequest.Item> items = new ArrayList<>();
+        for (SalesEntryRequest.Item i : req.items()) {
+            items.add(new ConsignmentOutRequest.Item(i.productId(), i.qty(),
+                    i.unitPrice(), i.supplyRate(), i.discountAmount()));
+        }
+        // 학교는 품목마다 다를 수 있으나 위탁출고 요청은 건 단위다 — 첫 품목 것을 쓴다
+        // (한 번의 위탁출고는 한 거래처·한 학교로 나간다).
+        SalesEntryRequest.Item first = req.items().get(0);
+        ConsignmentOutResponse out = consignmentService.consignmentOut(new ConsignmentOutRequest(
+                req.salesDate(), req.partnerId(), req.warehouseId(),
+                consignWarehouses.get(0).getId(), first.schoolCode(), first.schoolName(), items));
+
+        List<SalesEntryResponse.Line> lines = new ArrayList<>();
+        for (ConsignmentOutResponse.Line l : out.items()) {
+            // 금액은 0이다 — 위탁출고는 **매출이 아니라 미결**이고, 금액은 정산에서 정해진다.
+            // 번호 자리에는 매출번호 대신 **위탁출고번호(OUT-)** 를 담는다.
+            lines.add(new SalesEntryResponse.Line(l.sourceOutNo(), l.productId(), l.productCode(),
+                    ShipmentType.CONSIGN_SHIP, SalesCategory.SALE,
+                    l.qty(), 0L, 0L, 0L, l.toBalance()));
+        }
+        // ‼️위탁출고는 **매출이 아니다** — 미결로 남고 정산에서 확정된다. 등록번호·거래순번은
+        //   매출 묶음 번호라 여기서는 비운다(출고번호 OUT- 가 그 자리를 한다).
+        return new SalesEntryResponse(out.partnerId(), out.partnerName(), null, null,
+                lines, List.of());
     }
 
     /**
