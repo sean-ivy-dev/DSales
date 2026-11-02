@@ -1,5 +1,6 @@
 package com.daesung.sales.logistics.service;
 
+import java.util.LinkedHashMap;
 import com.daesung.sales.dsre.gateway.LogisCostDetailRow;
 import com.daesung.sales.logistics.dto.LogisCostDetailResponse.MissingProduct;
 import com.daesung.sales.logistics.dto.LogisCostDetailResponse.MissingReason;
@@ -54,11 +55,13 @@ public class StandaloneLogisCostService {
     private final SaleRepository saleRepository;
     private final ProductLogisRateRepository rateRepository;
     private final MaterialBomRepository materialBomRepository;
+    private final com.daesung.sales.product.service.SalesDivisionService salesDivisionService;
+    private final com.daesung.sales.inventory.repository.InventoryTxnRepository inventoryTxnRepository;
 
     /** 단독 상품 행. 비어 있으면 더할 것이 없다는 뜻이다. */
     @Transactional(readOnly = true)
     public List<LogisCostDetailRow> rows(LocalDate from, LocalDate to) {
-        List<Object[]> shipped = saleRepository.standaloneShippedQty(from, to);
+        List<Object[]> shipped = shippedQty(from, to);
         if (shipped.isEmpty()) {
             return List.of();
         }
@@ -127,7 +130,7 @@ public class StandaloneLogisCostService {
     public List<MissingProduct> missingProducts(LocalDate from, LocalDate to) {
         Map<String, Boolean> seen = new HashMap<>();
         List<MissingProduct> out = new ArrayList<>();
-        for (Object[] r : saleRepository.standaloneShippedQty(from, to)) {
+        for (Object[] r : shippedQty(from, to)) {
             Long productId = ((Number) r[0]).longValue();
             String code = (String) r[1];
             String name = (String) r[2];
@@ -179,5 +182,49 @@ public class StandaloneLogisCostService {
         long total() {
             return paperAmt + omrAmt + etcAmt + basicAmt + tradeAmt;
         }
+    }
+
+    /**
+     * 물류 작업비의 <b>수량 한 지점</b> — 매출 출고와 위탁 출고를 합쳐 낸다.
+     *
+     * <p>근거: 명세 §10 — "출처는 도서관리의 <b>수불부노출</b> 값으로 구분한다.
+     * <b>Y(매출프로그램 단독 관리)</b>: <b>출고/반품 조회의 출고 수량을 가져와 계산한다</b>",
+     * 그리고 "<b>이중 계산 방지 장치가 필요하다</b>. 같은 상품·수량이 두 경로로 잡히지
+     * 않게 한다(위탁출고 §4-5 포함)". 작업지침 4번 — "매입처는 … <b>물류 작업비 계산에서
+     * 뺀다</b>".
+     *
+     * <p>★<b>세 요구가 전부 "출고/반품 조회와 같은 수량이냐"로 모인다.</b> 예전엔 물류비가
+     * 자기 조건을 따로 갖고 있어 그 화면과 수량이 어긋났다 —
+     * 창고 없는 매출·매출만(배송X)·특강이 물류비에만 들어갔고, 매입처도 안 빠졌고,
+     * 위탁은 <b>정산분</b>(예시의 40)만 잡혀 §4-4가 요구하는 원출고(50)와 달랐다.
+     * 이제 판정 조각({@code SaleRepository.SHIPPED_PREDICATE})과 특강 목록을
+     * 그 화면과 <b>공유</b>한다.
+     *
+     * <p>두 갈래가 <b>같은 상품·거래처</b>로 겹칠 수 있다(한 달에 일반출고도 위탁출고도 한 곳).
+     * 그때는 수량을 <b>합친다</b> — 둘 다 실제로 나간 물량이다. 같은 물량이 두 번 세어지는
+     * 경우는 "정산으로 생긴 매출"뿐이고 그건 판정 조각이 이미 뺀다.
+     */
+    private List<Object[]> shippedQty(LocalDate from, LocalDate to) {
+        List<Long> purchasers = inventoryTxnRepository.purchaserPartnerIds();
+        boolean noPurchaser = purchasers.isEmpty();   // 빈 컬렉션은 JPQL in 에서 문법 오류
+        List<Object[]> rows = new ArrayList<>(saleRepository.standaloneShippedQty(
+                from, to, salesDivisionService.lectureDivisionCodes(),
+                noPurchaser, noPurchaser ? List.of(0L) : purchasers));
+        rows.addAll(saleRepository.consignShippedQty(
+                from, to, noPurchaser, noPurchaser ? List.of(0L) : purchasers));
+
+        // 같은 (상품, 거래처)가 두 갈래에 다 있으면 한 행으로 합친다 — 아래 소비부가
+        // 상품×거래처 단위로 단가를 매기므로 행이 둘이면 같은 쌍이 두 줄로 나간다.
+        Map<String, Object[]> merged = new LinkedHashMap<>();
+        for (Object[] r : rows) {
+            String key = r[0] + "|" + r[4];
+            Object[] prev = merged.get(key);
+            if (prev == null) {
+                merged.put(key, r.clone());
+            } else {
+                prev[6] = ((Number) prev[6]).longValue() + ((Number) r[6]).longValue();
+            }
+        }
+        return new ArrayList<>(merged.values());
     }
 }

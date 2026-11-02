@@ -437,6 +437,26 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
     // ‼️창고는 **left join** 이어야 한다. `s.warehouse.id` 라고만 쓰면 JPQL이 inner join을 만들어
     //   창고가 없는 과거 매출(업로드분 등)이 조건과 무관하게 통째로 사라진다.
     /**
+     * <b>"출고된 건이냐"를 판정하는 조각</b> — 출고/반품 조회와 <b>물류 작업비</b>가 같이 쓴다.
+     *
+     * <p>★상수로 뗀 이유가 전부다. 명세 §10 이 <b>"출고/반품 조회의 출고 수량을 가져와
+     * 계산한다"</b>고 못 박았는데, 물류비 쪽(`standaloneShippedQty`)이 <b>자기 조건을 따로</b>
+     * 갖고 있어 두 화면의 수량이 어긋나 있었다 — 창고 없는 매출·매출만(배송X)·특강이
+     * 물류비엔 그대로 들어갔다. 조건을 두 군데 적어 두면 <b>반드시</b> 다시 어긋난다.
+     *
+     * <p>빠져야 하는 넷 — ①매출만(배송X) ②창고 없는 매출 ③특강 ④정산으로 생긴 매출
+     * (실제 출고는 위탁 미결이 원출고수량으로 따로 센다 — 안 빼면 출고 때·정산 때 두 번).
+     *
+     * <p>쓰는 쪽은 별칭 {@code s}(Sale)와 {@code w}(left join s.warehouse)를 두고,
+     * 파라미터 {@code :lectureDivisions}를 넘겨야 한다.
+     */
+    String SHIPPED_PREDICATE =
+            "      coalesce(s.onlySales, false) = false "
+            + "      and w.id is not null "
+            + "      and coalesce(s.product.salesDivision, '') not in :lectureDivisions "
+            + "      and s.salesType <> com.daesung.sales.sale.entity.SalesType.CONSIGN_SALES ";
+
+    /**
      * 통합 매출 조회의 <b>WHERE 절</b>. {@link #search} 와 {@link #groupTotalsByPartner}·
      * {@link #groupTotalsByDate} 가 <b>같은 문자열을 공유</b>한다.
      *
@@ -500,16 +520,14 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
             //     ① 매출만(배송X)  ② 창고 없는 매출  ③ 특강
             //   ‼️"작업요청서가 있나"로 가르지 않는다. 이 규칙이 생기기 전(10/29) 등록분은
             //     매출만 건에도 작업요청서가 남아 있어, 그걸 기준 삼으면 과거분이 그대로 샌다.
-            + "and (:shippedOnly = false or ("
-            + "      coalesce(s.onlySales, false) = false "
-            + "      and w.id is not null "
-            + "      and coalesce(s.product.salesDivision, '') not in :lectureDivisions "
+            + "and (:shippedOnly = false or (" + SHIPPED_PREDICATE
             // ★정산으로 생긴 매출은 **출고/반품 조회에 넣지 않는다**(명세 §4-4 "정산 확정은
             //   매출 확정이므로 **통합 매출에만** 반영", 흐름도 "출고/반품 조회에는 추가로
             //   생기지 않음"). 넣으면 같은 물량이 출고 때·정산 때 **두 번** 잡힌다.
             //   실제 출고는 위탁 미결(ConsignmentOut)이 원출고수량으로 따로 보여준다.
-            + "      and s.salesType <> com.daesung.sales.sale.entity.SalesType.CONSIGN_SALES)) "
+            + ")) "
             + "and (:includeCanceled = true or s.canceled = false)";
+
 
     @Query("select s from Sale s left join s.warehouse w " + SALES_SEARCH_WHERE)
     Page<Sale> search(@Param("from") LocalDate from,
@@ -1108,16 +1126,54 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
             select p.id, p.code, p.name, coalesce(p.grade, ''),
                    pt.code, pt.name, sum(s.qty)
               from Sale s join s.product p join s.partner pt
+                   left join s.warehouse w
              where s.canceled = false
                and s.deletedAt is null
                and p.ledgerVisible = true
                and s.salesCategory <> com.daesung.sales.salestype.entity.SalesCategory.RETURN
                and s.salesDate between :from and :to
+               and (:noPurchaser = true or pt.id not in :purchaserIds)
+               and (""" + SHIPPED_PREDICATE + """
+                   )
              group by p.id, p.code, p.name, coalesce(p.grade, ''), pt.code, pt.name
              having sum(s.qty) > 0
              order by p.code, pt.code
             """)
-    List<Object[]> standaloneShippedQty(@Param("from") LocalDate from, @Param("to") LocalDate to);
+    List<Object[]> standaloneShippedQty(@Param("from") LocalDate from,
+                                        @Param("to") LocalDate to,
+                                        @Param("lectureDivisions") Collection<String> lectureDivisions,
+                                        @Param("noPurchaser") boolean noPurchaser,
+                                        @Param("purchaserIds") Collection<Long> purchaserIds);
+
+    /**
+     * <b>위탁출고</b>의 기간 출고수량 — 물류 작업비의 같은 자리에 더해진다.
+     *
+     * <p>근거: 명세 §4-4 — 위탁 50부를 보내고 40부를 정산했으면 출고/반품 조회의
+     * 출고수량은 <b>50</b>이다(정산분 40이 아니다). 물류 작업은 <b>50부를 싸서 보낼 때</b>
+     * 생겼으므로 물류비도 50으로 센다. {@code originalQty}는 생성 시 1회만 정해지고
+     * 정산·반품으로 바뀌지 않는다.
+     *
+     * <p>‼️정산으로 생긴 매출({@code CONSIGN_SALES})은 {@link #SHIPPED_PREDICATE}가 이미
+     * 빼고 있다 — 안 그러면 같은 물량이 출고 때·정산 때 <b>두 번</b> 물류비로 잡힌다
+     * (명세 §10 "이중 계산 방지 장치가 필요하다", 위탁출고 §4-5 포함).
+     *
+     * <p>반환 Object[]: {@link #standaloneShippedQty}와 <b>같은 7칸</b>(합쳐 쓰므로).
+     */
+    @Query("""
+            select cp.id, cp.code, cp.name, coalesce(cp.grade, ''),
+                   pt.code, pt.name, sum(co.originalQty)
+              from ConsignmentOut co join co.product cp join co.partner pt
+             where cp.ledgerVisible = true
+               and co.tradeDate between :from and :to
+               and (:noPurchaser = true or pt.id not in :purchaserIds)
+             group by cp.id, cp.code, cp.name, coalesce(cp.grade, ''), pt.code, pt.name
+             having sum(co.originalQty) > 0
+             order by cp.code, pt.code
+            """)
+    List<Object[]> consignShippedQty(@Param("from") LocalDate from,
+                                     @Param("to") LocalDate to,
+                                     @Param("noPurchaser") boolean noPurchaser,
+                                     @Param("purchaserIds") Collection<Long> purchaserIds);
 
     /**
      * 계산서·세금계산서 월별신고(38p): 월×발행유형으로 매출/반품/세액 집계. 취소 제외.

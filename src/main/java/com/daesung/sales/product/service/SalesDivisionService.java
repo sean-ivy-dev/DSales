@@ -139,4 +139,27 @@ public class SalesDivisionService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
                         "세부구분이 없습니다. id=" + id));
     }
+
+    /**
+     * 대분류가 <b>특강</b>인 세부구분 코드들. 특강을 빼야 하는 쪽이 전부 이걸 쓴다 —
+     * 출고/반품 조회(§3-4·4-12)와 <b>물류 작업비</b>(§10 "출고/반품 조회의 출고 수량").
+     *
+     * <p>★여기로 올린 이유: 예전엔 {@code SaleService} 안의 private 메서드였고, 물류비는
+     * 특강을 <b>아예 안 걸렀다</b>. 두 화면이 같은 수량을 보여야 하는데 조건이 한쪽에만
+     * 있었던 것이다. 복붙하면 또 어긋나므로 한 곳에 둔다.
+     *
+     * <p>매출 행에는 세부구분(코드)만 있고 대분류는 마스터에 있어, 쿼리가 대분류를 바로 못 본다.
+     * 비어 있으면 {@code in} 이 아무것도 안 걸러야 하므로 절대 안 맞는 값 하나를 넣는다
+     * (빈 컬렉션은 JPQL {@code in} 에서 문법 오류다).
+     */
+    @Transactional(readOnly = true)
+    public List<String> lectureDivisionCodes() {
+        List<String> codes = new ArrayList<>();
+        for (SalesDivision d : salesDivisionRepository.findAll()) {
+            if (d.getMajorCategory() == MajorCategory.SPECIAL_LECTURE) {
+                codes.add(d.getCode());
+            }
+        }
+        return codes.isEmpty() ? List.of("\u0000") : codes;
+    }
 }

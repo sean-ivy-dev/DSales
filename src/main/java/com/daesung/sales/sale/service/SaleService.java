@@ -64,6 +64,7 @@ public class SaleService {
     private final ProductRepository productRepository;
     private final com.daesung.sales.product.service.PartnerSupplyRateService partnerSupplyRateService;
     private final SalesDivisionRepository salesDivisionRepository;
+    private final com.daesung.sales.product.service.SalesDivisionService salesDivisionService;
     private final OutTypeLookupService outTypeLookupService;
     private final WarehouseRepository warehouseRepository;
     private final InventoryService inventoryService;
@@ -1001,18 +1002,12 @@ public class SaleService {
     /**
      * 대분류가 <b>특강</b>인 세부구분 코드들. 출고/반품 조회에서 특강을 빼는 데 쓴다.
      *
-     * <p>매출 행에는 세부구분(코드)만 있고 대분류는 마스터에 있어, 쿼리가 대분류를 바로 못 본다.
-     * 코드 목록은 몇 줄이라 한 번 읽어 넘긴다. 비어 있으면 {@code in} 이 아무것도 안 걸러야 하므로
-     * 빈 문자열 하나를 넣는다(빈 컬렉션은 JPQL {@code in} 에서 문법 오류다).
+     * <p>★구현은 {@link SalesDivisionService#lectureDivisionCodes()}로 옮겼다 —
+     * <b>물류 작업비</b>도 같은 목록을 써야 한다(§10 "출고/반품 조회의 출고 수량"). 여기
+     * private 으로 두는 동안 물류비는 특강을 아예 안 걸렀다.
      */
     private List<String> lectureDivisionCodes() {
-        List<String> codes = new ArrayList<>();
-        for (SalesDivision d : salesDivisionRepository.findAll()) {
-            if (d.getMajorCategory() == com.daesung.sales.product.entity.MajorCategory.SPECIAL_LECTURE) {
-                codes.add(d.getCode());
-            }
-        }
-        return codes.isEmpty() ? List.of("\u0000") : codes;
+        return salesDivisionService.lectureDivisionCodes();
     }
 
     /**

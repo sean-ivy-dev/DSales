@@ -516,4 +516,24 @@ public interface InventoryTxnRepository extends JpaRepository<InventoryTxn, Long
     List<Object[]> purchaseByPartner(@Param("fromDate") LocalDate fromDate,
                                      @Param("toDate") LocalDate toDate,
                                      @Param("partnerId") Long partnerId);
+
+    /**
+     * <b>매입처</b> 거래처 id 전부 — 매입(입고)이 한 번이라도 있던 곳.
+     *
+     * <p>근거: 작업지침 4번 — "<b>매입처(법인 분리)는 이 화면과 물류 작업비 계산에서 뺀다</b>".
+     * 외상매출현황은 {@code ReceivableService}가 이미 빼고 있었고, <b>물류 작업비 쪽에만
+     * 빠져 있었다</b>.
+     *
+     * <p>‼️<b>기간을 받지 않는다</b> — 조회기간 안에 매입이 없어도 매입처는 매입처다.
+     * 기간으로 자르면 그 달에 매입이 없던 매입처가 매출처로 섞여 들어와, 달마다
+     * 물류비 대상이 달라진다. {@code ReceivableService}도 같은 이유로 기간 밖 매입을
+     * 함께 본다(그쪽 주석: "이월에 그 매입이 녹아 있어서").
+     */
+    @Query(value = """
+            SELECT DISTINCT partner_id
+            FROM inventory_txn
+            WHERE deleted_at IS NULL AND partner_id IS NOT NULL
+              AND txn_type = 'INBOUND' AND inbound_type = 'PURCHASE'
+            """, nativeQuery = true)
+    List<Long> purchaserPartnerIds();
 }

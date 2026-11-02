@@ -201,4 +201,34 @@ class ConsignOrderEntryIntegrationTest extends IntegrationTestSupport {
         }
         assertThat(saleQty).as("통합 매출에는 정산분 40").isEqualTo(40);
     }
+
+    @Test
+    @DisplayName("★정산 목록에는 위탁출고로 들어온 건만 — 일반 매출은 섞이지 않는다(§4-2 · C-2)")
+    void 정산대상은_위탁출고만() {
+        // §4-2: "위탁 미결 정산은 **위탁출고 유형으로 들어온 건만** 불러와서 처리한다."
+        //
+        // ★구조상 이미 그렇다 — 정산 목록은 `ConsignmentOut` 만 읽고, 그 행은
+        //   위탁출고 경로(`ConsignmentService.consignmentOut`) **한 곳에서만** 생긴다.
+        //   C-1 로 주문 등록까지 그 경로로 모였으니 다른 입구가 없다.
+        //   이 테스트는 그 사실이 **나중에 깨지지 않도록** 못 박는 것이다 —
+        //   누군가 매출을 미결로 함께 올리면 정산 화면에 팔지도 않은 물건이 뜬다.
+        String day = "2048-07-07";
+
+        // 같은 날·같은 거래처로 **일반 매출**과 **위탁출고**를 따로 등록한다.
+        post("/sales/entries", Map.of("salesDate", day, "partnerId", partner, "warehouseId", main,
+                "items", List.of(Map.of("productId", book, "shipmentType", "NORMAL_SHIP",
+                        "qty", 33, "unitPrice", 10000, "supplyRate", 70))));
+        post("/sales/entries", Map.of("salesDate", day,
+                "partnerId", partner, "warehouseId", main, "items", List.of(item(7))));
+
+        int consignRows = 0;
+        for (JsonNode p : data(get("/consignment/pending?partnerId=" + partner)).path("items")) {
+            if (day.equals(p.path("tradeDate").asText())) {
+                consignRows++;
+                assertThat(p.path("originalQty").asInt())
+                        .as("위탁으로 넣은 7만 — 일반 매출 33은 들어오면 안 된다").isEqualTo(7);
+            }
+        }
+        assertThat(consignRows).as("그 날 미결은 위탁 한 건뿐").isEqualTo(1);
+    }
 }
