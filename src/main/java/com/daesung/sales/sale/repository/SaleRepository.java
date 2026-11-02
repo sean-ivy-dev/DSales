@@ -503,11 +503,136 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
             + "and (:shippedOnly = false or ("
             + "      coalesce(s.onlySales, false) = false "
             + "      and w.id is not null "
-            + "      and coalesce(s.product.salesDivision, '') not in :lectureDivisions)) "
+            + "      and coalesce(s.product.salesDivision, '') not in :lectureDivisions "
+            // ★정산으로 생긴 매출은 **출고/반품 조회에 넣지 않는다**(명세 §4-4 "정산 확정은
+            //   매출 확정이므로 **통합 매출에만** 반영", 흐름도 "출고/반품 조회에는 추가로
+            //   생기지 않음"). 넣으면 같은 물량이 출고 때·정산 때 **두 번** 잡힌다.
+            //   실제 출고는 위탁 미결(ConsignmentOut)이 원출고수량으로 따로 보여준다.
+            + "      and s.salesType <> com.daesung.sales.sale.entity.SalesType.CONSIGN_SALES)) "
             + "and (:includeCanceled = true or s.canceled = false)";
 
     @Query("select s from Sale s left join s.warehouse w " + SALES_SEARCH_WHERE)
     Page<Sale> search(@Param("from") LocalDate from,
+                      @Param("to") LocalDate to,
+                      @Param("anyCategory") boolean anyCategory,
+                      @Param("salesCategories") Collection<SalesCategory> salesCategories,
+                      @Param("anyShipmentType") boolean anyShipmentType,
+                      @Param("shipmentTypes") Collection<ShipmentType> shipmentTypes,
+                      @Param("anyPartner") boolean anyPartner,
+                      @Param("partnerIds") Collection<Long> partnerIds,
+                      @Param("anyWarehouse") boolean anyWarehouse,
+                      @Param("warehouseIds") Collection<Long> warehouseIds,
+                      @Param("anySchool") boolean anySchool,
+                      @Param("schoolCodes") Collection<String> schoolCodes,
+                      @Param("anyDivision") boolean anyDivision,
+                      @Param("divisions") Collection<String> divisions,
+                      @Param("anyProduct") boolean anyProduct,
+                      @Param("productIds") Collection<Long> productIds,
+                      @Param("anyPair") boolean anyPair,
+                      @Param("pairs") Collection<String> pairs,
+                      @Param("anyChannel") boolean anyChannel,
+                      @Param("unclassified") boolean unclassified,
+                      @Param("channels") Collection<String> channels,
+                      @Param("keyword") String keyword,
+                      @Param("tradeSeq") Integer tradeSeq,
+                      @Param("shippedOnly") boolean shippedOnly,
+                      @Param("lectureDivisions") Collection<String> lectureDivisions,
+                      @Param("includeCanceled") boolean includeCanceled,
+                      Pageable pageable);
+
+    /** 출고/반품 조회의 <b>매출 쪽</b> 건수. 목록과 같은 WHERE 를 쓴다. */
+    @Query("select count(s) from Sale s left join s.warehouse w " + SALES_SEARCH_WHERE)
+    long countShippedSales(@Param("from") LocalDate from,
+                      @Param("to") LocalDate to,
+                      @Param("anyCategory") boolean anyCategory,
+                      @Param("salesCategories") Collection<SalesCategory> salesCategories,
+                      @Param("anyShipmentType") boolean anyShipmentType,
+                      @Param("shipmentTypes") Collection<ShipmentType> shipmentTypes,
+                      @Param("anyPartner") boolean anyPartner,
+                      @Param("partnerIds") Collection<Long> partnerIds,
+                      @Param("anyWarehouse") boolean anyWarehouse,
+                      @Param("warehouseIds") Collection<Long> warehouseIds,
+                      @Param("anySchool") boolean anySchool,
+                      @Param("schoolCodes") Collection<String> schoolCodes,
+                      @Param("anyDivision") boolean anyDivision,
+                      @Param("divisions") Collection<String> divisions,
+                      @Param("anyProduct") boolean anyProduct,
+                      @Param("productIds") Collection<Long> productIds,
+                      @Param("anyPair") boolean anyPair,
+                      @Param("pairs") Collection<String> pairs,
+                      @Param("anyChannel") boolean anyChannel,
+                      @Param("unclassified") boolean unclassified,
+                      @Param("channels") Collection<String> channels,
+                      @Param("keyword") String keyword,
+                      @Param("tradeSeq") Integer tradeSeq,
+                      @Param("shippedOnly") boolean shippedOnly,
+                      @Param("lectureDivisions") Collection<String> lectureDivisions,
+                      @Param("includeCanceled") boolean includeCanceled);
+
+    /** 출고/반품 조회의 <b>위탁 쪽</b> 건수. 목록과 같은 WHERE 를 쓴다. */
+    @Query("select count(co) from ConsignmentOut co join co.product cp "
+            + CONSIGN_SHIPPED_WHERE)
+    long countShippedConsign(@Param("from") LocalDate from,
+                      @Param("to") LocalDate to,
+                      @Param("anyPartner") boolean anyPartner,
+                      @Param("partnerIds") Collection<Long> partnerIds,
+                      @Param("anySchool") boolean anySchool,
+                      @Param("schoolCodes") Collection<String> schoolCodes,
+                      @Param("anyProduct") boolean anyProduct,
+                      @Param("productIds") Collection<Long> productIds,
+                      @Param("anyDivision") boolean anyDivision,
+                      @Param("divisions") Collection<String> divisions,
+                      @Param("keyword") String keyword);
+
+    /**
+     * 출고/반품 조회에 보일 <b>위탁 미결</b>의 WHERE 절. 목록과 합계가 같은 문자열을 공유한다.
+     *
+     * <p>거는 조건은 기간·거래처·학교·도서·세부구분·키워드다. 매출에만 있는 축
+     * (회계구분·출고유형·창고·판매채널·거래순번)은 위탁 미결에 그 값이 없어 걸지 않는다 —
+     * 억지로 맞추면 "위탁출고인데 출고유형으로 걸러 사라지는" 일이 생긴다.
+     */
+    String CONSIGN_SHIPPED_WHERE = """
+             where (:from is null or co.tradeDate >= :from)
+               and (:to is null or co.tradeDate <= :to)
+               and (:anyPartner = true or co.partner.id in :partnerIds)
+               and (:anySchool = true or co.schoolCode in :schoolCodes)
+               and (:anyProduct = true or cp.id in :productIds)
+               and (:anyDivision = true or coalesce(cp.salesDivision, '') in :divisions)
+               and (:keyword is null or lower(co.partner.name) like :keyword
+                    or lower(cp.name) like :keyword or lower(cp.code) like :keyword
+                    or lower(co.sourceOutNo) like :keyword
+                    or lower(coalesce(co.schoolName, '')) like :keyword)
+            """;
+
+    /**
+     * 출고/반품 조회의 <b>행 목록</b> — 매출과 <b>위탁 미결</b>을 한 번에 페이징한다
+     * (10/27 명세 §4-3·§4-4, 프론트 C-3·C-4).
+     *
+     * <p>§4-3 "위탁출고도 실제 출고다. <b>정산과 관계없이 등록(출고) 시점에</b> 잡혀야 한다" ·
+     * §4-4 "미결잔고 50 중 40을 정산 확정하면 <b>출고/반품에는 50부</b>(실제 출고)".
+     *
+     * <p>★<b>HQL {@code union all} 로 합친다</b>(Hibernate 6). 그래서 매출 쪽 조건은
+     * {@link #SALES_SEARCH_WHERE} 를 <b>그대로 이어 붙여</b> 쓴다 — 네이티브로 다시 쓰면
+     * 25개 조건이 복사돼 언젠가 목록과 갈린다(B-3 에서 피한 그 문제).
+     *
+     * <p>돌려주는 것은 <b>(출처, id)</b> 뿐이다. 응답 47칸은 자바에서 기존 매핑으로 만든다 —
+     * 네이티브 행에서 손으로 조립하면 칸이 늘 때마다 어긋난다.
+     *
+     * <p>위탁 쪽에 거는 조건은 기간·거래처·학교·도서·세부구분·키워드다. 매출에만 있는 축
+     * (회계구분·출고유형·창고·판매채널·거래순번)은 위탁 미결에 그 값이 없어 걸지 않는다 —
+     * 억지로 맞추면 "위탁출고인데 출고유형으로 걸러 사라지는" 일이 생긴다.
+     */
+    @Query("""
+            select 'S' as src, s.id as rid, s.salesDate as rdate
+              from Sale s left join s.warehouse w
+            """ + SALES_SEARCH_WHERE + """
+            union all
+            select 'C' as src, co.id as rid, co.tradeDate as rdate
+              from ConsignmentOut co join co.product cp
+            """ + CONSIGN_SHIPPED_WHERE + """
+            order by rdate desc, rid desc
+            """)
+    List<Object[]> searchShippedRows(@Param("from") LocalDate from,
                       @Param("to") LocalDate to,
                       @Param("anyCategory") boolean anyCategory,
                       @Param("salesCategories") Collection<SalesCategory> salesCategories,

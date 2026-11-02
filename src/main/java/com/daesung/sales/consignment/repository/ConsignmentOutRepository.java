@@ -9,6 +9,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 
+import org.springframework.data.repository.query.Param;
+
 public interface ConsignmentOutRepository extends JpaRepository<ConsignmentOut, Long> {
     Optional<ConsignmentOut> findBySourceOutNo(String sourceOutNo);
 
@@ -110,4 +112,41 @@ public interface ConsignmentOutRepository extends JpaRepository<ConsignmentOut, 
 
         Long getQty();
     }
+
+    /**
+     * 출고/반품 조회에 보일 <b>위탁출고</b>(10/27 명세 §4-3·§4-4, 프론트 C-3·C-4).
+     *
+     * <p>§4-3 "위탁출고도 실제 출고다. <b>정산과 관계없이 등록(출고) 시점에</b> 잡혀야 한다" ·
+     * §4-4 "미결잔고 50 중 40을 정산 확정하면 <b>출고/반품에는 50부</b>(실제 출고)".
+     *
+     * <p>★<b>정산 여부로 거르지 않는다.</b> 다 팔렸어도 "그날 50부가 나갔다"는 사실은 남는다.
+     * 수량은 {@code originalQty}(원출고)를 쓴다 — 잔여를 쓰면 정산할수록 출고가 줄어든다.
+     *
+     * <p>적용하는 조건은 기간·거래처·학교·도서·세부구분·키워드다. 매출에만 있는 축
+     * (회계구분·출고유형·창고·판매채널·거래순번)은 위탁 미결에 해당 값이 없어 걸지 않는다 —
+     * 억지로 맞추면 "위탁출고인데 출고유형으로 걸러 사라지는" 일이 생긴다.
+     */
+    @Query("select co from ConsignmentOut co join fetch co.product p join fetch co.partner "
+            + "where (:from is null or co.tradeDate >= :from) "
+            + "and (:to is null or co.tradeDate <= :to) "
+            + "and (:anyPartner = true or co.partner.id in :partnerIds) "
+            + "and (:anySchool = true or co.schoolCode in :schoolCodes) "
+            + "and (:anyProduct = true or p.id in :productIds) "
+            + "and (:anyDivision = true or coalesce(p.salesDivision, '') in :divisions) "
+            + "and (:keyword is null or lower(co.partner.name) like :keyword "
+            + "     or lower(p.name) like :keyword or lower(p.code) like :keyword "
+            + "     or lower(co.sourceOutNo) like :keyword "
+            + "     or lower(coalesce(co.schoolName, '')) like :keyword) "
+            + "order by co.tradeDate desc, co.id desc")
+    List<ConsignmentOut> findForShippedView(@Param("from") java.time.LocalDate from,
+                                            @Param("to") java.time.LocalDate to,
+                                            @Param("anyPartner") boolean anyPartner,
+                                            @Param("partnerIds") java.util.Collection<Long> partnerIds,
+                                            @Param("anySchool") boolean anySchool,
+                                            @Param("schoolCodes") java.util.Collection<String> schoolCodes,
+                                            @Param("anyProduct") boolean anyProduct,
+                                            @Param("productIds") java.util.Collection<Long> productIds,
+                                            @Param("anyDivision") boolean anyDivision,
+                                            @Param("divisions") java.util.Collection<String> divisions,
+                                            @Param("keyword") String keyword);
 }

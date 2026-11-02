@@ -1155,6 +1155,14 @@ public class SaleService {
         String kw = (keyword == null || keyword.isBlank())
                 ? null : "%" + keyword.trim().toLowerCase(java.util.Locale.ROOT) + "%";
 
+        // ★출고/반품 조회는 **매출 + 위탁 미결**을 함께 본다(명세 §4-3·§4-4, 프론트 C-3·C-4).
+        //   위탁출고도 실제 출고이고, 정산 여부와 무관하게 **원출고 수량**으로 보여야 한다.
+        if (shippedOnly) {
+            return searchShipped(from, to, categories, shipmentTypes, partnerIds, warehouseIds,
+                    schoolCodes, divisionCodes, productIds, partnerSchools, salesChannels,
+                    kw, tradeSeq, couponCount, includeCanceled, pageable);
+        }
+
         Page<Sale> page = saleRepository.search(from, to,
                 MultiSelect.isAny(categories),
                 MultiSelect.orPlaceholder(categories, SalesCategory.SALE),
@@ -1186,7 +1194,151 @@ public class SaleService {
         Map<String, com.daesung.sales.school.entity.SchoolType> schoolTypes = schoolTypesOf(page);
         Map<String, String> schoolNames = schoolNamesOf(page);
         Map<String, String> channels = salesChannelsOf(page);
-        return PageResponse.of(page.map(s -> SaleResponse.from(
+        return PageResponse.of(page.map(s -> toResponse(s, divisions, schoolTypes,
+                schoolNames, channels, couponCount)));
+    }
+
+    /**
+     * 출고/반품 조회 — <b>매출 + 위탁 미결</b>을 한 번에 페이징한다
+     * (10/27 명세 §4-3·§4-4, 프론트 C-3·C-4).
+     *
+     * <p>§4-3 "위탁출고도 실제 출고다. <b>정산과 관계없이 등록(출고) 시점에</b> 잡혀야 한다" ·
+     * §4-4 "미결잔고 50 중 40을 정산 확정하면 <b>출고/반품에는 50부</b>(실제 출고)가 있어야 한다.
+     * 정산 확정은 매출 확정이므로 <b>통합 매출에만</b> 반영한다".
+     *
+     * <p>★<b>DB가 합치고 DB가 페이징한다.</b> HQL {@code union all} 로 (출처, id)만 받아
+     * 자바에서 엔티티를 붙인다. 메모리에서 합치면 매출 33만 건을 다 올려야 하고,
+     * 페이지마다 위탁 행이 중복되거나 빠진다.
+     *
+     * <p>‼️<b>계획서가 여기서 틀렸던 것</b> — 처음엔 "완전정산되면 위탁 행을 숨긴다"고 적었는데,
+     * §4-4 는 <b>실제 출고 50</b>이다. 다 팔렸어도 "그날 50부가 나갔다"는 사실은 남아야 한다.
+     * 숨기면 출고 기록이 통째로 사라진다.
+     */
+    private PageResponse<SaleResponse> searchShipped(LocalDate from, LocalDate to,
+                                                     List<SalesCategory> categories,
+                                                     List<ShipmentType> shipmentTypes,
+                                                     List<Long> partnerIds, List<Long> warehouseIds,
+                                                     List<String> schoolCodes,
+                                                     List<String> divisionCodes,
+                                                     List<Long> productIds,
+                                                     List<String> partnerSchools,
+                                                     List<String> salesChannels,
+                                                     String kw, Integer tradeSeq,
+                                                     boolean couponCount, boolean includeCanceled,
+                                                     Pageable pageable) {
+        List<String> lectures = lectureDivisionCodes();
+        // ‼️**정렬 없는 Pageable 로 넘긴다.** Spring Data 가 Pageable 의 정렬을 union 뒤에
+        //   덧붙이는데(`order by rdate desc, rid desc, s.id asc`), union 밖에서는 `s` 별칭이
+        //   없어 쿼리 해석이 통째로 깨진다. 정렬은 HQL 안에 이미 있다(일자 내림차순).
+        Pageable rowPage = org.springframework.data.domain.PageRequest.of(
+                pageable.getPageNumber(), pageable.getPageSize());
+        List<Object[]> rows = saleRepository.searchShippedRows(from, to,
+                MultiSelect.isAny(categories),
+                MultiSelect.orPlaceholder(categories, SalesCategory.SALE),
+                MultiSelect.isAny(shipmentTypes),
+                MultiSelect.orPlaceholder(shipmentTypes, ShipmentType.NORMAL_SHIP),
+                MultiSelect.isAny(partnerIds), MultiSelect.orPlaceholder(partnerIds, 0L),
+                MultiSelect.isAny(warehouseIds), MultiSelect.orPlaceholder(warehouseIds, 0L),
+                MultiSelect.isAny(schoolCodes), MultiSelect.orPlaceholder(schoolCodes, "\u0000"),
+                MultiSelect.isAny(divisionCodes), MultiSelect.orPlaceholder(divisionCodes, "\u0000"),
+                MultiSelect.isAny(productIds), MultiSelect.orPlaceholder(productIds, 0L),
+                MultiSelect.isAny(normalizePairs(partnerSchools)),
+                MultiSelect.orPlaceholder(normalizePairs(partnerSchools), "\u0000"),
+                MultiSelect.isAny(salesChannels), hasUnclassifiedChannel(salesChannels),
+                MultiSelect.orPlaceholder(namedChannels(salesChannels), "\u0000"),
+                kw, tradeSeq, true, lectures, includeCanceled, rowPage);
+
+        long total = saleRepository.countShippedSales(from, to,
+                MultiSelect.isAny(categories),
+                MultiSelect.orPlaceholder(categories, SalesCategory.SALE),
+                MultiSelect.isAny(shipmentTypes),
+                MultiSelect.orPlaceholder(shipmentTypes, ShipmentType.NORMAL_SHIP),
+                MultiSelect.isAny(partnerIds), MultiSelect.orPlaceholder(partnerIds, 0L),
+                MultiSelect.isAny(warehouseIds), MultiSelect.orPlaceholder(warehouseIds, 0L),
+                MultiSelect.isAny(schoolCodes), MultiSelect.orPlaceholder(schoolCodes, "\u0000"),
+                MultiSelect.isAny(divisionCodes), MultiSelect.orPlaceholder(divisionCodes, "\u0000"),
+                MultiSelect.isAny(productIds), MultiSelect.orPlaceholder(productIds, 0L),
+                MultiSelect.isAny(normalizePairs(partnerSchools)),
+                MultiSelect.orPlaceholder(normalizePairs(partnerSchools), "\u0000"),
+                MultiSelect.isAny(salesChannels), hasUnclassifiedChannel(salesChannels),
+                MultiSelect.orPlaceholder(namedChannels(salesChannels), "\u0000"),
+                kw, tradeSeq, true, lectures, includeCanceled)
+                + saleRepository.countShippedConsign(from, to,
+                MultiSelect.isAny(partnerIds), MultiSelect.orPlaceholder(partnerIds, 0L),
+                MultiSelect.isAny(schoolCodes), MultiSelect.orPlaceholder(schoolCodes, "\u0000"),
+                MultiSelect.isAny(productIds), MultiSelect.orPlaceholder(productIds, 0L),
+                MultiSelect.isAny(divisionCodes), MultiSelect.orPlaceholder(divisionCodes, "\u0000"),
+                kw);
+
+        // 페이지 안의 id 만 모아 **한 번에** 읽는다(행마다 읽으면 N+1이다).
+        List<Long> saleIds = new ArrayList<>();
+        List<Long> consignIds = new ArrayList<>();
+        for (Object[] r : rows) {
+            if ("C".equals(r[0])) {
+                consignIds.add(((Number) r[1]).longValue());
+            } else {
+                saleIds.add(((Number) r[1]).longValue());
+            }
+        }
+        Map<Long, Sale> saleById = new HashMap<>();
+        saleRepository.findAllById(saleIds).forEach(x -> saleById.put(x.getId(), x));
+        Map<Long, com.daesung.sales.consignment.entity.ConsignmentOut> coById = new HashMap<>();
+        consignmentService.findAllByIds(consignIds).forEach(x -> coById.put(x.getId(), x));
+
+        // union 이 준 **순서 그대로** 줄을 만든다(일자 내림차순).
+        List<Sale> ordered = new ArrayList<>(rows.size());
+        for (Object[] r : rows) {
+            long id = ((Number) r[1]).longValue();
+            if ("C".equals(r[0])) {
+                var co = coById.get(id);
+                if (co != null) {
+                    ordered.add(viewOf(co));
+                }
+            } else {
+                Sale sale = saleById.get(id);
+                if (sale != null) {
+                    ordered.add(sale);
+                }
+            }
+        }
+
+        Map<String, SalesDivision> divisions = new HashMap<>();
+        for (SalesDivision d : salesDivisionRepository.findAll()) {
+            divisions.put(d.getCode(), d);
+        }
+        var schoolTypes = schoolTypesOf(ordered);
+        var schoolNames = schoolNamesOf(ordered);
+        var channels = salesChannelsOf(ordered);
+
+        List<SaleResponse> content = new ArrayList<>(ordered.size());
+        for (Sale sale : ordered) {
+            content.add(toResponse(sale, divisions, schoolTypes, schoolNames, channels, couponCount));
+        }
+        return PageResponse.of(new org.springframework.data.domain.PageImpl<>(
+                content, pageable, total));
+    }
+
+    /**
+     * 위탁 미결 한 건을 <b>출고/반품 조회에 보일 모양</b>으로. 저장하지 않는다
+     * ({@link Sale#forConsignmentView} 주석 참고).
+     *
+     * <p>수량은 <b>원출고</b>({@code originalQty})다 — 잔여를 쓰면 정산할수록 출고가 줄어든다(§4-4).
+     */
+    private Sale viewOf(com.daesung.sales.consignment.entity.ConsignmentOut co) {
+        return Sale.forConsignmentView(co.getSourceOutNo(), co.getTradeDate(), co.getPartner(),
+                co.getProduct(), co.getUnitPrice(), co.getSupplyRate(), co.getOriginalQty(),
+                co.getSchoolCode(), co.getSchoolName(), consignmentService.consignWarehouseOrNull(co));
+    }
+
+    /**
+     * 매출 한 줄 → 응답. <b>두 경로(일반 조회·출고/반품 조회)가 같은 매핑을 쓴다</b> —
+     * 복사해 두면 한쪽 칸만 채워져 화면이 조건에 따라 달라진다.
+     */
+    private SaleResponse toResponse(Sale s, Map<String, SalesDivision> divisions,
+                                    Map<String, com.daesung.sales.school.entity.SchoolType> schoolTypes,
+                                    Map<String, String> schoolNames,
+                                    Map<String, String> channels, boolean couponCount) {
+        return SaleResponse.from(
                 s, divisions.get(s.getProduct().getSalesDivision()),
                 // ‼️학교코드가 없는 매출이 흔하다(학교 없이 거래처로만 나가는 건).
                 //   Map.of() 는 **null 키 조회에서 NPE**를 던진다 — 빈 맵이어도 그렇다.
@@ -1196,7 +1348,7 @@ public class SaleService {
                 (s.getSchoolCode() == null) ? null : schoolNames.get(s.getSchoolCode()),
                 // 판매채널도 학교 마스터 값이다(레거시 schDataDT.type1).
                 (s.getSchoolCode() == null) ? null : channels.get(s.getSchoolCode()),
-                couponCount)));
+                couponCount);
     }
 
     /**
@@ -1228,7 +1380,7 @@ public class SaleService {
      * 매출에 이름이 이미 있으면 그대로 두고, 빈 것만 이 값으로 채운다 —
      * 등록 당시 이름과 지금 마스터 이름이 다를 수 있어 덮어쓰지 않는다.
      */
-    private Map<String, String> schoolNamesOf(Page<Sale> page) {
+    private Map<String, String> schoolNamesOf(Iterable<Sale> page) {
         java.util.Set<String> codes = new java.util.HashSet<>();
         page.forEach(s -> {
             if (s.getSchoolCode() != null && !s.getSchoolCode().isBlank()
@@ -1246,7 +1398,7 @@ public class SaleService {
     }
 
     /** 페이지에 실린 학교코드의 <b>판매채널</b>을 한 번에 가져온다(N+1 방지). */
-    private Map<String, String> salesChannelsOf(Page<Sale> page) {
+    private Map<String, String> salesChannelsOf(Iterable<Sale> page) {
         java.util.Set<String> codes = new java.util.HashSet<>();
         page.forEach(s -> {
             if (s.getSchoolCode() != null && !s.getSchoolCode().isBlank()) {
@@ -1266,7 +1418,7 @@ public class SaleService {
     }
 
     /** 페이지에 실린 학교코드의 학교/학원 구분을 한 번에 가져온다(N+1 방지). */
-    private Map<String, com.daesung.sales.school.entity.SchoolType> schoolTypesOf(Page<Sale> page) {
+    private Map<String, com.daesung.sales.school.entity.SchoolType> schoolTypesOf(Iterable<Sale> page) {
         java.util.Set<String> codes = new java.util.HashSet<>();
         page.forEach(s -> {
             if (s.getSchoolCode() != null && !s.getSchoolCode().isBlank()) {

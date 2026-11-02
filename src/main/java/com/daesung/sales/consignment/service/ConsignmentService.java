@@ -405,6 +405,28 @@ public class ConsignmentService {
      * 이 미결의 위탁창고(자동이고 도착다리)를 찾는다.
      * 원 자동이고: origin_txn=출발다리(물류창고), 도착다리는 sourceTxn=origin_txn으로 역추적.
      */
+    /** 출고/반품 조회가 쓰는 조회용 — id 목록으로 한 번에 읽는다(행마다 읽으면 N+1이다). */
+    @Transactional(readOnly = true)
+    public List<ConsignmentOut> findAllByIds(List<Long> ids) {
+        return ids.isEmpty() ? List.of() : consignmentOutRepository.findAllById(ids);
+    }
+
+    /**
+     * 위탁창고 — <b>못 찾으면 null</b>. 조회 전용이라 막지 않는다.
+     *
+     * <p>{@link #consignWarehouseOf} 는 정산 경로라 못 찾으면 예외를 던진다(거기선 재고를
+     * 옮겨야 해서 모르면 안 된다). 조회에서 같은 이유로 터뜨리면 <b>옛 미결 하나 때문에
+     * 출고/반품 조회 전체가 500</b>이 된다 — 창고 칸만 비우고 줄은 보여 주는 쪽이 맞다.
+     */
+    @Transactional(readOnly = true)
+    public Warehouse consignWarehouseOrNull(ConsignmentOut co) {
+        try {
+            return consignWarehouseOf(co);
+        } catch (BusinessException e) {
+            return null;
+        }
+    }
+
     private Warehouse consignWarehouseOf(ConsignmentOut co) {
         InventoryTxn outLeg = co.getOriginTxn();
         if (outLeg == null) {

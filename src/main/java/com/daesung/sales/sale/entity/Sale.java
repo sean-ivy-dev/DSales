@@ -201,6 +201,51 @@ public class Sale extends com.daesung.sales.common.entity.SoftDeletableEntity {
     }
 
     /** 위탁 정산 확정 매출 라인. sales_type=위탁, shipment_type=위탁출고, 회계=매출. */
+    /**
+     * <b>조회 전용</b> — 위탁 미결({@code ConsignmentOut})을 출고/반품 조회에 보여주기 위한
+     * <b>저장하지 않는</b> 매출 모양 객체.
+     *
+     * <p>근거: 10/27 명세 §4-3 "위탁출고도 실제 출고다. <b>정산과 관계없이 등록(출고) 시점에</b>
+     * 출고/반품 조회에 잡혀야 한다" · §4-4 "미결잔고 50 중 40을 정산 확정하면
+     * <b>출고/반품에는 50부</b>(실제 출고)가 있어야 한다".
+     *
+     * <p>★왜 Sale 모양으로 만드나 — 출고/반품 조회 응답({@code SaleResponse})은 47개 칸이고
+     * 거래처·학교·상품 마스터에서 붙는 값이 많다. 위탁 행을 손으로 만들면 칸이 늘 때마다
+     * 어긋난다. 같은 매핑을 그대로 태우면 따라올 수밖에 없다.
+     *
+     * <p>‼️<b>절대 저장하지 않는다.</b> 저장하면 매출 원장에 없는 거래가 생겨 이중 장부가
+     * 깨진다 — 위탁출고는 매출이 아니라 <b>미결</b>이고, 매출은 정산에서 확정된다.
+     * {@code id} 가 {@code null} 이라 {@code /sales/{id}} 경로도 탈 수 없다.
+     *
+     * @param qty <b>원출고 수량</b>을 넣는다(정산·반품으로 줄어든 잔여가 아니다) — §4-4 그대로.
+     */
+    public static Sale forConsignmentView(String sourceOutNo, LocalDate tradeDate, Partner partner,
+                                          Product product, Integer unitPrice, Integer supplyRate,
+                                          int qty, String schoolCode, String schoolName,
+                                          Warehouse consignWarehouse) {
+        Sale s = new Sale();
+        s.salesNo = sourceOutNo;          // 매출번호 자리에 위탁출고번호(OUT-)
+        s.salesDate = tradeDate;
+        s.partner = partner;
+        s.product = product;
+        s.tradeClass = (product == null) ? null : product.getSalesDivision();
+        s.salesType = SalesType.CONSIGN_SALES;
+        s.shipmentType = ShipmentType.CONSIGN_SHIP;
+        s.salesCategory = SalesCategory.SALE;
+        s.unitPrice = unitPrice;
+        s.supplyRate = supplyRate;
+        s.qty = qty;
+        // 금액은 0이다 — 위탁출고는 매출이 아니다. 금액은 정산에서 정해진다.
+        s.supplyAmount = 0L;
+        s.tax = 0L;
+        s.totalAmount = 0L;
+        s.schoolCode = schoolCode;
+        s.schoolName = schoolName;
+        s.warehouse = consignWarehouse;   // 명세 §4-A "'위탁출고 · 위탁창고'로 표시"
+        s.sourceOutNo = sourceOutNo;
+        return s;
+    }
+
     public static Sale createConsign(String salesNo, LocalDate salesDate, Partner partner, Product product,
                                      Integer unitPrice, Integer supplyRate, int qty,
                                      Long supplyAmount, Long tax, Long totalAmount,

@@ -143,4 +143,62 @@ class ConsignOrderEntryIntegrationTest extends IntegrationTestSupport {
         assertThat(r.path("success").asBoolean()).isFalse();
         assertThat(r.path("error").path("message").asText()).contains("출고 창고");
     }
+
+    @Test
+    @DisplayName("★출고/반품 조회에 '위탁출고·위탁창고'로 나온다 — 등록 시점부터(§4-3)")
+    void 출고반품조회에_나온다() {
+        String day = "2048-06-01";
+        post("/sales/entries", Map.of("salesDate", day,
+                "partnerId", partner, "warehouseId", main, "items", List.of(item(50))));
+
+        JsonNode rows = data(get("/sales?fromDate=" + day + "&toDate=" + day
+                + "&partnerId=" + partner + "&shippedOnly=true&size=50")).path("content");
+
+        assertThat(rows).as("정산 전인데도 보여야 한다: %s", rows).isNotEmpty();
+        JsonNode r = rows.get(0);
+        assertThat(r.path("shipmentType").asText()).isEqualTo("CONSIGN_SHIP");
+        assertThat(r.path("warehouseName").asText()).as("위탁창고로 표시").contains("위탁");
+        assertThat(r.path("qty").asInt()).isEqualTo(50);
+        assertThat(r.path("salesNo").asText()).startsWith("OUT-");
+    }
+
+    @Test
+    @DisplayName("★50 중 40을 정산해도 출고/반품에는 50 — 정산분은 통합 매출에만(§4-4)")
+    void 정산해도_원출고수량() {
+        String day = "2048-06-02";
+        post("/sales/entries", Map.of("salesDate", day,
+                "partnerId", partner, "warehouseId", main, "items", List.of(item(50))));
+
+        // 미결 50 중 40 정산
+        long outId = 0;
+        for (JsonNode p : data(get("/consignment/pending?partnerId=" + partner)).path("items")) {
+            if (p.path("tradeDate").asText().equals(day)) {
+                outId = p.path("consignmentOutId").asLong();
+            }
+        }
+        assertThat(outId).as("미결을 찾았다").isPositive();
+        JsonNode st = post("/consignment/settle", Map.of("salesDate", day,
+                "settlements", List.of(Map.of("consignmentOutId", outId, "settleQty", 40,
+                        "unitPrice", 10000, "supplyRate", 70))));
+        assertThat(st.path("success").asBoolean()).as("정산: %s", st).isTrue();
+
+        // ★출고/반품 조회 — **50** 이어야 한다(40이 아니다). 정산 매출은 여기 안 나온다.
+        long shippedQty = 0;
+        int shippedRows = 0;
+        for (JsonNode r : data(get("/sales?fromDate=" + day + "&toDate=" + day
+                + "&partnerId=" + partner + "&shippedOnly=true&size=50")).path("content")) {
+            shippedRows++;
+            shippedQty += r.path("qty").asLong();
+        }
+        assertThat(shippedRows).as("위탁 한 줄만 — 정산 매출이 더해지면 두 줄이 된다").isEqualTo(1);
+        assertThat(shippedQty).as("실제 출고 50(정산분 40이 아니다)").isEqualTo(50);
+
+        // 통합 매출 조회에는 정산분(40)이 나온다.
+        long saleQty = 0;
+        for (JsonNode r : data(get("/sales?fromDate=" + day + "&toDate=" + day
+                + "&partnerId=" + partner + "&size=50")).path("content")) {
+            saleQty += r.path("qty").asLong();
+        }
+        assertThat(saleQty).as("통합 매출에는 정산분 40").isEqualTo(40);
+    }
 }
