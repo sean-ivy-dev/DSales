@@ -42,6 +42,16 @@ public abstract class IntegrationTestSupport {
         REDIS.start();
     }
 
+    /** 테스트용 특약점 사이트 키. 운영 키와 무관한 값이다. */
+    public static final String DEALER_SITE_KEY = "test-dealer-site-key";
+
+    /**
+     * 특약점 주문용 창고코드(고정). ‼️코드가 고정이라 <b>실행마다 새로 만들면 안 된다</b> —
+     * 컨테이너가 실행 간 살아 있어 두 번째 실행에서 "이미 존재하는 코드"로 깨진다.
+     * 쓰는 테스트가 <b>없으면 만들고 있으면 쓰는</b> 식으로 가져간다.
+     */
+    public static final String DEALER_WAREHOUSE_CODE = "DEALER-WH";
+
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
         r.add("spring.datasource.url", MYSQL::getJdbcUrl);
@@ -53,6 +63,13 @@ public abstract class IntegrationTestSupport {
         r.add("daesung.supplier.name", () -> "(주)대성테스트");
         r.add("daesung.supplier.biz-no", () -> "111-11-11111");
         r.add("daesung.supplier.tel", () -> "02-880-2301");
+        // 특약점 사이트 서버 연동 키(10/26 §10-3). 운영은 환경변수로 넣고 기본값은 없다 —
+        // 테스트에서만 값을 준다. ★여기(공용 베이스)에 두는 이유: 테스트 클래스마다
+        // @TestPropertySource 로 주면 **스프링 컨텍스트가 그 클래스 전용으로 새로 뜬다**.
+        r.add("daesung.dealer-site.api-key", () -> DEALER_SITE_KEY);
+        // 특약점 주문이 나갈 창고를 **못 박는다**. 안 박으면 다른 테스트가 만든 MAIN 창고가
+        // 섞여 "창고가 여럿이라 정할 수 없다"로 거부된다(운영도 같은 이유로 설정이 필요하다).
+        r.add("daesung.dealer-site.warehouse-code", () -> DEALER_WAREHOUSE_CODE);
     }
 
     @Autowired
@@ -118,6 +135,33 @@ public abstract class IntegrationTestSupport {
     /** 본문 있는 DELETE(삭제 사유 등). */
     protected JsonNode del(String path, Object body) {
         return exchange(HttpMethod.DELETE, path, body, true);
+    }
+
+    /**
+     * 특약점 사이트 <b>서버 간 호출</b>(키 헤더). 일반 호출과 달리 JWT 를 붙이지 않는다 —
+     * 그 경로는 토큰을 보지 않고 키만 본다(명세 §10-3).
+     *
+     * @param key 보낼 키. 틀린 키·null 로 거부를 검증할 때 바꿔 넣는다
+     */
+    protected JsonNode postAsDealerSite(String path, Object body, String key) {
+        HttpHeaders h = new HttpHeaders();
+        h.setContentType(MediaType.APPLICATION_JSON);
+        if (key != null) {
+            h.add("X-Dealer-Site-Key", key);
+        }
+        String json;
+        try {
+            json = (body == null) ? null : om.writeValueAsString(body);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        ResponseEntity<String> resp = rest.exchange("/api/v1" + path, HttpMethod.POST,
+                new org.springframework.http.HttpEntity<>(json, h), String.class);
+        try {
+            return om.readTree(resp.getBody());
+        } catch (Exception e) {
+            throw new RuntimeException("응답 파싱 실패: " + resp.getBody(), e);
+        }
     }
 
     /** data 노드만 반환(성공 응답 가정). */

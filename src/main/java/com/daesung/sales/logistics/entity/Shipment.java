@@ -136,6 +136,20 @@ public class Shipment extends BaseEntity {
     private String trackingNo;
 
     /**
+     * <b>접수 단계</b>(접수완료·상품검수)만 저장한다. 비어 있으면 아래 날짜 파생을 쓴다.
+     *
+     * <p>근거: 10/27 명세 §1(새 탭 주문은 매출 주문으로 저장) · §2-8(선택지는
+     * 접수완료/상품검수/상품준비중) · 발주처 1차회신 #4(6단계, 상품검수 포함).
+     *
+     * <p>★<b>발송준비중·발송완료는 여기 담지 않는다.</b> 그 둘은 지금처럼 출력·발송일에서
+     * 파생한다 — 이관분 46,218건이 그 파생에 기대고 있어 축을 옮기면 전건이 틀어진다.
+     * 즉 이 컬럼은 "날짜가 아직 아무것도 없는 구간"을 둘로 쪼개는 역할만 한다.
+     */
+    @Enumerated(jakarta.persistence.EnumType.STRING)
+    @Column(name = "intake_state", length = 20)
+    private com.daesung.sales.dsre.gateway.OrderState intakeState;
+
+    /**
      * 진행상태 6단계 중 이 발송이 어디인지. 발주처 확정(2026-10-23 #17) —
      * "진행상태 한 컬럼 6단계 / 완료·삭제 컬럼은 진행상태로 통합".
      *
@@ -147,9 +161,11 @@ public class Shipment extends BaseEntity {
      *   그 밖            → 상품준비중(PREPARING)
      * </pre>
      *
-     * <p>‼️<b>접수완료·상품검수는 여기서 나오지 않는다.</b> 그 둘은 DSRE2 소관(주문 접수 단계)이고,
-     * 작업결과는 <b>출고 작업 목록</b>이라 매출·출고가 선 뒤에야 행이 생긴다 —
-     * 가장 이른 단계가 상품준비중이다.
+     * <p>★<b>정정(2026-11-02)</b>: 예전엔 "접수완료·상품검수는 여기서 나오지 않는다 —
+     * 그 둘은 DSRE2 소관"이었다. 10/27 명세 §1이 <b>새 특약점 주문을 매출 주문으로
+     * 저장</b>하기로 바꿔, 그 접수 단계가 <b>우리 몫</b>이 됐다({@link #intakeState}).
+     * 날짜가 아직 아무것도 없는 구간에서만 그 값이 쓰이고, 비어 있으면 종전처럼
+     * 상품준비중이다 — 이관분은 전부 비어 있어 영향이 없다.
      *
      * <p>‼️'완료'(completedAt)는 판정에 쓰지 않는다. 이관분 46,218건이 가짜 1900-01-01 로
      * 채워져 사실상 전건 참이었고(V97 에서 비웠다), 레거시에서 실제로 쓰인 건 13건뿐이다.
@@ -165,7 +181,23 @@ public class Shipment extends BaseEntity {
         if (printedAt != null) {
             return com.daesung.sales.dsre.gateway.OrderState.READY_TO_SHIP;
         }
+        // ★접수 단계는 **물류가 아직 아무것도 안 한** 구간에서만 이긴다.
+        //   물류가 출력·발송을 했으면 위에서 이미 걸렸다 — 접수 단계가 물류 진행을
+        //   되돌리는 일은 없어야 한다(담당자가 상태를 A 로 되돌려도 발송완료는 유지된다).
+        if (intakeState != null) {
+            return intakeState;
+        }
         return com.daesung.sales.dsre.gateway.OrderState.PREPARING;
+    }
+
+    /**
+     * 접수 단계를 지정한다. {@code null} 또는 상품준비중이면 <b>컬럼을 비워</b>
+     * 날짜 파생으로 되돌린다 — 상품준비중은 파생의 기본값이라 따로 저장할 필요가 없고,
+     * 저장해 두면 나중에 파생 규칙이 바뀌어도 이 행만 옛 규칙에 묶인다.
+     */
+    public void applyIntakeState(com.daesung.sales.dsre.gateway.OrderState state) {
+        this.intakeState = (state == null
+                || state == com.daesung.sales.dsre.gateway.OrderState.PREPARING) ? null : state;
     }
 
     public static Shipment of(String tradeClass, LocalDate tradeDate, Partner partner,

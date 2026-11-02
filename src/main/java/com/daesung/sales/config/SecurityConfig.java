@@ -35,7 +35,8 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http, JwtProvider jwtProvider,
             com.daesung.sales.permission.service.DynamicAuthorizationManager dynamicAuthorizationManager,
-            com.daesung.sales.audit.service.AccessDeniedLogger accessDeniedLogger)
+            com.daesung.sales.audit.service.AccessDeniedLogger accessDeniedLogger,
+            com.daesung.sales.dealer.config.DealerSiteProperties dealerSiteProperties)
             throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -55,6 +56,14 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**",
                                 "/actuator/health").permitAll()
+                        // ★특약점 사이트 서버 전용 경로 — 인가를 **전용 키 필터**가 한다
+                        //   (DealerSiteKeyFilter). 키가 없거나 틀리면 그 필터가 401 로 끊으므로
+                        //   여기서 permitAll 이어도 열려 있지 않다.
+                        //   JWT·권한표를 같이 걸지 않는 이유: 그러면 사이트 서버가 사람 계정으로
+                        //   로그인해야 하고, 사이트에 사람 토큰이 상주한다(명세 §10-3 서버간 호출).
+                        .requestMatchers(
+                                com.daesung.sales.dealer.config.DealerSiteKeyFilter.PATH_PREFIX + "**")
+                        .permitAll()
                         // 계정 생성·권한 관리는 관리자만(권한 표 자체를 바꾸는 경로라 표 밖에 둔다 —
                         // 표를 잘못 고쳐 스스로를 잠그면 되돌릴 길이 없어진다)
                         .requestMatchers("/api/v1/auth/users", "/api/v1/auth/users/**").hasRole("ADMIN")
@@ -86,7 +95,15 @@ public class SecurityConfig {
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
                         .accessDeniedHandler(accessDeniedLogger))
+                // 사이트 키 필터가 JWT 필터보다 앞이다 — 그 경로는 JWT 를 보지 않는다.
+                // ‼️두 줄의 **순서가 곧 필터 순서**다. 같은 기준(UsernamePasswordAuthenticationFilter)
+                //   앞에 넣을 때는 나중에 등록한 쪽이 더 앞에 선다 — 그래서 JWT 필터를 먼저
+                //   등록하고 사이트 키 필터를 나중에 등록해, 키 필터가 **먼저** 돈다.
+                //   (커스텀 필터 클래스를 기준으로는 쓸 수 없다 — 스프링이 아는 필터만 기준이 된다.)
                 .addFilterBefore(new JwtAuthenticationFilter(jwtProvider),
+                        UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(
+                        new com.daesung.sales.dealer.config.DealerSiteKeyFilter(dealerSiteProperties),
                         UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
