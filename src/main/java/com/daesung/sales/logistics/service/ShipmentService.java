@@ -12,9 +12,11 @@ import com.daesung.sales.dsre.gateway.DsreShipResult;
 import com.daesung.sales.dsre.gateway.OrderState;
 import com.daesung.sales.logistics.dto.DsreStateSync;
 import com.daesung.sales.logistics.dto.ShippingUpdateRequest;
+import com.daesung.sales.logistics.dto.TrackingsUpdateRequest;
 import com.daesung.sales.logistics.dto.TrackingUploadResponse;
 import com.daesung.sales.logistics.entity.DeliveryType;
 import com.daesung.sales.logistics.entity.Shipment;
+import com.daesung.sales.logistics.entity.ShipmentTracking;
 import com.daesung.sales.logistics.repository.ShipmentRepository;
 import com.daesung.sales.partner.entity.Partner;
 import com.daesung.sales.sale.entity.Sale;
@@ -443,6 +445,38 @@ public class ShipmentService {
         s.updateTracking(req.courierName(), req.trackingNo());
         // 발송일이 들어오면 = 발송 처리. 묶인 신청의 DSRE 상태도 발송완료로(2026-10-23).
         return (req.sentDate() == null) ? List.of() : shipToDsre(s, req.sentDate());
+    }
+
+    /**
+     * 박스별 송장 <b>통째 교체</b>(10/27 명세 §8-3, 프론트 E-2).
+     *
+     * <p>삭제된 발송 건은 거부한다 — 작업 대상이 아니다(출력·확인과 같은 규칙).
+     * 박스 번호가 겹치면 DB 유니크 제약이 막지만, 담당자가 사유를 알 수 있게 여기서 먼저 본다.
+     */
+    @Transactional
+    public List<ShipmentTracking> replaceTrackings(Long shipmentId,
+                                                   TrackingsUpdateRequest req) {
+        Shipment s = getOrThrow(shipmentId);
+        assertNotDeleted(s);
+
+        List<Shipment.TrackingLine> lines = new ArrayList<>();
+        java.util.Set<Integer> seen = new java.util.HashSet<>();
+        if (req != null && req.trackings() != null) {
+            for (TrackingsUpdateRequest.Line l : req.trackings()) {
+                if (!seen.add(l.boxNo())) {
+                    throw new BusinessException(ErrorCode.INVALID_INPUT,
+                            "박스 번호가 겹칩니다: " + l.boxNo() + " — 한 발송 안에서 번호는 하나뿐입니다.");
+                }
+                lines.add(new Shipment.TrackingLine(l.boxNo(), l.courierName(), l.trackingNo()));
+            }
+        }
+        // ‼️**비우고 flush 한 뒤 채운다.** orphanRemoval 의 DELETE 는 커밋 직전에 나가는데,
+        //   같은 (발송·박스번호)로 INSERT 가 먼저 나가면 유니크 제약에 걸려 500 이 된다
+        //   (송장을 다시 저장할 때마다 터졌다 — 테스트가 잡았다).
+        s.clearTrackings();
+        shipmentRepository.flush();
+        s.applyTrackings(lines, currentAuditor.username());
+        return s.getTrackings();
     }
 
     /**

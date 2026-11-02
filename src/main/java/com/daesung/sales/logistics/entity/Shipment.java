@@ -344,18 +344,85 @@ public class Shipment extends BaseEntity {
     }
 
     /**
-     * 송장 기록(수기·엑셀 일괄). null인 항목은 건드리지 않는다.
+     * 박스별 송장 — <b>이쪽이 정본</b>(10/27 명세 §8-3 "송장번호는 박스 수만큼 여러 개").
+     *
+     * <p>{@link #courierName}·{@link #trackingNo} 는 <b>1번 박스를 비추는 거울</b>로 남겨 둔다.
+     * 화면·엑셀 양식·일괄 업로드가 아직 그 단일 필드를 쓰기 때문이다. 둘이 갈리지 않도록
+     * <b>갱신은 {@link #replaceTrackings} 한 곳</b>에서만 한다.
+     */
+    @jakarta.persistence.OneToMany(mappedBy = "shipment",
+            cascade = jakarta.persistence.CascadeType.ALL, orphanRemoval = true)
+    @jakarta.persistence.OrderBy("boxNo asc")
+    private java.util.List<ShipmentTracking> trackings = new java.util.ArrayList<>();
+
+    /**
+     * 송장 기록(수기·엑셀 일괄) — 단건. null인 항목은 건드리지 않는다.
      *
      * <p>택배사 API를 부르지 않는다 — 연동 여부가 아직 미확정이라(물류팀 인터뷰 대기)
      * 지금은 사람이 받아 적은 값을 그대로 보관만 한다.
+     *
+     * <p>★<b>1번 박스로 들어간다.</b> 기존 경로(발송정보 입력·엑셀 업로드)가 송장 하나만
+     * 보내므로, 그것이 곧 첫 박스다. 여러 개는 {@link #replaceTrackings} 를 쓴다.
      */
     public void updateTracking(String courierName, String trackingNo) {
-        if (courierName != null) {
-            this.courierName = courierName;
+        if (courierName == null && trackingNo == null) {
+            return;
         }
-        if (trackingNo != null) {
-            this.trackingNo = trackingNo;
+        String c = (courierName != null) ? courierName : this.courierName;
+        String n = (trackingNo != null) ? trackingNo : this.trackingNo;
+        if (n == null || n.isBlank()) {
+            // 송장번호 없이 택배사만 바꾸는 경우 — 거울만 갱신한다(박스 줄을 만들 수 없다).
+            this.courierName = c;
+            return;
         }
+        replaceTrackings(java.util.List.of(new TrackingLine(1, c, n)), null);
+    }
+
+    /** 박스 한 줄의 입력값. */
+    public record TrackingLine(int boxNo, String courierName, String trackingNo) {
+    }
+
+    /**
+     * 박스별 송장을 <b>통째로 교체</b>한다.
+     *
+     * <p>★줄 단위로 고치지 않고 교체하는 이유 — 박스 수가 줄면 남는 줄을 지워야 하고,
+     * 번호가 바뀌면 어느 줄이 어느 박스인지 짝짓기가 애매해진다. 화면도 "표를 통째로 저장"이다.
+     *
+     * <p>단일 필드({@code courierName}·{@code trackingNo})는 <b>1번 박스를 그대로 비춘다</b> —
+     * 여기서만 갱신하므로 자식 테이블과 갈릴 수 없다.
+     */
+    public void replaceTrackings(java.util.List<TrackingLine> lines, String by) {
+        clearTrackings();
+        applyTrackings(lines, by);
+    }
+
+    /**
+     * 송장 줄을 비운다. <b>채우기 전에 반드시 flush 해야 한다</b> —
+     * {@code orphanRemoval} 은 DELETE 를 커밋 직전에 내보내서, 그 전에 같은
+     * (발송·박스번호)로 INSERT 가 먼저 나가면 유니크 제약에 걸린다(실제로 500 이 났다).
+     * 그래서 서비스가 {@code clear → flush → apply} 순서로 부른다.
+     */
+    public void clearTrackings() {
+        this.trackings.clear();
+        this.courierName = null;
+        this.trackingNo = null;
+    }
+
+    /** 비운 뒤 채운다. 단일 필드는 1번 박스를 비춘다. */
+    public void applyTrackings(java.util.List<TrackingLine> lines, String by) {
+        if (lines != null) {
+            // ★번호 순으로 담는다. 화면이 보낸 순서(2,1,3)가 그대로 응답에 나오면
+            //   담당자가 박스 순서를 못 믿는다. @OrderBy 는 **다시 읽을 때만** 듣는다.
+            java.util.List<TrackingLine> sorted = new java.util.ArrayList<>(lines);
+            sorted.sort(java.util.Comparator.comparingInt(TrackingLine::boxNo));
+            for (TrackingLine l : sorted) {
+                this.trackings.add(ShipmentTracking.of(this, l.boxNo(),
+                        l.courierName(), l.trackingNo(), by));
+            }
+        }
+        ShipmentTracking first = this.trackings.isEmpty() ? null : this.trackings.get(0);
+        this.courierName = (first == null) ? null : first.getCourierName();
+        this.trackingNo = (first == null) ? null : first.getTrackingNo();
     }
 
     public void markDeleted(String by) {

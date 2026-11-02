@@ -115,6 +115,17 @@ public class WorkService {
      * 그 건들은 여러 주문이 한 건에 합쳐져 있어 주문 하나로 되돌릴 수 없으므로,
      * <b>주문을 뺀 네 칸으로 맞춘다</b>({@link #legacyKey}). 소급해 채우면 없던 사실을 만드는 것이다.
      */
+    /** 박스별 송장을 응답 모양으로. 명세 §8-3 — 박스 수만큼 줄이 있다. */
+    private static List<WorkOrderResponse.Tracking> trackingsOf(Shipment s) {
+        List<WorkOrderResponse.Tracking> out = new ArrayList<>();
+        for (var t : s.getTrackings()) {
+            out.add(new WorkOrderResponse.Tracking(t.getBoxNo(), t.getCourierName(), t.getTrackingNo()));
+        }
+        // 읽는 쪽에서도 한 번 더 못 박는다 — 정렬을 JPA 동작에 기대면 조용히 섞인다.
+        out.sort(java.util.Comparator.comparingInt(WorkOrderResponse.Tracking::boxNo));
+        return out;
+    }
+
     private static String key(LocalDate date, Long partnerId, String schoolCode, String tradeClass,
                               String entryNo) {
         return legacyKey(date, partnerId, schoolCode, tradeClass)
@@ -359,6 +370,7 @@ public class WorkService {
                     dt, (dt == null) ? null : dt.label(),
                     s.getReceiverName(), s.getReceiverPhone(),
                     s.getCourierName(), s.getTrackingNo(),
+                    trackingsOf(s),
                     total, lines));
         }
         return out;

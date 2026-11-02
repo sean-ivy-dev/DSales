@@ -6,6 +6,7 @@ import com.daesung.sales.common.excel.ExcelExportUtil.Col;
 import com.daesung.sales.common.response.ApiResponse;
 import com.daesung.sales.logistics.dto.ReasonRequest;
 import com.daesung.sales.logistics.dto.ShippingUpdateRequest;
+import com.daesung.sales.logistics.dto.TrackingsUpdateRequest;
 import com.daesung.sales.logistics.dto.TrackingUploadResponse;
 import com.daesung.sales.logistics.entity.DeliveryType;
 import com.daesung.sales.logistics.dto.WorkOrderResponse;
@@ -97,6 +98,29 @@ public class WorkController {
             @Parameter(description = "기준일(미지정 시 오늘)") @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
         return ApiResponse.success(actionItemService.newWorkOrderCount(asOf));
+    }
+
+    @Operation(summary = "박스별 송장 저장(여러 개)",
+            description = """
+                    한 주문에 **박스 수만큼** 송장을 둔다(10/27 명세 §8-3 —
+                    "주문은 한 줄이지만 송장번호는 박스 수만큼 여러 개 등록할 수 있게 한다").
+
+                    · **보낸 목록이 그대로 저장된다** — 기존 줄은 사라진다(표를 통째로 저장).
+                    · **빈 배열을 보내면 송장을 모두 지운다**(잘못 넣은 것을 되돌리는 길).
+                    · 박스 번호는 1부터, 한 발송 안에서 겹치면 400.
+
+                    ‼️기존 단일 필드(`courierName`·`trackingNo`)는 그대로 둔다 —
+                    화면·엑셀 양식·일괄 업로드가 아직 쓴다. **1번 박스를 비추며**, 서버가
+                    한 곳에서만 갱신하므로 둘이 갈릴 수 없다.""")
+    @PutMapping("/work-orders/{id}/trackings")
+    public ApiResponse<List<WorkOrderResponse.Tracking>> replaceTrackings(
+            @PathVariable Long id,
+            @Valid @RequestBody(required = false) TrackingsUpdateRequest req) {
+        List<WorkOrderResponse.Tracking> out = new java.util.ArrayList<>();
+        for (var t : shipmentService.replaceTrackings(id, req)) {
+            out.add(new WorkOrderResponse.Tracking(t.getBoxNo(), t.getCourierName(), t.getTrackingNo()));
+        }
+        return ApiResponse.success(out);
     }
 
     @Operation(summary = "작업요청서 출력 처리",

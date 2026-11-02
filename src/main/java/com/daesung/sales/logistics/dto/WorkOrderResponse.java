@@ -50,10 +50,26 @@ public record WorkOrderResponse(
         @Schema(description = "수령인 — 정본 26p \"'택배' 선택 시 담당자 정보가 노출\"") String receiverName,
         @Schema(description = "수령인 연락처") String receiverPhone,
         @Schema(description = "택배사") String courierName,
-        @Schema(description = "송장번호") String trackingNo,
+        @Schema(description = """
+                송장번호 — **1번 박스**의 것(기존 화면 호환용).
+                박스가 여럿이면 `trackings` 를 본다.""")
+        String trackingNo,
+        @Schema(description = """
+                **박스별 송장**(10/27 명세 §8-3 "송장번호는 박스 수만큼 여러 개").
+                박스 번호 순으로 돌아온다. 비어 있으면 아직 송장이 없다.""")
+        List<Tracking> trackings,
         @Schema(description = "총 수량") long totalQty,
         @Schema(description = "도서별 지시 목록") List<Line> lines
 ) {
+    /** 박스 한 줄의 송장. */
+    @Schema(name = "WorkOrderTracking")
+    public record Tracking(
+            @Schema(description = "박스 번호(1부터)", example = "1") int boxNo,
+            @Schema(description = "택배사", example = "CJ대한통운") String courierName,
+            @Schema(description = "송장번호", example = "123456789012") String trackingNo
+    ) {
+    }
+
     @Schema(name = "WorkOrderLine")
     public record Line(
             @Schema(description = "분류코드") String catCode,
