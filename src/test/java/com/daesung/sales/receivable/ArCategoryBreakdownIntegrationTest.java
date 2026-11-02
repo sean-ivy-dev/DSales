@@ -52,6 +52,7 @@ class ArCategoryBreakdownIntegrationTest extends IntegrationTestSupport {
 
         Long textbook = book("ACT" + SFX, "교재상품", "교재");
         Long mock = book("ACM" + SFX, "모의고사상품", "모의고사");
+        Long etcExam = book("ACE" + SFX, "기타고사상품", "기타고사");
         // 세부구분을 주지 않은 상품 — 대분류가 안 붙어 '미분류'로 떨어진다.
         Long unclassified = book("ACU" + SFX, "미분류상품", null);
 
@@ -59,10 +60,12 @@ class ArCategoryBreakdownIntegrationTest extends IntegrationTestSupport {
                 "destinationWarehouseId", wh,
                 "items", List.of(Map.of("productId", textbook, "unitCost", 1000, "qty", 1000),
                         Map.of("productId", mock, "unitCost", 1000, "qty", 1000),
+                        Map.of("productId", etcExam, "unitCost", 1000, "qty", 1000),
                         Map.of("productId", unclassified, "unitCost", 1000, "qty", 1000))));
 
         sell(wh, textbook, "NORMAL_SHIP", 100);
         sell(wh, mock, "NORMAL_SHIP", 30);
+        sell(wh, etcExam, "NORMAL_SHIP", 40);
         sell(wh, unclassified, "NORMAL_SHIP", 7);
         // 교재만 반품 — 상품군별 반품 칸이 갈리는지 보려면 한쪽만 움직여야 한다.
         JsonNode ret = post("/sales/return-inbound", Map.of(
@@ -70,6 +73,21 @@ class ArCategoryBreakdownIntegrationTest extends IntegrationTestSupport {
                 "items", List.of(Map.of("productId", textbook, "qty", 20,
                         "unitPrice", 10000, "supplyRate", 70))));
         assertThat(ret.path("success").asBoolean()).as("반품입고: %s", ret).isTrue();
+
+        // ★G-4 확인용 — **모의고사 반품**은 어느 칸에도 안 들어가야 하고,
+        //   **기타고사 반품**은 기타 칸에 들어가야 한다(레거시 외상매출현황조회.vb:204
+        //   `tradeClass in ('IC','기타고사')`).
+        JsonNode ret2 = post("/sales/return-inbound", Map.of(
+                "returnDate", YEAR + "-03-02", "partnerId", partner, "warehouseId", wh,
+                "items", List.of(Map.of("productId", mock, "qty", 5,
+                        "unitPrice", 10000, "supplyRate", 70))));
+        assertThat(ret2.path("success").asBoolean()).as("모의고사 반품: %s", ret2).isTrue();
+
+        JsonNode ret3 = post("/sales/return-inbound", Map.of(
+                "returnDate", YEAR + "-03-03", "partnerId", partner, "warehouseId", wh,
+                "items", List.of(Map.of("productId", etcExam, "qty", 9,
+                        "unitPrice", 10000, "supplyRate", 70))));
+        assertThat(ret3.path("success").asBoolean()).as("기타고사 반품: %s", ret3).isTrue();
     }
 
     private Long book(String code, String name, String division) {
@@ -147,9 +165,15 @@ class ArCategoryBreakdownIntegrationTest extends IntegrationTestSupport {
             sumRetQty += c.path("returnQty").asLong();
         }
 
-        assertThat(sumQty).as("100+30+7(미분류)").isEqualTo(row.path("saleQty").asLong()).isEqualTo(137);
+        assertThat(sumQty).as("100+30+40(기타고사)+7(미분류)")
+                .isEqualTo(row.path("saleQty").asLong()).isEqualTo(177);
         assertThat(sumAmt).isEqualTo(row.path("saleAmount").asLong());
-        assertThat(sumRetQty).isEqualTo(row.path("returnQty").asLong()).isEqualTo(20);
+        // ‼️**반품은 합이 안 맞는 것이 정상이다**(프론트 G-4 · 레거시 외상매출현황조회.vb:204).
+        //   기타 칸은 `tradeClass in ('IC','기타고사')` 둘만 담아, 모의고사 반품 5는
+        //   **어느 칸에도 안 들어간다**. 그래도 반품 **합계**에는 들어간다 — 버리는 게 아니다.
+        //   매출은 전부 어느 칸엔가 들어가므로 위처럼 합이 맞는다(둘을 같은 규칙으로 보면 안 된다).
+        assertThat(sumRetQty).as("칸 합 = 교재 20 + 기타고사 9").isEqualTo(29);
+        assertThat(row.path("returnQty").asLong()).as("반품 합계 = 20+9+모의고사 5").isEqualTo(34);
     }
 
     @Test
@@ -159,7 +183,8 @@ class ArCategoryBreakdownIntegrationTest extends IntegrationTestSupport {
 
         assertThat(category(row, "미분류")).as("미분류 칸은 더 이상 없다(§7-C)").isNull();
         // 세부구분 없는 7부가 기타 칸에 들어가 있다.
-        assertThat(category(row, "기타").path("saleQty").asLong()).isEqualTo(7);
+        // 기타 칸 = 기타고사 40 + 미분류 7 (매출은 **합치는 쪽**이다 — 반품과 다르다)
+        assertThat(category(row, "기타").path("saleQty").asLong()).isEqualTo(47);
     }
 
     @Test
@@ -174,13 +199,22 @@ class ArCategoryBreakdownIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("★반품은 교재·기타 2칸만 움직인다 — 모의고사·특강 반품 칸은 없다(0)")
+    @DisplayName("★반품(기타)는 IC·기타고사만 담는다 — 모의고사 반품은 어느 칸에도 안 들어간다(G-4)")
     void 반품은_2분류() {
         JsonNode row = myRow();
 
         assertThat(category(row, "교재").path("returnQty").asLong()).isEqualTo(20);
         assertThat(category(row, "모의고사").path("returnQty").asLong()).isZero();
         assertThat(category(row, "특강").path("returnQty").asLong()).isZero();
+
+        // ‼️**뒤집힌 단언**(프론트 G-4). 예전엔 "교재가 아니면 전부 기타"라 모의고사 반품 5가
+        //   기타 칸에 섞였다. 레거시(외상매출현황조회.vb:204)는 `tradeClass in ('IC','기타고사')`
+        //   둘만 담는다 — **기타고사 9만** 들어가고 모의고사 5는 어느 칸에도 안 들어간다.
+        assertThat(category(row, "기타").path("returnQty").asLong())
+                .as("기타고사 9만 — 모의고사 5는 빠진다").isEqualTo(9);
+
+        // 버려지는 것이 아니다 — 반품 **합계**에는 셋 다 들어간다(20+5+9).
+        assertThat(row.path("returnQty").asLong()).as("합계에는 그대로").isEqualTo(34);
     }
 
     @Test
@@ -189,8 +223,8 @@ class ArCategoryBreakdownIntegrationTest extends IntegrationTestSupport {
         JsonNode row = myRow();
 
         assertThat(row.path("bossName").asText()).isEqualTo("김대표");
-        assertThat(row.path("saleQty").asLong()).isEqualTo(137);
-        assertThat(row.path("returnQty").asLong()).isEqualTo(20);
+        assertThat(row.path("saleQty").asLong()).isEqualTo(177);
+        assertThat(row.path("returnQty").asLong()).as("교재 20 + 기타고사 9 + 모의고사 5").isEqualTo(34);
     }
 
     @Test

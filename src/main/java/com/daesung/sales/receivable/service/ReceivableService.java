@@ -1304,9 +1304,14 @@ public class ReceivableService {
             long[] sv = m.computeIfAbsent(saleBucket(raw), k -> new long[4]);
             sv[0] += num(r[2]);
             sv[1] += num(r[3]);
-            long[] rv = m.computeIfAbsent(returnBucket(raw), k -> new long[4]);
-            rv[2] += num(r[4]);
-            rv[3] += num(r[5]);
+            // ★반품은 담을 칸이 없을 수 있다(모의고사·특강·기타) — 레거시가 그렇다.
+            //   그때는 어느 칸에도 더하지 않는다(반품 합계에는 이미 들어가 있다).
+            MajorCategory rb = returnBucket(raw);
+            if (rb != null) {
+                long[] rv = m.computeIfAbsent(rb, k -> new long[4]);
+                rv[2] += num(r[4]);
+                rv[3] += num(r[5]);
+            }
         }
         Map<Long, List<ArStatusResponse.CategoryBreakdown>> out = new LinkedHashMap<>();
         acc.forEach((pid, m) -> out.put(pid, fixedBreakdowns(m)));
@@ -1382,12 +1387,35 @@ public class ReceivableService {
     }
 
     /**
-     * <b>반품</b> 표시 분류 — 교재만 따로, 나머지는 전부 기타.
-     * 근거: 10/27 피드백 §7-C "반품은 교재·기타 2분류" + 실파일 24칸에 반품 칸이
-     * `반품수량(교재)·반품수량(기타)` 둘뿐이다(모의고사·특강 반품 칸이 아예 없다).
+     * <b>반품</b> 표시 분류 — 교재 칸 / 기타 칸 / <b>어느 칸에도 안 넣음</b>(null).
+     *
+     * <p>★근거는 레거시 원본이다({@code 외상매출현황조회.vb:203~206}) —
+     * <pre>
+     * case when tradeClass='교재'               and tradeType='반품' then … as '반품수량_교재'
+     * case when tradeClass in ('IC','기타고사')  and tradeType='반품' then … as '반품수량_기타'
+     * </pre>
+     * 기타 칸에 들어가는 것은 <b>IC·기타고사 둘뿐</b>이다. 모의고사·특강은 물론이고
+     * 우리 {@code ETC}(기타·학원콘텐츠 등)도 들어가지 않는다.
+     *
+     * <p>‼️<b>뒤집힌 구현이다</b>(프론트 G-4). 예전엔 "교재가 아니면 전부 기타"로 넣어
+     * 모의고사 반품까지 기타 칸에 섞였다(2026년 1~10월 7,700원 1건). §7-C 가 매출 쪽만
+     * 4분류로 적고 반품 범위를 안 적어, 합계가 어긋나는 것을 피하려 전부 담았던 것이다.
+     * 발주처 확인 결과 <b>레거시대로</b> 가기로 했다 — 이 화면의 목적이 레거시 대조다.
+     *
+     * <p>버려지는 것이 아니다. 어느 칸에도 안 들어갈 뿐 <b>반품 합계에는 그대로</b> 들어간다
+     * (레거시도 `반품수량` 전체 칸을 따로 둔다). 그래서 상품군 합과 반품 합계가 달라질 수 있고,
+     * 그건 레거시도 같다.
+     *
+     * @return 담을 칸. {@code null} 이면 어느 칸에도 넣지 않는다.
      */
     private static MajorCategory returnBucket(MajorCategory raw) {
-        return (raw == MajorCategory.TEXTBOOK) ? MajorCategory.TEXTBOOK : MajorCategory.ETC;
+        if (raw == MajorCategory.TEXTBOOK) {
+            return MajorCategory.TEXTBOOK;
+        }
+        if (raw == MajorCategory.IC || raw == MajorCategory.ETC_EXAM) {
+            return MajorCategory.ETC;
+        }
+        return null;   // 모의고사·특강·기타 — 레거시도 칸에 넣지 않는다
     }
 
     /** 표시 순서는 {@link #DISPLAY_CATEGORIES}(실파일 칸 순서)다 — enum 선언순이 아니다. */
