@@ -133,10 +133,16 @@ public class DealerStatementService {
         return saleReportService.transactionStatement(partner.getId(), date, date, null, schoolCode);
     }
 
+    /**
+     * ‼️{@link ErrorCode#PARTNER_NOT_LINKED} 다 — {@code INVALID_INPUT} 이 아니다.
+     * 특약점팀 전달(2026-11-03 확인 a)로 발견 — `/dealer-site/orders`(접수·조회·수정)는
+     * 이미 이 코드를 쓰는데, 이 서비스(발송완료 목록·거래명세서)는 더 먼저 만들어져서
+     * {@code PARTNER_NOT_LINKED} 신설(요청 5번) 때 같이 못 고쳤다 — 고치는 걸 놓쳤다.
+     */
     private Partner requirePartner(String partnerCode) {
         return partnerRepository.findByCode(partnerCode)
-                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT,
-                        "거래처를 찾을 수 없습니다: " + partnerCode));
+                .orElseThrow(() -> new BusinessException(ErrorCode.PARTNER_NOT_LINKED,
+                        "매출 거래처 연결이 되어 있지 않습니다: " + partnerCode));
     }
 
     private List<DealerShippedOrderRow.Tracking> trackingsOf(List<Long> shipmentIds) {

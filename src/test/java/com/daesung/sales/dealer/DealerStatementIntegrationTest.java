@@ -213,6 +213,16 @@ class DealerStatementIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
+    @DisplayName("★거래처를 못 찾으면 PARTNER_NOT_LINKED — 특약점팀 전달(2026-11-03 확인 a)")
+    void 거래처미연결_전용코드() {
+        JsonNode r = siteGet("/dealer-site/orders/shipped?partnerCode=없는코드" + SFX
+                + "&fromDate=2096-09-01&toDate=2096-09-30", DEALER_SITE_KEY);
+        assertThat(r.path("success").asBoolean()).isFalse();
+        assertThat(r.path("error").path("code").asText())
+                .as("다른 /dealer-site/** 경로와 같은 코드여야 한다").isEqualTo("PARTNER_NOT_LINKED");
+    }
+
+    @Test
     @DisplayName("남의 거래처로 목록을 부르면 내 주문이 안 섞인다")
     void 남의_목록에는_없다() {
         JsonNode r = siteGet("/dealer-site/orders/shipped?partnerCode=" + OTHER

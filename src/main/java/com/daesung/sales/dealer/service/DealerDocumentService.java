@@ -88,10 +88,13 @@ public class DealerDocumentService {
         return new ResponseEntity<>(doc.getContent(), headers, org.springframework.http.HttpStatus.OK);
     }
 
+    /** ‼️{@link ErrorCode#PARTNER_NOT_LINKED} 다 — 특약점팀 전달(2026-11-03 확인 a)로 발견된
+     * 누락. {@link com.daesung.sales.dealer.service.DealerStatementService#requirePartner} 와
+     * 같은 사유. */
     private Partner requirePartner(String partnerCode) {
         return partnerRepository.findByCode(partnerCode)
-                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT,
-                        "거래처를 찾을 수 없습니다: " + partnerCode));
+                .orElseThrow(() -> new BusinessException(ErrorCode.PARTNER_NOT_LINKED,
+                        "매출 거래처 연결이 되어 있지 않습니다: " + partnerCode));
     }
 
     private static String blankToNull(String v) {

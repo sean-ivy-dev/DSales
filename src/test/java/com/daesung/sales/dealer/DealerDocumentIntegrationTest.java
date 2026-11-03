@@ -153,6 +153,15 @@ class DealerDocumentIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
+    @DisplayName("★거래처를 못 찾으면 PARTNER_NOT_LINKED — 특약점팀 전달(2026-11-03 확인 a)")
+    void 거래처미연결_전용코드() {
+        JsonNode r = getAsDealerSite("/dealer-site/documents?partnerCode=없는코드" + SFX, DEALER_SITE_KEY);
+        assertThat(r.path("success").asBoolean()).isFalse();
+        assertThat(r.path("error").path("code").asText())
+                .as("다른 /dealer-site/** 경로와 같은 코드여야 한다").isEqualTo("PARTNER_NOT_LINKED");
+    }
+
+    @Test
     @DisplayName("★★남의 PDF 는 '없음'으로 답한다 — '권한 없음'이면 그 파일이 있다는 걸 알려준다")
     void 남의것은_없음() {
         var resp = getBytesAsDealerSite("/dealer-site/documents/" + myDocId
