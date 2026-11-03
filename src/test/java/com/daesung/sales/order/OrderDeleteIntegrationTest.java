@@ -21,7 +21,9 @@ import org.junit.jupiter.api.TestInstance;
  *
  * <p>★<b>급소</b>: 매출등록 삭제(`DELETE /sales/entries/{entryNo}`)는 이미 PREPARING 상태
  * 주문을 지우는 걸 정상 동작으로 고정하고 있다({@code EntryEditIntegrationTest.통째_삭제}).
- * 이 새 경로(`DELETE /orders/{orderNo}`)가 그 기존 동작을 건드리지 않는지도 함께 확인한다.
+ * 이 새 경로(`DELETE /orders/entries/{orderNo}`)가 그 기존 동작을 건드리지 않는지도 함께 확인한다.
+ * ‼️경로가 `entries`를 거치는 이유는 {@code OrderController}의 `DELETE /orders/{reqCd}`
+ * 와의 충돌을 피하기 위해서다(2026-11-03 라이브 전수 호출로 발견, {@code OrderPathCollisionTest} 참고).
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @DisplayName("주문 삭제 — 접수완료만(§2-9)")
@@ -86,7 +88,7 @@ class OrderDeleteIntegrationTest extends IntegrationTestSupport {
     void 접수완료아니면_거부() {
         String no = register();   // 아무것도 안 하면 상품준비중
 
-        JsonNode r = del("/orders/" + no);
+        JsonNode r = del("/orders/entries/" + no);
         assertThat(r.path("success").asBoolean()).isFalse();
         assertThat(r.path("error").path("message").asText()).contains("접수완료 상태일 때만");
 
@@ -101,7 +103,7 @@ class OrderDeleteIntegrationTest extends IntegrationTestSupport {
         String no = register();
         assertThat(toReceived(no).path("success").asBoolean()).isTrue();
 
-        JsonNode r = del("/orders/" + no);
+        JsonNode r = del("/orders/entries/" + no);
         assertThat(r.path("success").asBoolean()).as("%s", r).isTrue();
         assertThat(r.path("data").asInt()).isEqualTo(1);
 
@@ -120,7 +122,7 @@ class OrderDeleteIntegrationTest extends IntegrationTestSupport {
         assertThat(post("/orders/progress-state", Map.of(
                 "orderNos", List.of(a), "toState", "INSPECTING"))
                 .path("success").asBoolean()).isTrue();
-        JsonNode r1 = del("/orders/" + a);
+        JsonNode r1 = del("/orders/entries/" + a);
         assertThat(r1.path("success").asBoolean()).isFalse();
 
         String b = register();
@@ -131,7 +133,7 @@ class OrderDeleteIntegrationTest extends IntegrationTestSupport {
                         .path("success").asBoolean()).isTrue();
             }
         }
-        JsonNode r2 = del("/orders/" + b);
+        JsonNode r2 = del("/orders/entries/" + b);
         assertThat(r2.path("success").asBoolean()).isFalse();
         assertThat(r2.path("error").path("message").asText()).contains("발송준비중");
     }
@@ -144,7 +146,7 @@ class OrderDeleteIntegrationTest extends IntegrationTestSupport {
         org.springframework.http.HttpHeaders h = new org.springframework.http.HttpHeaders();
         h.setBearerAuth(token());
         var resp = rest.getRestTemplate().exchange(
-                new java.net.URI(rest.getRootUri() + "/api/v1/orders/%23999999"),
+                new java.net.URI(rest.getRootUri() + "/api/v1/orders/entries/%23999999"),
                 org.springframework.http.HttpMethod.DELETE,
                 new org.springframework.http.HttpEntity<>(h), String.class);
         JsonNode r = new com.fasterxml.jackson.databind.ObjectMapper().readTree(resp.getBody());
@@ -155,7 +157,7 @@ class OrderDeleteIntegrationTest extends IntegrationTestSupport {
     @Test
     @DisplayName("없는 주문번호는 404")
     void 없는주문() {
-        JsonNode r = del("/orders/E-없는번호" + SFX);
+        JsonNode r = del("/orders/entries/E-없는번호" + SFX);
         assertThat(r.path("success").asBoolean()).isFalse();
     }
 

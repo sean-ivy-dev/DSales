@@ -169,8 +169,17 @@ public class SalesOrderController {
               `POST /orders/progress-state` 로 접수완료로 돌린 뒤 지운다.
             · 등록번호 없는 옛 주문(`#발송id`)은 지울 수 없다 — 반품 또는 매출 취소로 처리한다.
             · 실제 삭제는 매출등록과 같은 로직(`SaleService.deleteEntry`)을 그대로 쓴다 —
-              재고 역분개·이력·빈 작업요청서 정리가 똑같이 적용된다.""")
-    @org.springframework.web.bind.annotation.DeleteMapping("/{orderNo}")
+              재고 역분개·이력·빈 작업요청서 정리가 똑같이 적용된다.
+
+            ‼️경로가 **`entries`를 거친다**(`/orders/entries/{orderNo}`, `/orders/{orderNo}`가
+            아니다) — `DELETE /orders/{reqCd}`(DSRE 모의고사 신청, OrderController)와 베이스가
+            같은 한 세그먼트라 **겹쳐서 라이브에서 실제로 500(Ambiguous handler methods)이
+            났다**(2026-11-03 전수 호출로 발견). reqCd에 숫자 제약(`:[0-9]+`)을 걸어도
+            Spring의 PathPattern 특이성 비교는 "제약 있는 변수 1개 세그먼트"와 "제약 없는
+            변수 1개 세그먼트"를 같게 보고 여전히 터진다(`OrderPathCollisionTest`로 직접
+            재현·확인) — 그래서 변수 제약이 아니라 **리터럴 세그먼트로 패턴 자체를 다르게**
+            만들어 갈랐다.""")
+    @org.springframework.web.bind.annotation.DeleteMapping("/entries/{orderNo}")
     public ApiResponse<Integer> delete(
             @Parameter(description = "주문번호(`E-…`)", example = "E-20261027-55")
             @org.springframework.web.bind.annotation.PathVariable String orderNo,

@@ -121,8 +121,18 @@ public class OrderController {
                       같은 행을 보고 있어 우리가 지울 자리가 아닙니다.
                     · 조회와 변경 사이에 DSRE2 쪽이 먼저 옮겼으면 `changed=false`로 돌려줍니다
                       (성공으로 보고하면 담당자가 속습니다).
-                    · 누가·언제·왜 지웠는지는 상태변경 이력에 남습니다.""")
-    @DeleteMapping("/{reqCd}")
+                    · 누가·언제·왜 지웠는지는 상태변경 이력에 남습니다.
+
+                    ‼️이 경로가 한때 `DELETE /orders/{orderNo}`(주문조회, SalesOrderController)와
+                    겹쳐서 **둘 다 라이브에서 500(Ambiguous handler methods)이 났었다**
+                    (2026-11-03 전수 호출로 발견) — 베이스가 둘 다 `/orders`라 변수명만 다를 뿐
+                    패턴이 같았다. ⚠️이 메서드의 `:[0-9]+` 제약은 **그 충돌을 풀지 못한다**
+                    (Spring의 PathPattern 특이성 비교가 "제약 있는 변수"와 "제약 없는 변수"를
+                    같게 본다 — `OrderPathCollisionTest`로 직접 재현·확인) — 실제로 가른 것은
+                    SalesOrderController 쪽 경로를 `/orders/entries/{orderNo}`로 바꿔 **리터럴
+                    세그먼트 자체를 다르게** 만든 것이다. 이 숫자 제약은 그와 별개로 남겨 둔다 —
+                    REQ_CD가 항상 순수 숫자라는 입력 모양을 명시하는 용도로는 여전히 유효하다.""")
+    @DeleteMapping("/{reqCd:[0-9]+}")
     public ApiResponse<OrderService.ItemResult> delete(
             @Parameter(description = "신청번호(REQ_CD)", required = true) @PathVariable int reqCd,
             @Parameter(description = "삭제 사유") @RequestParam(required = false) String reason) {
