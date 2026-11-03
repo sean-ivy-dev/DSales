@@ -44,6 +44,9 @@ class ArLedgerLegacyFormatIntegrationTest extends IntegrationTestSupport {
      *  같은 거래처에 줄을 더하면 그쪽 단언(명세행 1줄)이 깨진다. */
     private Long partnerB9;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
     @BeforeAll
     void seed() {
         token();
@@ -201,5 +204,29 @@ class ArLedgerLegacyFormatIntegrationTest extends IntegrationTestSupport {
         // 0 은 값이지 없음이 아니다 — 빈칸으로 두면 "세액을 안 채웠다"로 읽힌다.
         assertThat(detail.path("tax").isNull()).as("세액이 null 이면 안 된다").isFalse();
         assertThat(detail.path("tax").asLong()).isZero();
+    }
+
+    @Test
+    @DisplayName("★★응답에 partnerDsreCode 가 실린다 — 실물 PDF 제목이 DSRE 코드를 쓴다")
+    void DSRE코드가_실린다() {
+        // 실물 PDF(SALES_10003_강남 하람도서_….pdf) 제목 줄이 정확히 "10003 ─ 강남 하람도서"다
+        // — 우리 코드(A10A195 꼴)가 아니라 **DSRE 거래처코드**다. 더프모(DuffLedgerResponse)엔
+        // 이미 partnerDsreCode 가 있었는데 이 일반 원장엔 빠져 있었다 — 더프 쪽 주석이
+        // "처음에 partnerCode 를 그대로 보내 RESULT_A10A195_… 가 됐었다"고 적어 둔 바로 그 버그가
+        // 일반 쪽엔 고쳐지지 않은 채 남아 있었다(2026-11-03 전수 재대조로 발견).
+        //
+        // dsreCode 는 DSRE 동기화로만 채워지는 칸이라(등록 API 입력 아님) JDBC 로 직접 심는다.
+        jdbc.update("UPDATE partners SET dsre_code = ? WHERE id = ?", "10099" + SFX.hashCode() % 1000, partner);
+
+        JsonNode led = data(get("/closing/ar-ledger?partnerId=" + partner
+                + "&fromDate=" + DAY + "&toDate=" + DAY));
+
+        assertThat(led.path("partnerDsreCode").asText()).startsWith("10099");
+        // 거래처명 자리에 코드가 들어가는 사고(더프에서 실제로 있었던 일, 100곳 중 90곳)를
+        // 같은 방식으로 막는다 — 세 값이 전부 String 이라 순서가 바뀌어도 컴파일은 통과한다.
+        assertThat(led.path("partnerCode").asText()).isEqualTo(partnerCode);
+        assertThat(led.path("partnerName").asText()).as("이름 자리에 코드가 들어가면 안 된다")
+                .isEqualTo(data(get("/masters/clients/" + partner)).path("name").asText())
+                .isNotEqualTo(partnerCode);
     }
 }

@@ -27,6 +27,16 @@ public record ArLedgerResponse(
                 ‼️<b>행(컬럼)에서는 뺐다</b> — 거래처 하나를 보는 장부라 매 줄에 같은 코드가
                 반복될 뿐이다. 제목 줄에 한 번만 쓴다(레거시 인쇄물: `10003 ─ 강남 하람도서`).""")
         String partnerCode,
+        @Schema(description = """
+                **DSRE 거래처코드**('10003' 꼴). ★<b>PDF 파일명이 쓰는 값은 이쪽이다</b> —
+                발주처 지정 `SALES_{DSRE 거래처코드}_{거래처명}_{yyyyMMdd}-{yyyyMMdd}.pdf`,
+                예) `SALES_10003_강남 하람도서_20260101-20260831.pdf`.
+
+                ‼️`partnerCode`(A10A195)와 **다른 체계**다. 더프모(`DuffLedgerResponse`)엔
+                있었는데 이 일반 원장엔 빠져 있던 것을 추가했다 — 똑같이 그대로 쓰면
+                `SALES_A10A195_…` 가 된다. 비어 있으면 `POST /masters/clients/sync-dsre-code`
+                로 채운다.""")
+        String partnerDsreCode,
         @Schema(description = "거래처명 — 제목에 쓴다(`외상매출장(거래처명)`)") String partnerName,
         @Schema(description = "조회 시작일") LocalDate fromDate,
         @Schema(description = "조회 종료일") LocalDate toDate,

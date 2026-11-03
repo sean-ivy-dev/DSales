@@ -1110,7 +1110,8 @@ public class ReceivableService {
             lines.add(agg("MONTH_SUBTOTAL", "월 계", curDay, month, running));
             lines.add(agg("RUNNING_TOTAL", "누 계", curDay, run, running));
         }
-        return new ArLedgerResponse(partner.getId(), partner.getCode(), partner.getName(), from, to,
+        return new ArLedgerResponse(partner.getId(), partner.getCode(), partner.getDsreCode(),
+                partner.getName(), from, to,
                 supplierProperties.name(), supplierProperties.bankAccount(),
                 opening, running, lines);
     }
