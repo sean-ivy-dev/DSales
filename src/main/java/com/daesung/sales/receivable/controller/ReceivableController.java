@@ -326,7 +326,7 @@ public class ReceivableController {
                 new Col("입고수량", "purchaseQty"), new Col("입고금액", "purchaseAmount"),
                 new Col("수금", "collected"), new Col("잔액", "balance"),
                 new Col("담보금액", "assureAmount"), new Col("담보비율", "assureRatio"),
-                new Col("담보등급", "assureLevel")));
+                new Col("담보등급", "assureLevel"), new Col("담보만기등급", "assureExpiryLevel")));
         return cols;
     }
 
@@ -340,8 +340,9 @@ public class ReceivableController {
      * {@code arStatusCols()}에 빠져 있던 <b>담보만기·담보내용</b>이 들어간다 — 이 둘은
      * 지금까지 응답 DTO엔 있었지만 어느 엑셀에도 안 나가고 있었다.
      *
-     * <p>담보등급은 레거시 원문엔 없지만, 레거시가 담보비율·만기 칸에 색을 칠해 구분하는 것과
-     * 같은 역할(화면이 색을 입힐 판정값)이라 매출상세 export처럼 덤으로 둔다.
+     * <p>담보등급·담보만기등급은 레거시 원문엔 없지만, 레거시가 담보비율·만기 칸에 **각각** 색을
+     * 칠해 구분하는 것과 같은 역할(화면이 색을 입힐 판정값)이라 덤으로 둔다 — 비율(assureLevel)과
+     * 만기(assureExpiryLevel)는 서로 독립된 축이라 칸을 하나로 합치지 않았다.
      */
     private static List<Col> arStatusCollateralCols() {
         return List.of(
@@ -353,7 +354,7 @@ public class ReceivableController {
                 new Col("수금", "collected"), new Col("잔액", "balance"),
                 new Col("담보금액", "assureAmount"), new Col("담보비율", "assureRatio"),
                 new Col("담보만기", "assureExpiry"), new Col("담보내용", "assureNote"),
-                new Col("담보등급", "assureLevel"));
+                new Col("담보등급", "assureLevel"), new Col("담보만기등급", "assureExpiryLevel"));
     }
 
     /**
@@ -404,6 +405,7 @@ public class ReceivableController {
             m.put("assureAmount", r.assureAmount());
             m.put("assureRatio", r.assureRatio());
             m.put("assureLevel", r.assureLevel());
+            m.put("assureExpiryLevel", r.assureExpiryLevel());
             for (MajorCategory c : arCategories()) {
                 m.put("saleQty_" + c.name(), 0L);
                 m.put("saleAmount_" + c.name(), 0L);

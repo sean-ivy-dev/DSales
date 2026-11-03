@@ -96,7 +96,16 @@ public record ArStatusResponse(
             @Schema(description = "담보비율(%)=잔액/담보×100, 담보 없으면 null") Double assureRatio,
             @Schema(description = "담보 만기") LocalDate assureExpiry,
             @Schema(description = "담보 내용(정본 25p 데이터 항목 '담보(금액,만기,내용)')") String assureNote,
-            @Schema(description = "담보 경고등급(OVER≥100/WARN≥70/WATCH>50/NORMAL/null)") String assureLevel
+            @Schema(description = "담보 경고등급(OVER≥100/WARN≥70/WATCH>50/NORMAL/null)") String assureLevel,
+            @Schema(description = """
+                    담보만기 경고등급(EXPIRED=오늘 기준 이미 만료/IMMINENT=30일 이내 임박/null=여유 있음·만기 없음).
+
+                    ‼️담보비율(assureLevel)과 **별도 축**이다 — 10/27 피드백 §7-C가 "담보비율과 담보만기
+                    칸에 각각 색을 칠해 구분한다"고 두 칸을 따로 지목했는데, assureLevel은 비율만 보고
+                    만기일(assureExpiry)엔 등급이 없어 프론트가 색을 칠할 근거가 없었다.
+                    기준일은 조회기간(toDate)이 아니라 **오늘**이다 — 과거 기간을 조회해도 "지금 임박한지"를 봐야 한다.
+                    기존 담보만기 알림(`GET /masters/clients/collateral-expiry`, 기본 30일)과 같은 기준.""")
+            String assureExpiryLevel
     ) {
     }
 

@@ -651,6 +651,13 @@ public class ReceivableService {
                 ratio = Math.round((double) balance / assureAmount * 100 * 10) / 10.0;
                 level = ratio >= 100 ? "OVER" : ratio >= 70 ? "WARN" : ratio > 50 ? "WATCH" : "NORMAL";
             }
+            // 담보만기 경고등급 — 담보비율(level)과 별도 축. 기준일은 조회기간이 아니라 오늘
+            // (담보만기 알림 GET /masters/clients/collateral-expiry 와 같은 기준, 기본 30일 임박).
+            String expiryLevel = null;
+            if (p.getAssureExpiry() != null) {
+                long daysUntil = java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(), p.getAssureExpiry());
+                expiryLevel = daysUntil < 0 ? "EXPIRED" : daysUntil <= 30 ? "IMMINENT" : null;
+            }
             // 기간 안에 매입(입고)이 있으면 매입처. 기간 밖 매입만 있는 곳도 매입처로 본다
             // (이월에 그 매입이 녹아 있어서, 매출처로 묶으면 소계가 설명되지 않는다).
             boolean isPurchaser = purchased != 0 || purchasedQty != 0 || priorPur[1] != 0;
@@ -665,7 +672,7 @@ public class ReceivableService {
                     kind, opening, s[6], s[1], s[7], s[2], s[3], s[0], purchasedQty, purchased,
                     collected, balance, s[4], s[5],
                     byCat.getOrDefault(pid, List.of()),
-                    assureAmount, ratio, p.getAssureExpiry(), p.getAssureNote(), level);
+                    assureAmount, ratio, p.getAssureExpiry(), p.getAssureNote(), level, expiryLevel);
             rows.add(row);
             (isPurchaser ? purchaseRows : salesRows).add(row);
             // 합계행의 상품군 칸은 **합계에 든 거래처만** 더한다 — 행을 뺐는데 상품군 합은
@@ -682,7 +689,7 @@ public class ReceivableService {
                 tOpen, tSaleQty, tSale, tRetQty, tRet, tTax, tGen, tPurchaseQty, tPurchase,
                 tColl, tBal, tTeacher, tTeacherQty,
                 sumCategories(totalCatLists),
-                null, null, null, null, null);
+                null, null, null, null, null, null);
         // ★이월 스냅샷이 없는 연도는 **없다고 말한다**. 예전엔 조용히 0으로 나가서,
         //   이월이 안 잡힌 채 "잔액이 맞다"고 읽혔다(프론트 실측: 부산지사 2025 미수 3,646만 원 누락).
         //   숫자를 고치는 게 아니라 — 이월을 자동 생성하면 아무도 모르는 사이에 장부가 생긴다 —
@@ -1262,7 +1269,7 @@ public class ReceivableService {
         }
         return new ArStatusResponse.Row(null, label, null, null, null,
                 open, saleQty, sale, retQty, ret, tax, gen, purQty, pur, coll, bal, teacher, teacherQty,
-                List.of(), null, null, null, null, null);
+                List.of(), null, null, null, null, null, null);
     }
 
     /**
