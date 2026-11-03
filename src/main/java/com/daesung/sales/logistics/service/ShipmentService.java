@@ -157,7 +157,9 @@ public class ShipmentService {
         shipmentRepository.findKey(sale.getSalesDate(), sale.getPartner().getId(),
                         sale.getSchoolCode(), sale.getProduct().getSalesDivision(),
                         sale.getEntryNo())
-                .ifPresent(s -> s.fillDeliveryIfBlank(type, teacher, tel));
+                // ★이메일은 DSRE 신청(기존 모의고사 탭) 경로라 채울 것이 없다 — §4 "담당자 정보"는
+                //   새 특약점 탭 대상이고(10/27 §1), 이 메서드는 그 탭과 무관하다.
+                .ifPresent(s -> s.fillDeliveryIfBlank(type, teacher, tel, null));
     }
 
     /**
@@ -170,9 +172,10 @@ public class ShipmentService {
      * 그대로 고치는 편이 트랜잭션 커밋 시 flush로 반영돼 더 단순하다.
      */
     @Transactional
-    public void applyDeliveryIfBlank(Shipment shipment, DeliveryType type, String name, String phone) {
+    public void applyDeliveryIfBlank(Shipment shipment, DeliveryType type, String name, String phone,
+                                     String email) {
         if (shipment != null) {
-            shipment.fillDeliveryIfBlank(type, name, phone);
+            shipment.fillDeliveryIfBlank(type, name, phone, email);
         }
     }
 
@@ -441,7 +444,8 @@ public class ShipmentService {
     public List<DsreStateSync> updateShipping(Long shipmentId, ShippingUpdateRequest req) {
         Shipment s = getOrThrow(shipmentId);
         s.updateShipping(req.boxCount(), req.sentDate(), req.sendMemo());
-        s.updateDelivery(req.deliveryType(), req.receiverName(), req.receiverPhone());
+        s.updateDelivery(req.deliveryType(), req.receiverName(), req.receiverPhone(),
+                req.receiverEmail());
         s.updateTracking(req.courierName(), req.trackingNo());
         // 발송일이 들어오면 = 발송 처리. 묶인 신청의 DSRE 상태도 발송완료로(2026-10-23).
         return (req.sentDate() == null) ? List.of() : shipToDsre(s, req.sentDate());

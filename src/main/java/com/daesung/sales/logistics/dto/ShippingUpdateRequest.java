@@ -25,6 +25,7 @@ public record ShippingUpdateRequest(
 
         @Schema(description = "수령인(택배일 때 담당자 정보)", example = "홍길동") String receiverName,
         @Schema(description = "수령인 연락처", example = "010-0000-0000") String receiverPhone,
+        @Schema(description = "수령인 이메일", example = "teacher@example.com") String receiverEmail,
         @Schema(description = "택배사", example = "CJ대한통운") String courierName,
         @Schema(description = "송장번호", example = "123456789012") String trackingNo
 ) {

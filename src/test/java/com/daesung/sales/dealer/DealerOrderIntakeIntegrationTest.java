@@ -188,6 +188,75 @@ class DealerOrderIntakeIntegrationTest extends IntegrationTestSupport {
         assertThat(r.path("success").asBoolean()).isFalse();
     }
 
+    @Test
+    @DisplayName("★★담당자 정보를 안 보내면 거래처 마스터 값으로 채운다(10/26 §4)")
+    void 담당자정보_기본값채움() {
+        Long p = createId("/masters/clients", Map.of(
+                "code", "DOM" + SFX, "name", "담당자거래처", "type", "NORMAL",
+                "bossName", "김대표", "tel1", "02-111-2222", "email1", "boss@example.com"));
+
+        Map<String, Object> req = new HashMap<>();
+        req.put("partnerCode", "DOM" + SFX);
+        req.put("orderDate", DATE);
+        req.put("items", List.of(Map.of("productCode", BOOK_CODE, "qty", 1)));
+        JsonNode r = postAsDealerSite("/dealer-site/orders", req, DEALER_SITE_KEY);
+        assertThat(r.path("success").asBoolean()).as("%s", r).isTrue();
+
+        String entryNo = data(r).path("entryNo").asText();
+        JsonNode wo = null;
+        for (JsonNode w : data(get("/logistics/work-orders?fromDate=" + DATE + "&toDate=" + DATE))
+                .path("content")) {
+            if (entryNo.equals(w.path("entryNo").asText())) {
+                wo = w;
+            }
+        }
+        assertThat(wo).as("작업요청서를 찾았다").isNotNull();
+        assertThat(wo.path("receiverName").asText()).isEqualTo("김대표");
+        assertThat(wo.path("receiverPhone").asText()).isEqualTo("02-111-2222");
+        assertThat(wo.path("receiverEmail").asText()).isEqualTo("boss@example.com");
+        // 담당자정보가 채워지면 택배로 자동 판정된다(§8-6) — 덤으로 확인.
+        assertThat(wo.path("deliveryType").asText()).isEqualTo("COURIER");
+
+        // ‼️거래처 마스터는 바뀌지 않는다("수정한 값은 그 신청 건에만 저장한다").
+        JsonNode master = data(get("/masters/clients/" + p));
+        assertThat(master.path("bossName").asText()).isEqualTo("김대표");
+    }
+
+    @Test
+    @DisplayName("★보낸 담당자 정보는 거래처 마스터보다 우선한다 — 신청 건에만 저장된다")
+    void 담당자정보_직접입력이_우선() {
+        Long p = createId("/masters/clients", Map.of(
+                "code", "DOV" + SFX, "name", "담당자override거래처", "type", "NORMAL",
+                "bossName", "마스터대표", "tel1", "02-999-9999", "email1", "master@example.com"));
+
+        Map<String, Object> req = new HashMap<>();
+        req.put("partnerCode", "DOV" + SFX);
+        req.put("orderDate", DATE);
+        req.put("receiverName", "박선생");
+        req.put("receiverPhone", "010-5555-5555");
+        req.put("receiverEmail", "teacher@example.com");
+        req.put("items", List.of(Map.of("productCode", BOOK_CODE, "qty", 1)));
+        JsonNode r = postAsDealerSite("/dealer-site/orders", req, DEALER_SITE_KEY);
+        assertThat(r.path("success").asBoolean()).as("%s", r).isTrue();
+
+        String entryNo = data(r).path("entryNo").asText();
+        JsonNode wo = null;
+        for (JsonNode w : data(get("/logistics/work-orders?fromDate=" + DATE + "&toDate=" + DATE))
+                .path("content")) {
+            if (entryNo.equals(w.path("entryNo").asText())) {
+                wo = w;
+            }
+        }
+        assertThat(wo).isNotNull();
+        assertThat(wo.path("receiverName").asText()).as("보낸 값이 이긴다").isEqualTo("박선생");
+        assertThat(wo.path("receiverPhone").asText()).isEqualTo("010-5555-5555");
+        assertThat(wo.path("receiverEmail").asText()).isEqualTo("teacher@example.com");
+
+        // 거래처 마스터는 여전히 '마스터대표' — 신청 건의 수정값으로 덮이지 않는다.
+        JsonNode master = data(get("/masters/clients/" + p));
+        assertThat(master.path("bossName").asText()).isEqualTo("마스터대표");
+    }
+
     /** 재고는 제품수불부(단일 공식)로 본다 — 화면마다 다른 계산식을 쓰지 않는다. */
     private long stockOf() {
         long sum = 0;

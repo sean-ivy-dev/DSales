@@ -48,6 +48,22 @@ public record DealerOrderRequest(
         @Schema(description = "주문 메모(선택)", example = "11월 2주 배송 요청")
         String memo,
 
+        @Schema(description = """
+                담당자명(선택). 10/26 §4 "담당자 정보" — "신청 화면에 들어가면 거래처관리에
+                저장된 값을 미리 채운다. 사용자는 이 값을 수정할 수 있다." **안 보내면**
+                거래처 마스터의 대표자명으로 채운다. 보내면 **그 값 그대로** 저장하고(빈
+                문자열이어도 그대로 — "지우고 싶다"는 뜻일 수 있다), **거래처 마스터는
+                바꾸지 않는다**("수정한 값은 그 신청 건에만 저장한다").""", example = "홍길동")
+        String receiverName,
+
+        @Schema(description = "담당자 연락처(선택). 규칙은 `receiverName` 과 같다",
+                example = "010-0000-0000")
+        String receiverPhone,
+
+        @Schema(description = "담당자 이메일(선택). 규칙은 `receiverName` 과 같다",
+                example = "teacher@example.com")
+        String receiverEmail,
+
         @Schema(description = "주문 도서", requiredMode = Schema.RequiredMode.REQUIRED)
         @NotEmpty @Valid List<Item> items
 ) {

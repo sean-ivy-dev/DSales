@@ -77,13 +77,23 @@ public class DealerOrderService {
                     req.memo()));
         }
 
-        // onlySales·발송구분·담당자정보는 비워 둔다 — §2-10 "특약점 사이트에서는 고르지 않는다".
-        // 발송구분은 등록 쪽이 "아무것도 없으면 화물"로 정한다(기존 decideDeliveryTypeIfBlank).
+        // onlySales·발송구분은 비워 둔다 — §2-10 "특약점 사이트에서는 고르지 않는다"(택배/화물
+        // 선택 얘기다). 발송구분은 등록 쪽이 "아무것도 없으면 화물"로 정한다
+        // (decideDeliveryTypeIfBlank — 다만 아래 담당자정보가 채워지면 택배로 자동 판정된다,
+        // §8-6 "담당자명·연락처가 있을 때만 택배").
+        //
+        // ‼️§2-10 과 §4 "담당자 정보"는 **다른 요구사항**이다 — 전자는 발송구분(화물/택배)
+        //   선택지 얘기고, 후자는 담당자명·연락처·이메일 세 칸 얘기다. 예전엔 이 둘을
+        //   섞어서 "담당자정보도 비워 둔다"고 잘못 적었다(2026-11-03 전수 재대조로 발견).
+        //
         // ★접수경로는 **서버가 ONLINE 으로 박는다**(프론트 I-2) — 요청으로 바꿀 수 없다.
         //   사이트에서 온 주문을 수기로 위장할 수 있으면 §2-1 의 "함께 보여주고"가 무의미해진다.
         SalesEntryRequest entry = new SalesEntryRequest(
                 date, partner.getId(), warehouse.getId(),
-                null, null, null, null,
+                null, null,
+                receiverOrDefault(req.receiverName(), partner.getBossName()),
+                receiverOrDefault(req.receiverPhone(), partner.getTel1()),
+                receiverOrDefault(req.receiverEmail(), partner.getEmail1()),
                 com.daesung.sales.sale.entity.OrderChannel.ONLINE, items);
         SalesEntryResponse res = saleService.createEntries(entry);
 
@@ -122,6 +132,22 @@ public class DealerOrderService {
      * ★처음엔 2번만 뒀는데, 물류창고가 둘인 환경에서 <b>모든 특약점 주문이 실패</b>했다 —
      * 설정으로 못 박을 길이 반드시 있어야 한다.
      */
+    /**
+     * 담당자 정보 — "보낸 값이 있으면 그대로, 없으면 거래처 마스터 기본값"(10/26 §4).
+     *
+     * <p>★<b>레거시 매핑을 실측으로 확인했다</b>(DSRE2 {@code tbl_cust_info} DDL — 담당자명에
+     * 해당하는 칸이 따로 없고 <b>대표자명({@code OWNER_NM})</b>·연락처({@code TEL_NO1})·
+     * 이메일({@code EMAIL1})을 쓴다). 우리 {@code Partner} 의 {@code bossName}·{@code tel1}·
+     * {@code email1} 이 그 대응이다.
+     *
+     * <p>★<b>빈 문자열("")과 null 을 다르게 본다</b> — null 이면 "안 보냈다"(기본값으로
+     * 채운다), 빈 문자열이면 "일부러 지웠다"(그대로 빈 값으로 저장한다). 사이트가 프리필된
+     * 값을 지우고 제출하면 그 의도를 존중해야 한다.
+     */
+    private static String receiverOrDefault(String sent, String masterDefault) {
+        return (sent != null) ? sent : masterDefault;
+    }
+
     private Warehouse defaultWarehouse() {
         if (properties.warehouseCode() != null) {
             return warehouseRepository.findByCode(properties.warehouseCode())

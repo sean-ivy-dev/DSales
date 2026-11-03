@@ -59,6 +59,7 @@ public record WorkOrderResponse(
         @Schema(description = "발송구분 명칭(택배/화물)") String deliveryTypeName,
         @Schema(description = "수령인 — 정본 26p \"'택배' 선택 시 담당자 정보가 노출\"") String receiverName,
         @Schema(description = "수령인 연락처") String receiverPhone,
+        @Schema(description = "수령인 이메일") String receiverEmail,
         @Schema(description = "택배사") String courierName,
         @Schema(description = """
                 송장번호 — **1번 박스**의 것(기존 화면 호환용).

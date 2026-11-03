@@ -213,9 +213,11 @@ public class SaleService {
                 var shipment = shipmentService.ensureFor(sale);
                 // ★비어 있을 때만 채운다 — 발주처 질의 2026-10-26 ①. 자세한 이유는
                 //   ShipmentService.applyDeliveryIfBlank/Shipment.fillDeliveryIfBlank 주석 참고.
-                if (req.deliveryType() != null || req.receiverName() != null || req.receiverPhone() != null) {
+                if (req.deliveryType() != null || req.receiverName() != null
+                        || req.receiverPhone() != null || req.receiverEmail() != null) {
                     shipmentService.applyDeliveryIfBlank(shipment,
-                            req.deliveryType(), req.receiverName(), req.receiverPhone());
+                            req.deliveryType(), req.receiverName(), req.receiverPhone(),
+                            req.receiverEmail());
                 }
                 // ★명시적 지정·담당자정보 적용을 끝낸 뒤 기본값을 확정한다(10/27 피드백 §8-6).
                 //   담당자정보가 있으면 택배, 그 외엔 화물 — 위 if문을 안 탄 경우(셋 다 null)도

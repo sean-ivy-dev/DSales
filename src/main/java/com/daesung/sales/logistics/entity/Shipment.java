@@ -127,6 +127,14 @@ public class Shipment extends BaseEntity {
     @Column(name = "receiver_phone", length = 30)
     private String receiverPhone;
 
+    /**
+     * 수령인 이메일 — 10/26 특약점 명세 §4 "담당자 정보"의 세 칸 중 하나(담당자명·연락처·
+     * 이메일). <b>그 신청 건에만</b> 저장한다 — 거래처 마스터({@code partners.email1})
+     * 원본은 UPDATE하지 않는다.
+     */
+    @Column(name = "receiver_email", length = 100)
+    private String receiverEmail;
+
     /** 택배사(예: CJ대한통운). 수기·엑셀 일괄 입력. ⚠️택배사 API 연동은 하지 않는다. */
     @Column(name = "courier_name", length = 30)
     private String courierName;
@@ -290,7 +298,8 @@ public class Shipment extends BaseEntity {
      * 발송구분·수령인 입력(26p). null인 항목은 건드리지 않는다 —
      * 발송구분만 고치려다 수령인이 지워지면 택배가 누구에게 가는지 알 수 없게 된다.
      */
-    public void updateDelivery(DeliveryType deliveryType, String receiverName, String receiverPhone) {
+    public void updateDelivery(DeliveryType deliveryType, String receiverName, String receiverPhone,
+                               String receiverEmail) {
         if (deliveryType != null) {
             this.deliveryType = deliveryType;
         }
@@ -299,6 +308,9 @@ public class Shipment extends BaseEntity {
         }
         if (receiverPhone != null) {
             this.receiverPhone = receiverPhone;
+        }
+        if (receiverEmail != null) {
+            this.receiverEmail = receiverEmail;
         }
     }
 
@@ -334,7 +346,7 @@ public class Shipment extends BaseEntity {
      *
      * @return 한 항목이라도 채웠으면 true
      */
-    public boolean fillDeliveryIfBlank(DeliveryType type, String name, String phone) {
+    public boolean fillDeliveryIfBlank(DeliveryType type, String name, String phone, String email) {
         boolean changed = false;
         if (this.deliveryType == null && type != null) {
             this.deliveryType = type;
@@ -346,6 +358,10 @@ public class Shipment extends BaseEntity {
         }
         if (isBlank(this.receiverPhone) && phone != null && !phone.isBlank()) {
             this.receiverPhone = phone.trim();
+            changed = true;
+        }
+        if (isBlank(this.receiverEmail) && email != null && !email.isBlank()) {
+            this.receiverEmail = email.trim();
             changed = true;
         }
         return changed;

@@ -376,7 +376,7 @@ public class WorkService {
                     s.getAcknowledgedAt() != null, s.getAcknowledgedBy(),
                     s.getBoxCount(), s.getSentDate(), s.getSendMemo(),
                     dt, (dt == null) ? null : dt.label(),
-                    s.getReceiverName(), s.getReceiverPhone(),
+                    s.getReceiverName(), s.getReceiverPhone(), s.getReceiverEmail(),
                     s.getCourierName(), s.getTrackingNo(),
                     trackingsOf(s),
                     total, lines));

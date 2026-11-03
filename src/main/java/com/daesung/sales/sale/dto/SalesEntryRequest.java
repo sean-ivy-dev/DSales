@@ -77,6 +77,10 @@ public record SalesEntryRequest(
         @Schema(description = "수령인 연락처", example = "010-0000-0000")
         String receiverPhone,
 
+        @Schema(description = "수령인 이메일. 10/26 특약점 명세 §4 \"담당자 정보\"의 세 칸 중 하나",
+                example = "teacher@example.com")
+        String receiverEmail,
+
         @Schema(description = """
                 접수경로 — `ONLINE`(특약점 사이트) / `MANUAL`(수기). **안 보내면 수기**다.
                 근거: 10/27 §2-1 "수기 주문과 온라인(특약점) 주문을 **함께** 보여주고".

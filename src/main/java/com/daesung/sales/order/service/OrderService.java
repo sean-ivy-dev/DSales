@@ -351,7 +351,7 @@ public class OrderService {
         SalesEntryRequest entry = new SalesEntryRequest(
                 (sl.salesDate() != null) ? sl.salesDate() : LocalDate.now(),
                 sl.partnerId(), sl.warehouseId(), null,
-                null, null, null,     // 발송구분·수령인 — 이 경로는 아래 autoFillDelivery(DSRE 축)로 따로 채운다
+                null, null, null, null,  // 발송구분·수령인·이메일 — 아래 autoFillDelivery(DSRE 축)로 따로 채운다
                 null,                 // 접수경로 — DSRE 신청 축이라 온라인/수기 어느 쪽도 아니다(비움=수기)
                 List.of(item));
 

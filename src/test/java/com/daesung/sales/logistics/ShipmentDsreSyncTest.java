@@ -82,7 +82,7 @@ class ShipmentDsreSyncTest {
     }
 
     private static ShippingUpdateRequest sentOn(LocalDate d) {
-        return new ShippingUpdateRequest(null, d, null, null, null, null, null, null);
+        return new ShippingUpdateRequest(null, d, null, null, null, null, null, null, null);
     }
 
     @Test
@@ -154,7 +154,7 @@ class ShipmentDsreSyncTest {
     @DisplayName("발송일 없이 박스 수만 고치면 DSRE 를 건드리지 않는다")
     void 발송일_없음() {
         shipment(14L, null);
-        var req = new ShippingUpdateRequest(3, null, null, null, null, null, null, null);
+        var req = new ShippingUpdateRequest(3, null, null, null, null, null, null, null, null);
 
         assertThat(service.updateShipping(14L, req)).isEmpty();
         verify(gw, never()).ship(anyList(), any(), any());
