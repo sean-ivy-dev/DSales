@@ -7,6 +7,7 @@ import com.daesung.sales.common.exception.ErrorCode;
 import com.daesung.sales.dsre.gateway.OrderState;
 import com.daesung.sales.logistics.entity.Shipment;
 import com.daesung.sales.logistics.repository.ShipmentRepository;
+import com.daesung.sales.sale.service.SaleService;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -52,6 +53,7 @@ public class SalesOrderStateService {
 
     private final ShipmentRepository shipmentRepository;
     private final StatusHistoryService statusHistoryService;
+    private final SaleService saleService;
 
     /** 건별 결과. {@code changed=false} 면 {@code message} 에 사유가 있다. */
     public record ItemResult(String orderNo, boolean changed,
@@ -131,5 +133,48 @@ public class SalesOrderStateService {
         }
         return new ItemResult(orderNo, true, from.name(), from.label(),
                 to.name(), to.label(), null);
+    }
+
+    /**
+     * 주문조회 화면의 <b>주문 삭제</b>(10/27 명세 §2-9 — "주문 삭제 … **접수완료 상태일 때만**
+     * 가능하게 한다").
+     *
+     * <h3>왜 여기 새로 만드나 — 기존 {@code DELETE /sales/entries/{entryNo}} 를 안 쓰는 이유</h3>
+     * 그 경로는 <b>매출등록 화면</b>의 "거래순번으로 불러와 지우기"(§3-6, 프론트 B-4②)가
+     * 이미 쓰고 있고, 그 화면의 주문은 <b>접수 단계를 건너뛰고 상품준비중에서 시작</b>한다
+     * (수기 등록 설계). 거기에 "접수완료만 삭제 가능"을 걸면 그 화면의 기존 삭제가
+     * PREPARING 상태에서 전부 거부돼 <b>지금 되는 기능이 깨진다</b>(`EntryEditIntegrationTest`
+     * 가 PREPARING 상태 주문의 삭제를 이미 성공으로 고정하고 있다). §2-9 와 §3-6 은 정본에서
+     * <b>서로 다른 섹션</b>("주문/출고관리" vs "매출관리")의 서로 다른 화면 기능이다 — 같은 API로
+     * 묶으면 이 둘을 가를 수 없다.
+     *
+     * <p>★그래서 <b>경로를 가른다.</b> 이 메서드는 주문조회 전용이고, 접수완료 판정은
+     * {@link OrderProgress#groupState} — 상태변경({@link #change})과 같은 기준이다.
+     * 실제 지우기는 {@link SaleService#deleteEntry} 를 그대로 호출한다 — 재고 역분개·이력·
+     * 빈 작업요청서 정리가 전부 거기 있다. 여기서 다시 쓰면 매출등록 삭제와 어긋난다.
+     *
+     * <p>등록번호 없는 옛 주문(키가 {@code #발송id})은 {@code Sale.entryNo} 가 없어
+     * {@code SaleService.deleteEntry} 로 지울 수 없다 — 거부하고 사유를 말한다.
+     */
+    @Transactional
+    public int delete(String orderNo, String reason) {
+        if (orderNo.startsWith("#")) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "등록번호가 없는 옛 주문입니다(" + orderNo + "). 이 화면에서는 지울 수 없습니다 — "
+                            + "반품 또는 매출 취소로 처리하세요.");
+        }
+        List<Shipment> shipments = shipmentRepository.findByOrderKeys(List.of(orderNo));
+        if (shipments.isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND,
+                    "그 주문번호의 주문이 없습니다: " + orderNo);
+        }
+        OrderState state = OrderProgress.groupState(shipments);
+        if (state != OrderState.RECEIVED) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "접수완료 상태일 때만 삭제할 수 있습니다. 현재 상태=" + state.label() + " — "
+                            + "먼저 '선택 건 상태변경'으로 접수완료로 되돌리거나, "
+                            + "반품 또는 매출 취소로 처리하세요.");
+        }
+        return saleService.deleteEntry(orderNo, reason);
     }
 }

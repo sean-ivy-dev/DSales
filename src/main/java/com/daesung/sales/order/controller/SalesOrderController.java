@@ -155,6 +155,31 @@ public class SalesOrderController {
                 salesOrderStateService.change(req.orderNos(), req.toState(), req.reason()));
     }
 
+    @Operation(summary = "★주문 삭제 — 접수완료 상태일 때만", description = """
+            근거: 10/27 명세 §2-9 — "주문 삭제 … **접수완료 상태일 때만** 가능하게 한다."
+
+            ‼️**`DELETE /sales/entries/{entryNo}` 와 다른 경로다.** 그건 매출등록 화면의
+            "거래순번으로 불러와 지우기"(§3-6)가 쓰는 경로이고, 그 화면의 주문은 접수 단계를
+            건너뛰고 **상품준비중에서 시작**한다(수기 등록 설계) — 거기에 이 제한을 걸면
+            매출등록의 기존 삭제가 깨진다. §2-9(이 화면)와 §3-6(매출등록 화면)은 정본에서
+            서로 다른 섹션의 서로 다른 화면 기능이라 경로를 갈랐다.
+
+            · 현재 상태가 **접수완료가 아니면 거부**한다(상품검수·상품준비중·발송준비중·
+              발송완료·삭제 전부). 상품검수·상품준비중으로 되돌리려면 먼저
+              `POST /orders/progress-state` 로 접수완료로 돌린 뒤 지운다.
+            · 등록번호 없는 옛 주문(`#발송id`)은 지울 수 없다 — 반품 또는 매출 취소로 처리한다.
+            · 실제 삭제는 매출등록과 같은 로직(`SaleService.deleteEntry`)을 그대로 쓴다 —
+              재고 역분개·이력·빈 작업요청서 정리가 똑같이 적용된다.""")
+    @org.springframework.web.bind.annotation.DeleteMapping("/{orderNo}")
+    public ApiResponse<Integer> delete(
+            @Parameter(description = "주문번호(`E-…`)", example = "E-20261027-55")
+            @org.springframework.web.bind.annotation.PathVariable String orderNo,
+            @Valid @RequestBody(required = false)
+            com.daesung.sales.logistics.dto.ReasonRequest req) {
+        return ApiResponse.success(salesOrderStateService.delete(orderNo,
+                com.daesung.sales.logistics.dto.ReasonRequest.reasonOf(req)));
+    }
+
     private static LocalDate from(LocalDate v) {
         return (v != null) ? v : LocalDate.now().withDayOfYear(1);
     }
