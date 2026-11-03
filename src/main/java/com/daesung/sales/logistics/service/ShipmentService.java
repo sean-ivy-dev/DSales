@@ -457,7 +457,7 @@ public class ShipmentService {
         s.updateShipping(req.boxCount(), req.sentDate(), req.sendMemo());
         s.updateDelivery(req.deliveryType(), req.receiverName(), req.receiverPhone(),
                 req.receiverEmail());
-        s.updateTracking(req.courierName(), req.trackingNo());
+        s.updateTracking(labelOf(req.courierName()), req.trackingNo());
         // 발송일이 들어오면 = 발송 처리. 묶인 신청의 DSRE 상태도 발송완료로(2026-10-23).
         return (req.sentDate() == null) ? List.of() : shipToDsre(s, req.sentDate());
     }
@@ -482,7 +482,7 @@ public class ShipmentService {
                     throw new BusinessException(ErrorCode.INVALID_INPUT,
                             "박스 번호가 겹칩니다: " + l.boxNo() + " — 한 발송 안에서 번호는 하나뿐입니다.");
                 }
-                lines.add(new Shipment.TrackingLine(l.boxNo(), l.courierName(), l.trackingNo()));
+                lines.add(new Shipment.TrackingLine(l.boxNo(), labelOf(l.courierName()), l.trackingNo()));
             }
         }
         // ‼️**비우고 flush 한 뒤 채운다.** orphanRemoval 의 DELETE 는 커밋 직전에 나가는데,
@@ -505,6 +505,11 @@ public class ShipmentService {
      * 전체가 취소되면, 담당자는 어느 줄이 문제인지 모른 채 처음부터 다시 해야 한다.
      * ⚠️택배사 API를 부르지 않는다(연동 여부는 물류팀 인터뷰 회신 대기).
      */
+    /** DB에는 enum 이름이 아니라 한글 라벨을 저장한다(기존 값·엑셀 내보내기와 호환). */
+    private static String labelOf(com.daesung.sales.logistics.entity.CourierCompany courier) {
+        return (courier == null) ? null : courier.label();
+    }
+
     @Transactional
     public TrackingUploadResponse uploadTracking(MultipartFile file) {
         List<TrackingUploadResponse.Line> lines = new ArrayList<>();
@@ -524,11 +529,21 @@ public class ShipmentService {
                     continue;   // 발송건ID가 숫자가 아니면 설명행/빈행 → 스킵
                 }
                 int rowNo = r + 1;
-                String courier = str(row.getCell(1));
+                String courierRaw = str(row.getCell(1));
                 String tracking = str(row.getCell(2));
                 try {
                     if (tracking == null || tracking.isBlank()) {
                         throw new BusinessException(ErrorCode.INVALID_INPUT, "송장번호가 비어 있음");
+                    }
+                    // ★엑셀 일괄 입력(10/31 §2) — 비어 있으면 CJ대한통운으로 넣는다.
+                    //   목록에 없는 값이면 업로드 전 오류로 표시(이 행만 ERROR, 나머지는 계속 처리).
+                    String courier;
+                    try {
+                        courier = com.daesung.sales.logistics.entity.CourierCompany
+                                .labelOrDefault(courierRaw);
+                    } catch (IllegalArgumentException e) {
+                        throw new BusinessException(ErrorCode.INVALID_INPUT,
+                                "알 수 없는 택배사입니다: " + courierRaw + " (CJ대한통운/대신택배)");
                     }
                     Shipment s = shipmentRepository.findById(id).orElseThrow(() ->
                             new BusinessException(ErrorCode.NOT_FOUND, "발송 건이 없습니다. id=" + id));

@@ -189,6 +189,59 @@ class DeliveryTrackingIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
+    @DisplayName("★택배사 — 모르는 값은 PUT(단건)에서 400으로 거부한다")
+    void 단건_모르는택배사_거부() {
+        JsonNode r = put("/logistics/work-orders/" + courierShipment + "/shipping",
+                Map.of("courierName", "우체국택배", "trackingNo", "T-1"));
+        assertThat(r.path("success").asBoolean()).isFalse();
+    }
+
+    @Test
+    @DisplayName("★택배사 — CJ/대신택배 둘 다 저장된다(코드명·한글 라벨 모두 허용)")
+    void 단건_택배사_코드와라벨() {
+        put("/logistics/work-orders/" + courierShipment + "/shipping",
+                Map.of("courierName", "CJ", "trackingNo", "T-2"));   // 코드명
+        assertThat(orderById(courierShipment).path("courierName").asText()).isEqualTo("CJ대한통운");
+
+        put("/logistics/work-orders/" + freightShipment + "/shipping",
+                Map.of("courierName", "대신택배", "trackingNo", "T-3"));   // 한글 라벨
+        assertThat(orderById(freightShipment).path("courierName").asText()).isEqualTo("대신택배");
+    }
+
+    @Test
+    @DisplayName("★엑셀 일괄 — 택배사 칸이 비어 있으면 CJ대한통운으로 채운다(10/31 §2)")
+    void 일괄_빈택배사는_CJ기본값() throws Exception {
+        byte[] xlsx = trackingFile(new Object[][]{
+                {courierShipment, "", "888888888888"},
+        });
+        JsonNode r = data(uploadTracking(xlsx));
+        assertThat(r.path("updated").asInt()).isEqualTo(1);
+        assertThat(orderById(courierShipment).path("courierName").asText()).isEqualTo("CJ대한통운");
+    }
+
+    @Test
+    @DisplayName("★엑셀 일괄 — 목록에 없는 택배사는 그 행만 오류, 나머지는 반영된다")
+    void 일괄_모르는택배사는_그행만오류() throws Exception {
+        byte[] xlsx = trackingFile(new Object[][]{
+                {courierShipment, "우체국택배", "777777777777"},   // 모르는 값
+                {freightShipment, "CJ대한통운", "666666666666"},   // 정상
+        });
+        JsonNode r = data(uploadTracking(xlsx));
+        assertThat(r.path("updated").asInt()).as("정상 행만 반영").isEqualTo(1);
+        assertThat(r.path("failed").asInt()).isEqualTo(1);
+        assertThat(orderById(freightShipment).path("trackingNo").asText()).isEqualTo("666666666666");
+
+        boolean foundCourierError = false;
+        for (JsonNode l : r.path("lines")) {
+            if ("ERROR".equals(l.path("status").asText())
+                    && l.path("message").asText().contains("택배사")) {
+                foundCourierError = true;
+            }
+        }
+        assertThat(foundCourierError).as("어느 이유로 실패했는지 알 수 있어야").isTrue();
+    }
+
+    @Test
     @DisplayName("송장 양식에 대조 키(발송건ID)가 들어 있다")
     void 송장양식_대조키() throws Exception {
         byte[] xlsx = getBytes("/logistics/work-orders/tracking/template"

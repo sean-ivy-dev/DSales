@@ -1,5 +1,6 @@
 package com.daesung.sales.logistics.dto;
 
+import com.daesung.sales.logistics.entity.CourierCompany;
 import com.daesung.sales.logistics.entity.DeliveryType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -26,7 +27,11 @@ public record ShippingUpdateRequest(
         @Schema(description = "수령인(택배일 때 담당자 정보)", example = "홍길동") String receiverName,
         @Schema(description = "수령인 연락처", example = "010-0000-0000") String receiverPhone,
         @Schema(description = "수령인 이메일", example = "teacher@example.com") String receiverEmail,
-        @Schema(description = "택배사", example = "CJ대한통운") String courierName,
+        @Schema(description = """
+                택배사. CJ(CJ대한통운) / DAESIN(대신택배). 미지정이면 기존 값을 유지한다.
+                기본값은 **화면이** CJ대한통운으로 미리 선택해 보낸다(10/31 §2).""",
+                example = "CJ")
+        CourierCompany courierName,
         @Schema(description = "송장번호", example = "123456789012") String trackingNo
 ) {
 }

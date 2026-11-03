@@ -147,8 +147,12 @@ public class DealerStatementService {
                 continue;
             }
             for (ShipmentTracking t : s.getTrackings()) {
-                out.add(new DealerShippedOrderRow.Tracking(
-                        t.getBoxNo(), t.getCourierName(), t.getTrackingNo()));
+                // ★과거 건(택배사 코드화 이전)은 courierName이 비어 있다 — 10/31 §2
+                //   "courier_name이 비어 있으면 CJ대한통운으로 간주한다"를 여기서 적용한다.
+                //   사이트가 빈 값을 보고 또 추정하지 않도록, 보여줄 땐 항상 값을 채워 준다.
+                out.add(new DealerShippedOrderRow.Tracking(t.getBoxNo(),
+                        com.daesung.sales.logistics.entity.CourierCompany.displayLabel(t.getCourierName()),
+                        t.getTrackingNo()));
             }
         }
         out.sort(java.util.Comparator.comparingInt(DealerShippedOrderRow.Tracking::boxNo));

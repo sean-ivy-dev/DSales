@@ -63,4 +63,22 @@ public class ShipmentTracking {
         t.createdBy = by;
         return t;
     }
+
+    /**
+     * 같은 줄을 <b>제자리에서</b> 고친다 — {@code null}이 아닌 항목만.
+     *
+     * <p>★{@link Shipment#updateTracking}이 이 메서드로 1번 박스를 고치는 이유 —
+     * {@link Shipment#clearTrackings}로 지우고 다시 넣으면(delete+insert) orphanRemoval의
+     * DELETE가 커밋 직전에야 나가는데 그 전에 같은 (shipment·박스번호)로 INSERT가 먼저
+     * 나가 유니크 제약(`ux_shipment_tracking_box`)에 걸린다(실제로 재현됨 — 같은 발송
+     * 건에 단건 송장 입력을 두 번째로 부르면 500). 제자리 UPDATE는 그 경합이 없다.
+     */
+    void apply(String courierName, String trackingNo) {
+        if (courierName != null) {
+            this.courierName = courierName;
+        }
+        if (trackingNo != null) {
+            this.trackingNo = trackingNo;
+        }
+    }
 }

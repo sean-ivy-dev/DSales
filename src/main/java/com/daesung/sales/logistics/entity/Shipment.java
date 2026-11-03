@@ -470,7 +470,20 @@ public class Shipment extends BaseEntity {
             this.courierName = c;
             return;
         }
-        replaceTrackings(java.util.List.of(new TrackingLine(1, c, n)), null);
+        // ‼️`replaceTrackings`(clear→apply, delete+insert)를 쓰지 않는다 — 같은 발송 건에
+        //   이 메서드가 **두 번째로** 불리면(이미 1번 박스가 있는 상태) orphanRemoval의
+        //   지연 DELETE보다 새 INSERT가 먼저 나가 유니크 제약(shipment_id,box_no)에 걸린다
+        //   (실제로 500 재현됨 — 통합테스트가 단건 송장 입력을 두 번 부르는 경로에서 드러났다).
+        //   이미 있는 1번 박스는 제자리에서 고친다({@link ShipmentTracking#apply}).
+        ShipmentTracking box1 = this.trackings.stream()
+                .filter(t -> t.getBoxNo() == 1).findFirst().orElse(null);
+        if (box1 != null) {
+            box1.apply(c, n);
+        } else {
+            this.trackings.add(ShipmentTracking.of(this, 1, c, n, null));
+        }
+        this.courierName = c;
+        this.trackingNo = n;
     }
 
     /** 박스 한 줄의 입력값. */

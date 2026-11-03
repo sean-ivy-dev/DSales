@@ -88,7 +88,7 @@ class MultiTrackingIntegrationTest extends IntegrationTestSupport {
                 "trackings", List.of(
                         Map.of("boxNo", 2, "courierName", "CJ대한통운", "trackingNo", "222"),
                         Map.of("boxNo", 1, "courierName", "CJ대한통운", "trackingNo", "111"),
-                        Map.of("boxNo", 3, "courierName", "우체국", "trackingNo", "333"))));
+                        Map.of("boxNo", 3, "courierName", "대신택배", "trackingNo", "333"))));
         assertThat(r.path("success").asBoolean()).as("%s", r).isTrue();
 
         JsonNode list = order().path("trackings");
@@ -96,7 +96,7 @@ class MultiTrackingIntegrationTest extends IntegrationTestSupport {
         assertThat(list.get(0).path("boxNo").asInt()).as("번호 순").isEqualTo(1);
         assertThat(list.get(0).path("trackingNo").asText()).isEqualTo("111");
         assertThat(list.get(2).path("trackingNo").asText()).isEqualTo("333");
-        assertThat(list.get(2).path("courierName").asText()).isEqualTo("우체국");
+        assertThat(list.get(2).path("courierName").asText()).isEqualTo("대신택배");
 
         // ★기존 단일 필드는 1번 박스를 비춘다 — 화면·엑셀이 아직 이걸 쓴다.
         assertThat(order().path("trackingNo").asText()).isEqualTo("111");
@@ -151,7 +151,7 @@ class MultiTrackingIntegrationTest extends IntegrationTestSupport {
     void 단건입력_호환() {
         put("/logistics/work-orders/" + shipmentId + "/trackings", Map.of("trackings", List.of()));
         put("/logistics/work-orders/" + shipmentId + "/shipping",
-                Map.of("boxCount", 1, "courierName", "로젠", "trackingNo", "SINGLE-1"));
+                Map.of("boxCount", 1, "courierName", "CJ대한통운", "trackingNo", "SINGLE-1"));
 
         JsonNode list = order().path("trackings");
         assertThat(list).as("단건도 박스 줄이 된다").hasSize(1);

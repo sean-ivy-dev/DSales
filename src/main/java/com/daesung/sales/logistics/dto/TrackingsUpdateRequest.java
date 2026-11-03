@@ -30,8 +30,8 @@ public record TrackingsUpdateRequest(
                     requiredMode = Schema.RequiredMode.REQUIRED)
             @Positive(message = "박스 번호는 1부터입니다") int boxNo,
 
-            @Schema(description = "택배사", example = "CJ대한통운")
-            String courierName,
+            @Schema(description = "택배사. CJ(CJ대한통운) / DAESIN(대신택배)", example = "CJ")
+            com.daesung.sales.logistics.entity.CourierCompany courierName,
 
             @Schema(description = "송장번호", example = "123456789012",
                     requiredMode = Schema.RequiredMode.REQUIRED)
