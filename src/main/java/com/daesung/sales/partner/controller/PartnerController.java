@@ -41,6 +41,7 @@ public class PartnerController {
 
     private final PartnerService partnerService;
     private final PartnerUploadService partnerUploadService;
+    private final com.daesung.sales.product.service.PartnerProductVisibilityService partnerProductVisibilityService;
     private final ExcelExportUtil excel;
     /**
      * DSRE 코드 동기화. ‼️<b>선택 주입</b>이다 — DSRE 연동이 꺼져 있으면 빈이 없다.
@@ -244,4 +245,43 @@ public class PartnerController {
         return ApiResponse.success(svc.sync());
     }
 
+    @Operation(summary = "★도서별 노출(거래처×도서 예외)", description = """
+            [거래처관리] 거래처 상세 → '도서별 노출' 화면. 근거: 10/31 클라이언트 회신 §1-4.
+
+            목록은 **분류코드→도서코드 순**이다(화면에서 분류명으로 묶어 트리로 그린다).
+            각 줄의 `visible`은 노출 판단 순서(①도서Web게시 ②이 거래처의 예외 ③거래처×대분류
+            매핑 ④매핑없음)를 **전부 적용한 현재 값**이다 — 체크박스에 그대로 쓰면 된다.
+            `exception=true`면 그 값이 예외로 저장된 것이다(화면의 '예외' 배지).
+            `productWebVisible=false`면 체크박스를 비활성화한다(①이 예외보다 우선이라
+            체크해도 안 바뀐다).""")
+    @GetMapping("/{partnerId}/product-visibility")
+    public ApiResponse<PageResponse<com.daesung.sales.product.dto.PartnerProductVisibilityRow>> productVisibility(
+            @PathVariable Long partnerId,
+            @Parameter(description = "도서코드·도서명 부분일치") @RequestParam(required = false) String keyword,
+            @ParameterObject PageRequestDto page) {
+        return ApiResponse.success(PageResponse.of(
+                partnerProductVisibilityService.list(partnerId, keyword, page.toPageable())));
+    }
+
+    @Operation(summary = "도서별 노출 — 체크박스 변경", description = """
+            열기/닫기를 저장한다. **③④(거래처×대분류 매핑)로 계산한 기본값과 같아지면
+            예외 행을 지운다**(10/31 §1-4) — 예외는 "기본값과 다른 값"일 때만 의미가 있다.
+            변경 이력(누가·언제·열기/닫기)이 남는다.""")
+    @PutMapping("/{partnerId}/product-visibility/{productId}")
+    public ApiResponse<Void> setProductVisibility(
+            @PathVariable Long partnerId, @PathVariable Long productId,
+            @RequestBody com.daesung.sales.product.dto.ProductVisibilityRequest req) {
+        partnerProductVisibilityService.set(partnerId, productId, req.visible(), req.reason());
+        return ApiResponse.success(null);
+    }
+
+    @Operation(summary = "도서별 노출 — 기본값으로 되돌리기",
+            description = "예외 행을 지운다. 그 뒤로는 거래처×대분류 매핑(③④)을 그대로 따른다.")
+    @DeleteMapping("/{partnerId}/product-visibility/{productId}")
+    public ApiResponse<Void> resetProductVisibility(
+            @PathVariable Long partnerId, @PathVariable Long productId,
+            @RequestParam(required = false) String reason) {
+        partnerProductVisibilityService.reset(partnerId, productId, reason);
+        return ApiResponse.success(null);
+    }
 }

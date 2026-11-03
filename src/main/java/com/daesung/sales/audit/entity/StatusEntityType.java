@@ -37,5 +37,11 @@ public enum StatusEntityType {
      * (제자리 UPDATE라 이전 값이 사라진다). 우리가 전환시킨 건만이라도 여기 남겨,
      * "누가 언제 명세서를 발급해서 발송준비중이 됐는지"를 소명할 수 있게 한다.
      */
-    DSRE_ORDER
+    DSRE_ORDER,
+    /**
+     * 거래처×도서 노출 예외 — 열기/닫기. entityId = 예외 행 id(삭제 시엔 지우기 전 id).
+     *
+     * <p>근거: 10/31 클라이언트 회신 §1-4 "변경 이력(누가, 언제, 열기/닫기)을 남긴다".
+     */
+    PARTNER_PRODUCT_VISIBILITY
 }

@@ -90,24 +90,30 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             org.springframework.data.domain.Pageable pageable);
 
     /**
-     * <b>특약점 사이트 신청 화면에 노출할 도서</b>. 근거: 10/26 특약점 명세 §3 +
-     * 특약점팀 전달(2026-11-03)이 옮긴 클라이언트 10/31 회신.
+     * <b>특약점 사이트 신청 화면(+재고현황 목록)에 노출할 도서</b>. 근거: 10/31 클라이언트
+     * 회신(`특약점사이트-개발전달-261031.md` §1-1, 10/26 §3·§9-1 대체) — 노출 판단 순서는
+     * <b>위에서부터 처음 걸리는 규칙</b>이다.
      *
      * <pre>
-     *   ① 도서 Web게시(p.webVisible) = Y
-     *   ② 거래처별 매핑(partner_supply_rate, 거래처 × 도서 대분류)의 Web게시 = Y
-     *   ③ 그 매핑의 사용여부 = Y, 미삭제(@SQLRestriction 으로 자동)
-     *   ④ 매핑 행이 없으면 비노출 ← <b>inner join 이 그 규칙이다</b>(left join 으로 바꾸면 안 된다)
+     *   ① p.webVisible = N                                  → 비노출 (예외보다 우선)
+     *   ② 거래처×도서 예외(PartnerProductVisibility) 행이 있음  → 그 행의 visible
+     *      (열기=매핑이 없거나 닫혀 있어도 노출 / 닫기=매핑이 열려 있어도 비노출)
+     *   ③ 거래처×대분류 매핑(PartnerSupplyRate, use_yn=Y·미삭제)이 있음 → 그 행의 web_visible
+     *   ④ 매핑 행 없음                                        → 비노출
      * </pre>
+     *
+     * <p>‼️<b>처음엔 ②(거래처×도서 예외)가 없었다</b> — 10/26 명세 §3만 보고 ①③④로 구현했는데
+     * 10/31 회신이 §3을 통째로 대체하면서 ②를 추가했다. 10/31 문서가 늦게 발견돼
+     * 이 메서드가 한동안 확정 규칙과 다르게 동작했다(2026-11-03).
      *
      * <p>대분류는 도서에 직접 없다 — {@code products.sales_division}(세부구분 코드) →
      * {@code sales_divisions.major_category} 로 한 번 더 타고 간다. FK가 아니라 코드 문자열
      * 연결이라 {@code join ... on} 으로 붙인다. 세부구분이 비었거나 마스터에 없는 도서는
-     * 대분류를 알 수 없어 <b>매핑을 찾을 수 없고, 그래서 ④에 따라 비노출</b>이 된다.
+     * 대분류를 알 수 없어 매핑을 찾을 수 없고, 예외도 없으면 ④에 따라 비노출이 된다.
      *
      * <p>★<b>캐시를 두지 않는다</b>(§3 "도서관리에서 바꾸면 사이트에 바로 반영돼야 한다").
      *
-     * <p>⚠️<b>도서 사용여부(p.useYn)는 우리가 더한 조건</b>이다 — §3 원문에는 없다.
+     * <p>⚠️<b>도서 사용여부(p.useYn)는 우리가 더한 조건</b>이다 — 10/31 §1-1 원문에는 없다.
      * 쓰지 않기로 한 도서를 특약점이 주문할 수 있으면 그 주문은 받는 쪽에서 막아야 하는데,
      * 그 경로가 없다. 빼야 하면 이 조건만 지우면 된다(2026-11-03 회신에 질문으로 올림).
      */
@@ -115,14 +121,39 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             select p from Product p
               join com.daesung.sales.product.entity.SalesDivision d
                 on d.code = p.salesDivision
-              join com.daesung.sales.product.entity.PartnerSupplyRate m
+              left join com.daesung.sales.product.entity.PartnerProductVisibility ex
+                on ex.partner.id = :partnerId and ex.product = p
+              left join com.daesung.sales.product.entity.PartnerSupplyRate m
                 on m.majorCategory = d.majorCategory and m.partner.id = :partnerId
              where p.webVisible = true
                and p.useYn = true
-               and m.webVisible = true
-               and m.useYn = true
+               and ((ex.id is not null and ex.visible = true)
+                 or (ex.id is null and m.webVisible = true and m.useYn = true))
              order by p.catCode asc, p.code asc
             """)
     java.util.List<Product> findDealerVisible(
             @org.springframework.data.repository.query.Param("partnerId") Long partnerId);
+
+    /**
+     * {@link #findDealerVisible} 과 <b>같은 WHERE</b>를 쓰되 단건 판정용 — "이 거래처에
+     * 이 도서가 보이는가"를 [거래처관리] '도서별 노출' 화면이 전 도서마다 묻는다.
+     * 전체를 긁어 자바에서 걸러도 되지만, 그 화면이 수천 권을 한 번에 보여줄 수 있어
+     * DB에서 바로 거른다.
+     */
+    @org.springframework.data.jpa.repository.Query("""
+            select count(p) > 0 from Product p
+              join com.daesung.sales.product.entity.SalesDivision d
+                on d.code = p.salesDivision
+              left join com.daesung.sales.product.entity.PartnerProductVisibility ex
+                on ex.partner.id = :partnerId and ex.product = p
+              left join com.daesung.sales.product.entity.PartnerSupplyRate m
+                on m.majorCategory = d.majorCategory and m.partner.id = :partnerId
+             where p = :product
+               and p.webVisible = true
+               and p.useYn = true
+               and ((ex.id is not null and ex.visible = true)
+                 or (ex.id is null and m.webVisible = true and m.useYn = true))
+            """)
+    boolean isDealerVisible(@org.springframework.data.repository.query.Param("partnerId") Long partnerId,
+                            @org.springframework.data.repository.query.Param("product") Product product);
 }
