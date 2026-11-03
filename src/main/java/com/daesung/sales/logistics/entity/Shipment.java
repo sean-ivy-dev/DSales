@@ -371,18 +371,29 @@ public class Shipment extends BaseEntity {
      * 발송구분이 아직 없으면 규칙대로 정한다(10/27 피드백 §8-6·작업지침5).
      * 우선순위: ① 이미 값이 있으면 그대로 둔다(명시적 지정이 여기서 이미 반영됐다 —
      * {@link #fillDeliveryIfBlank}를 먼저 호출한 뒤에 이 메서드를 호출하는 것이 전제다).
-     * ② 담당자정보(수령인명·연락처)가 있으면 택배. ③ 그 외에는 화물(기본값).
+     * ② {@code courierByReceiverInfo}일 때 담당자정보(수령인명·연락처)가 있으면 택배.
+     * ③ 그 외에는 화물(기본값).
      *
      * <p>★<b>생성 시점({@link #of})이 아니라 등록 흐름의 맨 끝에서 호출해야 한다.</b>
      * 생성할 때 바로 화물을 채우면, 뒤이어 담당자정보가 들어와도
      * {@link #fillDeliveryIfBlank}의 "비어있을 때만 채운다" 조건이 이미 거짓이 되어
      * "담당자정보가 있으면 택배"가 영영 못 먹는다 — 그래서 기본값을 둘로 쪼갰다.
+     *
+     * @param courierByReceiverInfo 담당자정보로 택배를 판정할지. <b>특약점 사이트 주문
+     *     (channel=ONLINE)은 false</b> — 발주처 추가요청 J-1(2026-11-03)·명세 §2-10
+     *     "특약점 사이트에서는 고르지 않는다". 그 경로는 담당자정보를 거래처 마스터
+     *     대표자명·연락처로 <b>자동으로 채우기 때문에</b>(10/26 §4) 이 판정을 그대로 두면
+     *     마스터에 대표자명이 있는 거래처(운영 180곳 중 178곳) 주문이 사실상 전부 택배가
+     *     된다 — 그게 클라이언트가 §8-6에서 버그로 지적한 "전부 택배" 그 증상이다.
+     *     담당자정보는 계속 주문에 저장된다(택배 판정에만 안 쓴다). 택배로 보낼 건은
+     *     물류가 작업요청서 「발송 구분」에서 바꾼다.
      */
-    public void decideDeliveryTypeIfBlank() {
+    public void decideDeliveryTypeIfBlank(boolean courierByReceiverInfo) {
         if (this.deliveryType != null) {
             return;
         }
-        this.deliveryType = (!isBlank(this.receiverName) || !isBlank(this.receiverPhone))
+        boolean hasReceiverInfo = !isBlank(this.receiverName) || !isBlank(this.receiverPhone);
+        this.deliveryType = (courierByReceiverInfo && hasReceiverInfo)
                 ? DeliveryType.COURIER
                 : DeliveryType.FREIGHT;
     }

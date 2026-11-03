@@ -183,11 +183,14 @@ public class ShipmentService {
      * 발송구분 기본값 확정(10/27 피드백 §8-6) — 명시적 지정·담당자정보 적용을 **전부 마친 뒤**
      * 호출해야 한다. 그래도 비어 있으면 담당자정보 유무로 택배/화물을 가른다
      * ({@link Shipment#decideDeliveryTypeIfBlank} 참고).
+     *
+     * @param courierByReceiverInfo 담당자정보로 택배를 판정할지 —
+     *     <b>특약점 사이트 주문(channel=ONLINE)은 false</b>(발주처 J-1·명세 §2-10).
      */
     @Transactional
-    public void decideDeliveryTypeIfBlank(Shipment shipment) {
+    public void decideDeliveryTypeIfBlank(Shipment shipment, boolean courierByReceiverInfo) {
         if (shipment != null) {
-            shipment.decideDeliveryTypeIfBlank();
+            shipment.decideDeliveryTypeIfBlank(courierByReceiverInfo);
         }
     }
 

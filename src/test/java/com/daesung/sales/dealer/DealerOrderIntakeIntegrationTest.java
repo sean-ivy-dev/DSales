@@ -214,8 +214,13 @@ class DealerOrderIntakeIntegrationTest extends IntegrationTestSupport {
         assertThat(wo.path("receiverName").asText()).isEqualTo("김대표");
         assertThat(wo.path("receiverPhone").asText()).isEqualTo("02-111-2222");
         assertThat(wo.path("receiverEmail").asText()).isEqualTo("boss@example.com");
-        // 담당자정보가 채워지면 택배로 자동 판정된다(§8-6) — 덤으로 확인.
-        assertThat(wo.path("deliveryType").asText()).isEqualTo("COURIER");
+        // ★★담당자정보가 채워져도 **화물**이다 — 발주처 추가요청 J-1(2026-11-03).
+        //   §8-6의 "담당자명·연락처가 있으면 택배"는 매출등록 수기 주문에만 적용된다.
+        //   이 경로는 바로 위에서 마스터 대표자명·연락처를 자동으로 채우므로, 그 규칙을
+        //   같이 적용하면 운영 거래처 180곳 중 178곳이 전부 택배가 된다(= §8-6이 지적한 버그).
+        assertThat(wo.path("deliveryType").asText())
+                .as("특약점 사이트 주문은 담당자정보가 있어도 화물(§2-10·J-1)")
+                .isEqualTo("FREIGHT");
 
         // ‼️거래처 마스터는 바뀌지 않는다("수정한 값은 그 신청 건에만 저장한다").
         JsonNode master = data(get("/masters/clients/" + p));

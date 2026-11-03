@@ -28,6 +28,7 @@ import com.daesung.sales.sale.dto.SaleUpdateRequest;
 import com.daesung.sales.sale.dto.GroupTotalResponse;
 import com.daesung.sales.sale.dto.SalesEntryRequest;
 import com.daesung.sales.sale.dto.SalesEntryResponse;
+import com.daesung.sales.sale.entity.OrderChannel;
 import com.daesung.sales.sale.entity.Sale;
 import com.daesung.sales.sale.entity.SalesType;
 import com.daesung.sales.sale.repository.SaleRepository;
@@ -222,7 +223,14 @@ public class SaleService {
                 // ★명시적 지정·담당자정보 적용을 끝낸 뒤 기본값을 확정한다(10/27 피드백 §8-6).
                 //   담당자정보가 있으면 택배, 그 외엔 화물 — 위 if문을 안 탄 경우(셋 다 null)도
                 //   포함해 항상 호출해야 "기본은 화물"이 실제로 적용된다.
-                shipmentService.decideDeliveryTypeIfBlank(shipment);
+                // ★★단, 특약점 사이트 주문(channel=ONLINE)은 담당자정보로 택배를 판정하지 않는다
+                //   (발주처 추가요청 J-1 2026-11-03 · 명세 §2-10 "특약점 사이트에서는 고르지 않는다").
+                //   그 경로는 담당자정보를 거래처 마스터에서 자동으로 채우므로(10/26 §4) 판정을
+                //   그대로 두면 운영 거래처 180곳 중 178곳이 전부 택배가 된다 — §8-6이 버그로
+                //   지적한 "전부 택배" 증상 그 자체다. 담당자정보는 그대로 저장되고, 택배로 보낼
+                //   건은 물류가 작업요청서에서 바꾼다.
+                shipmentService.decideDeliveryTypeIfBlank(shipment,
+                        req.channel() != OrderChannel.ONLINE);
             }
 
             lines.add(new SalesEntryResponse.Line(salesNo, product.getId(), product.getCode(),

@@ -112,4 +112,31 @@ class DeliveryTypeAutoDecideIntegrationTest extends IntegrationTestSupport {
         assertThat(o.path("deliveryType").asText()).as("명시적 지정이 자동판정보다 우선해야").isEqualTo("FREIGHT");
         assertThat(o.path("receiverName").asText()).isEqualTo("박화물");
     }
+
+    @Test
+    @DisplayName("★★특약점 사이트 주문(channel=ONLINE)은 담당자정보가 있어도 화물 — J-1")
+    void 온라인채널은_담당자정보가_있어도_화물() {
+        Long id = sellWithSchool("DA005" + SFX, Map.of(
+                "channel", "ONLINE", "receiverName", "김대표", "receiverPhone", "02-111-2222"));
+        JsonNode o = orderById(id);
+
+        assertThat(o.path("deliveryType").asText())
+                .as("§2-10 특약점 사이트에서는 고르지 않는다 → 화물 고정")
+                .isEqualTo("FREIGHT");
+        // ‼️담당자정보는 **그대로 저장된다** — 택배 판정에만 안 쓴다(10/26 §4는 별개 요구사항).
+        assertThat(o.path("receiverName").asText()).isEqualTo("김대표");
+        assertThat(o.path("receiverPhone").asText()).isEqualTo("02-111-2222");
+    }
+
+    @Test
+    @DisplayName("수기 주문(channel=MANUAL)은 기존 규칙 그대로 — 담당자정보 있으면 택배")
+    void 수기채널은_기존규칙() {
+        Long id = sellWithSchool("DA006" + SFX,
+                Map.of("channel", "MANUAL", "receiverName", "홍길동"));
+        JsonNode o = orderById(id);
+
+        assertThat(o.path("deliveryType").asText())
+                .as("매출등록 수기 주문은 §8-6 규칙 유지 — J-1이 바꾼 것은 ONLINE만")
+                .isEqualTo("COURIER");
+    }
 }
