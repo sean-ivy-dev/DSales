@@ -1,0 +1,86 @@
+package com.daesung.sales.product.entity;
+
+import com.daesung.sales.common.entity.BaseEntity;
+import com.daesung.sales.partner.entity.Partner;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
+/**
+ * 특약점 재고현황 — 거래처 × 도서(product_id). 근거: 10/31 클라이언트 회신 §3
+ * (10/26 §6 확정) "로직: 현행 그대로다. 구매·반품·재고를 수기로 입력하고, 출고는
+ * 구매−재고−반품으로 계산해 표시만 한다 … 저장 위치: 도서 키가 매출 product_id로 바뀐다."
+ *
+ * <p>★<b>월 축이 없다.</b> 레거시(DSRE2 {@code tbl_booklist_cnt})와 같은 모양으로,
+ * 조합당 값이 하나이고 다시 입력하면 <b>덮어쓴다</b>(이력을 남기지 않는다 — 레거시도
+ * 안 남긴다). 출고는 이 엔티티에 저장하지 않고 조회 시점에 계산한다
+ * ({@code purchaseQty − stockQty − returnQty}).
+ *
+ * <p>⚠️DSRE2 {@code tbl_booklist_cnt}와는 <b>별개 저장소</b>다 — 도서 키가 DSRE
+ * LST_CD/DTL_CD에서 매출 {@code product_id}로 바뀌어 그대로 이어 쓸 수 없다(10/31 문서
+ * 지시). DSRE 데스크톱이 보는 값과는 지금부터 갈린다 — 기존 입력값 이관은 별도 회신
+ * 대기(§4-3)라 이관 로직을 만들지 않는다.
+ */
+@Entity
+@Table(name = "partner_product_stock")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class PartnerProductStock extends BaseEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "partner_id", nullable = false)
+    private Partner partner;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "product_id", nullable = false)
+    private Product product;
+
+    @Column(name = "purchase_qty", nullable = false)
+    private int purchaseQty;
+
+    @Column(name = "return_qty", nullable = false)
+    private int returnQty;
+
+    @Column(name = "stock_qty", nullable = false)
+    private int stockQty;
+
+    public static PartnerProductStock create(Partner partner, Product product,
+                                              int purchaseQty, int returnQty, int stockQty) {
+        PartnerProductStock e = new PartnerProductStock();
+        e.partner = partner;
+        e.product = product;
+        e.apply(purchaseQty, returnQty, stockQty);
+        return e;
+    }
+
+    /** 현행(레거시)과 같은 덮어쓰기 — null인 항목은 그대로 둔다(부분 입력 허용). */
+    public void apply(Integer purchaseQty, Integer returnQty, Integer stockQty) {
+        if (purchaseQty != null) {
+            this.purchaseQty = purchaseQty;
+        }
+        if (returnQty != null) {
+            this.returnQty = returnQty;
+        }
+        if (stockQty != null) {
+            this.stockQty = stockQty;
+        }
+    }
+
+    /** 출고 = 구매 − 재고 − 반품(저장하지 않고 조회 시 계산, 레거시와 같은 공식). */
+    public int shipQty() {
+        return purchaseQty - stockQty - returnQty;
+    }
+}

@@ -42,6 +42,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class DealerOrderController {
 
     private final DealerOrderService dealerOrderService;
+    private final com.daesung.sales.dealer.service.DealerStockService dealerStockService;
     private final com.daesung.sales.dealer.service.DealerStatementService dealerStatementService;
     private final com.daesung.sales.dealer.service.DealerDocumentService dealerDocumentService;
 
@@ -267,5 +268,36 @@ public class DealerOrderController {
             @Parameter(description = "거래처 코드", example = "A10A195")
             @RequestParam String partnerCode) {
         return dealerDocumentService.download(partnerCode, id);
+    }
+
+    @Operation(summary = "★재고현황 목록", description = """
+            특약점이 가진 교재의 구매·반품·재고를 수기로 관리하는 화면. 근거: 10/31 클라이언트
+            회신 §3(10/26 §6 확정) "로직: 현행 그대로다. 구매·반품·재고를 수기로 입력하고,
+            출고는 구매−재고−반품으로 계산해 표시만 한다".
+
+            · **대상은 교재만**, 그 거래처에 §1 노출 규칙으로 노출되는 도서만 나온다.
+            · `shipQty`(출고)는 **서버가 계산**해서 내려준다 — 저장하지 않는다.
+            · 아직 입력한 적 없는 도서는 전부 0으로 나온다(오류 아님).
+            · **재고 자동 반영은 하지 않는다**(10/31 §9-4, 현행 유지로 종결) — 매출 쪽
+              `inventory` 장부와는 완전히 별개다.""")
+    @GetMapping("/stock")
+    public ApiResponse<java.util.List<com.daesung.sales.dealer.dto.DealerStockRow>> stock(
+            @Parameter(description = "주문 거래처 코드", example = "A10A195")
+            @RequestParam String partnerCode) {
+        return ApiResponse.success(dealerStockService.list(partnerCode));
+    }
+
+    @Operation(summary = "재고현황 입력(구매·반품·재고)", description = """
+            현행과 같은 방식 — **월 축이 없고, 다시 입력하면 덮어쓴다**(이력 안 남음, 레거시와
+            동일). 보내지 않은 항목(null)은 건드리지 않는다 — 재고만 고치고 구매·반품은
+            그대로 둘 수 있다.
+
+            그 거래처에 노출되지 않거나 교재가 아닌 도서는 `PRODUCT_NOT_VISIBLE` 로 거부한다
+            (목록에 없는 도서가 입력되면 화면에 안 보이는 숫자가 쌓인다).""")
+    @PostMapping("/stock")
+    public ApiResponse<com.daesung.sales.dealer.dto.DealerStockRow> saveStock(
+            @Valid @RequestBody com.daesung.sales.dealer.dto.DealerStockUpdateRequest req) {
+        return ApiResponse.success(dealerStockService.save(req.partnerCode(), req.productCode(),
+                req.purchaseQty(), req.returnQty(), req.stockQty()));
     }
 }
