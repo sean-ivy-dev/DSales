@@ -76,7 +76,7 @@ jobs:
           #   step의 env: 에만 적으면 러너에서만 살아 있고 원격에서는 빈 값이 된다 —
           #   docker run -e VAR="" 로 들어가 앱은 기본값으로 조용히 뜬다(2026-09-08에 이걸로 한 번 헤맸다).
           #   env: 에 값을 추가하면 이 줄에도 반드시 같이 추가할 것.
-          envs: REGISTRY,ECR_PW,DB_HOST,DB_SECRET_ID,REDIS_HOST,JWT_SECRET,AWS_REGION,COOKIE_SECURE,COOKIE_SAME_SITE,DSRE_ENABLED,DSRE_URL,DSRE_USERNAME,DSRE_PASSWORD,MAIL_ENABLED,MAIL_HOST,MAIL_PORT,MAIL_USERNAME,MAIL_PASSWORD,MAIL_FROM,MAIL_SSL,MAIL_STARTTLS,MAIL_SSL_TRUST
+          envs: REGISTRY,ECR_PW,DB_HOST,DB_SECRET_ID,REDIS_HOST,JWT_SECRET,AWS_REGION,COOKIE_SECURE,COOKIE_SAME_SITE,DSRE_ENABLED,DSRE_URL,DSRE_USERNAME,DSRE_PASSWORD,MAIL_ENABLED,MAIL_HOST,MAIL_PORT,MAIL_USERNAME,MAIL_PASSWORD,MAIL_FROM,MAIL_SSL,MAIL_STARTTLS,MAIL_SSL_TRUST,DEALER_SITE_API_KEY,DEALER_SITE_WAREHOUSE_CODE
           # ★DB 계정/비번을 -e 로 넣지 않는다. 넣으면 환경변수가 application-aws.yml 보다 우선순위가 높아
           #   Secrets Manager 조회를 무력화한다(=로테이션 장애 재발). DB_HOST/DB_SECRET_ID 만 전달.
           script: |
@@ -136,6 +136,8 @@ jobs:
               -e MAIL_SSL="$MAIL_SSL" \
               -e MAIL_STARTTLS="$MAIL_STARTTLS" \
               -e MAIL_SSL_TRUST="$MAIL_SSL_TRUST" \
+              -e DEALER_SITE_API_KEY="$DEALER_SITE_API_KEY" \
+              -e DEALER_SITE_WAREHOUSE_CODE="$DEALER_SITE_WAREHOUSE_CODE" \
               "$REGISTRY/dsales:latest"
             docker image prune -f
         env:
@@ -178,6 +180,12 @@ jobs:
           MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
           MAIL_FROM: ${{ vars.MAIL_FROM }}
           AWS_REGION: ${{ env.AWS_REGION }}
+          # 특약점 사이트(order.dsdo.co.kr) 서버 간 연동 — 10/26 명세 §10-3. ‼️기본값 없음 —
+          # 비어 있으면 /api/v1/dealer-site/** 전부 401(DealerSiteProperties.enabled()).
+          # 기동을 막는 필수값은 아니다(DB_HOST 등과 달리 missing= 선검사에 넣지 않는다) —
+          # 이 기능 자체가 아직 켜지기 전이라도 나머지 배포는 그대로 성공해야 한다.
+          DEALER_SITE_API_KEY: ${{ secrets.DEALER_SITE_API_KEY }}
+          DEALER_SITE_WAREHOUSE_CODE: ${{ vars.DEALER_SITE_WAREHOUSE_CODE }}
 
       # 배포가 "컨테이너는 떴는데 DB 못 붙음" 상태로 조용히 성공 처리되는 것을 막는다.
       # (2026-08-01 장애가 며칠간 안 잡힌 이유 = 기동 검증이 없었음)
