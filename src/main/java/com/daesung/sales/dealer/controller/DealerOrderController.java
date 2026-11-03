@@ -68,6 +68,64 @@ public class DealerOrderController {
         return ApiResponse.success(dealerOrderService.accept(req));
     }
 
+    @Operation(summary = "★내 주문 목록(조회·수정·삭제 가능 여부 포함)", description = """
+            그 거래처가 넣은 주문 목록. 10/26 §2-1 "'신청완료'를 '접수완료'로" —
+            진행상태 라벨은 이미 정본 6단계 명칭 그대로다(`progressStateName`).
+
+            · 접수완료(`progressState=RECEIVED`)인 주문만 **수정·삭제**가 됩니다(§2-3).
+              G~D 는 이 목록으로 **조회만** 됩니다 — 사이트 쪽에서 그 상태면 수정·삭제
+              버튼을 잠그고, 눌렀을 때는 아래 두 API 가 돌려주는 문구를 그대로 보여주면
+              §2-4 "주문 건의 수정 및 취소를 원하시는 경우 담당자에게 확인 바랍니다"가 된다.
+            · 응답 모양은 백오피스 주문조회(`GET /orders`)와 같은 `SalesOrderRow` 다.""")
+    @GetMapping("/orders")
+    public ApiResponse<com.daesung.sales.common.response.PageResponse<
+            com.daesung.sales.order.dto.SalesOrderRow>> myOrders(
+            @Parameter(description = "주문 거래처 코드", example = "A10A195")
+            @RequestParam String partnerCode,
+            @Parameter(description = "주문일 시작. 미지정 시 올해 1월 1일")
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @Parameter(description = "주문일 종료. 미지정 시 오늘")
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @Parameter(description = "진행상태(미지정=전체)")
+            @RequestParam(required = false) com.daesung.sales.dsre.gateway.OrderState state,
+            @Parameter(description = "페이지(0부터)") @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "페이지 크기(최대 200)") @RequestParam(defaultValue = "50") int size) {
+        LocalDate from = (fromDate != null) ? fromDate : LocalDate.now().withDayOfYear(1);
+        LocalDate to = (toDate != null) ? toDate : LocalDate.now();
+        return ApiResponse.success(com.daesung.sales.common.response.PageResponse.of(
+                dealerOrderService.list(partnerCode, from, to, state, page, size)));
+    }
+
+    @Operation(summary = "★내 주문 수정 — 접수완료일 때만", description = """
+            근거: 10/26 §2-3 "**A(접수완료)에서만** 수정·삭제할 수 있다. G~C는 조회만 된다."
+
+            · 본문은 `POST /orders` 와 **같다**. 줄을 통째로 바꾼다(등록번호·거래순번 유지).
+            · 접수완료가 아니거나 **본인 거래처 주문이 아니면 같은 문구**로 거부한다 —
+              "주문 건의 수정 및 취소를 원하시는 경우 담당자에게 확인 바랍니다"(§2-4).
+              남의 거래처 주문인지 여부를 알려주지 않는다(존재 자체를 숨긴다).""")
+    @org.springframework.web.bind.annotation.PutMapping("/orders/{orderNo}")
+    public ApiResponse<SalesEntryResponse> edit(
+            @Parameter(description = "주문번호", example = "E-20261102-7")
+            @PathVariable String orderNo,
+            @Valid @RequestBody DealerOrderRequest req) {
+        return ApiResponse.success(dealerOrderService.edit(orderNo, req));
+    }
+
+    @Operation(summary = "★내 주문 삭제 — 접수완료일 때만", description = """
+            근거: 10/26 §2-2 "'취소' 버튼 — 화면 예시의 '취소'는 실제로 **삭제** 동작이다"·
+            §2-3·§2-4(위 수정과 같은 규칙).
+
+            줄 전부와, 발송 전이면 묶인 작업요청서까지 함께 지운다(백오피스 삭제와 같은 로직).
+            논리삭제라 이력에 남는다.""")
+    @org.springframework.web.bind.annotation.DeleteMapping("/orders/{orderNo}")
+    public ApiResponse<Integer> delete(
+            @Parameter(description = "주문번호", example = "E-20261102-7")
+            @PathVariable String orderNo,
+            @Parameter(description = "주문 거래처 코드", example = "A10A195")
+            @RequestParam String partnerCode) {
+        return ApiResponse.success(dealerOrderService.delete(orderNo, partnerCode));
+    }
+
     @Operation(summary = "발송완료 주문 목록(송장 조회·거래명세서 공통)", description = """
             그 거래처의 **발송완료** 주문을 내린다. 송장 메뉴(10/26 §4)와 거래명세서 메뉴(§5)가
             **같은 목록**을 본다 — 둘 다 "내 발송완료 주문"이다.

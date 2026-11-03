@@ -143,7 +143,7 @@ public abstract class IntegrationTestSupport {
      *
      * @param key 보낼 키. 틀린 키·null 로 거부를 검증할 때 바꿔 넣는다
      */
-    protected JsonNode postAsDealerSite(String path, Object body, String key) {
+    protected JsonNode dealerSite(HttpMethod method, String path, Object body, String key) {
         HttpHeaders h = new HttpHeaders();
         h.setContentType(MediaType.APPLICATION_JSON);
         if (key != null) {
@@ -155,7 +155,7 @@ public abstract class IntegrationTestSupport {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        ResponseEntity<String> resp = rest.exchange("/api/v1" + path, HttpMethod.POST,
+        ResponseEntity<String> resp = rest.exchange("/api/v1" + path, method,
                 new org.springframework.http.HttpEntity<>(json, h), String.class);
         try {
             return om.readTree(resp.getBody());
@@ -164,19 +164,21 @@ public abstract class IntegrationTestSupport {
         }
     }
 
+    protected JsonNode postAsDealerSite(String path, Object body, String key) {
+        return dealerSite(HttpMethod.POST, path, body, key);
+    }
+
     /** 특약점 사이트 서버 간 호출(GET). {@link #postAsDealerSite} 와 같은 규칙이다. */
     protected JsonNode getAsDealerSite(String path, String key) {
-        HttpHeaders h = new HttpHeaders();
-        if (key != null) {
-            h.add("X-Dealer-Site-Key", key);
-        }
-        ResponseEntity<String> resp = rest.exchange("/api/v1" + path, HttpMethod.GET,
-                new org.springframework.http.HttpEntity<>(null, h), String.class);
-        try {
-            return om.readTree(resp.getBody());
-        } catch (Exception e) {
-            throw new RuntimeException("응답 파싱 실패: " + resp.getBody(), e);
-        }
+        return dealerSite(HttpMethod.GET, path, null, key);
+    }
+
+    protected JsonNode putAsDealerSite(String path, Object body, String key) {
+        return dealerSite(HttpMethod.PUT, path, body, key);
+    }
+
+    protected JsonNode deleteAsDealerSite(String path, String key) {
+        return dealerSite(HttpMethod.DELETE, path, null, key);
     }
 
     /** 특약점 사이트 서버 간 호출(GET, 바이너리). PDF 다운로드 검증용. */

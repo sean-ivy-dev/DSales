@@ -6,6 +6,9 @@ import com.daesung.sales.dealer.dto.DealerOrderRequest;
 import com.daesung.sales.dsre.gateway.OrderState;
 import com.daesung.sales.logistics.entity.Shipment;
 import com.daesung.sales.logistics.repository.ShipmentRepository;
+import com.daesung.sales.order.dto.SalesOrderRow;
+import com.daesung.sales.order.service.OrderProgress;
+import com.daesung.sales.order.service.SalesOrderQueryService;
 import com.daesung.sales.partner.entity.Partner;
 import com.daesung.sales.partner.repository.PartnerRepository;
 import com.daesung.sales.product.entity.Product;
@@ -21,6 +24,9 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,33 +45,130 @@ import org.springframework.transaction.annotation.Transactional;
  * "A(접수완료)에서만 수정·삭제할 수 있다"를 요구하므로 그 상태가 실제로 있어야 한다.
  * 수기 등록(매출등록 화면)은 본사가 직접 넣은 것이라 접수 단계를 지나 <b>상품준비중</b>에서
  * 시작한다 — 그래서 수기 쪽에는 이 처리를 하지 않는다.
+ *
+ * <h3>조회·수정·삭제도 이 클래스가 한다(10/26 §2)</h3>
+ * ★<b>처음엔 접수(만들기)만 만들고 이걸 빠뜨렸다</b> — "특약점 사이트는 레포가 없어 범위
+ * 밖"이라고 치웠는데, 10/27 §1 이 "진행상태 제한·삭제 표시(§2)는 <b>새 탭 주문에 적용한다</b>"
+ * 고 명시한다. 새 탭 주문은 <b>우리 시스템에 저장</b>되므로, 사이트가 못 만들어도 사이트가
+ * 부를 <b>API는 우리 쪽에 있어야</b> 한다(2026-11-03 전수 재대조로 발견).
+ *
+ * <p>§2-3 — "<b>A(접수완료)에서만</b> 수정·삭제할 수 있다. G~C는 조회만 된다."
+ * §2-4 — 그 외 상태에서 시도하면 <b>"주문 건의 수정 및 취소를 원하시는 경우 담당자에게
+ * 확인 바랍니다."</b>
+ * §2-6 — "수정·삭제 SQL에 STATE = 'A' 조건을 넣는다. <b>영향 행이 0이면 거부</b>한다."
+ *
+ * <p>★<b>남의 거래처 주문은 건드릴 수 없다.</b> 사이트 인증은 공유 키 하나뿐이고 어느
+ * 거래처인지는 요청 바디가 말한다 — 그 말을 그대로 믿으면 다른 특약점의 주문을 고치거나
+ * 지울 수 있다. 그래서 요청의 {@code partnerCode} 가 그 주문의 실제 거래처와
+ * <b>같은지</b>를 매번 확인한다(없는 주문과 같은 메시지로 답한다 — PDF·거래명세서와 같은 규칙).
  */
 @Service
 @RequiredArgsConstructor
 public class DealerOrderService {
+
+    /** §2-4 알럿 문구. 접수완료가 아닐 때 수정·삭제를 시도하면 이 메시지로 거부한다. */
+    private static final String EDIT_LOCKED_MESSAGE =
+            "주문 건의 수정 및 취소를 원하시는 경우 담당자에게 확인 바랍니다.";
 
     private final SaleService saleService;
     private final PartnerRepository partnerRepository;
     private final ProductRepository productRepository;
     private final WarehouseRepository warehouseRepository;
     private final ShipmentRepository shipmentRepository;
+    private final SalesOrderQueryService salesOrderQueryService;
     private final com.daesung.sales.dealer.config.DealerSiteProperties properties;
 
     @Transactional
     public SalesEntryResponse accept(DealerOrderRequest req) {
-        Partner partner = partnerRepository.findByCode(req.partnerCode())
-                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT,
-                        "거래처를 찾을 수 없습니다: " + req.partnerCode()));
+        Partner partner = requirePartner(req.partnerCode());
         LocalDate date = (req.orderDate() == null) ? LocalDate.now() : req.orderDate();
-        Warehouse warehouse = defaultWarehouse();
+        SalesEntryRequest entry = buildEntry(partner, date, defaultWarehouse().getId(), req);
 
+        SalesEntryResponse res = saleService.createEntries(entry);
+        markReceived(res.entryNo());
+        return res;
+    }
+
+    /**
+     * 본인 주문 목록(§2-1 "수기 주문과 온라인 주문을 함께 보여준다" 의 특약점 쪽 반사 — 자기
+     * 것만 본다). 상태 라벨은 {@link SalesOrderRow#progressStateName} 그대로 쓰면 된다
+     * (정본 6단계 명칭과 이미 같다).
+     */
+    @Transactional(readOnly = true)
+    public Page<SalesOrderRow> list(String partnerCode, LocalDate from, LocalDate to,
+                                    com.daesung.sales.dsre.gateway.OrderState state,
+                                    int page, int size) {
+        requirePartner(partnerCode);
+        Pageable pageable = PageRequest.of(Math.max(0, page), Math.min(Math.max(1, size), 200));
+        return salesOrderQueryService.orders(from, to, null, partnerCode, null, state, null, pageable);
+    }
+
+    /**
+     * 본인 주문 수정(§2-3 "A 에서만"). 줄을 통째로 바꾼다 — 규칙은
+     * {@link SaleService#replaceEntry} 와 같다(등록번호·거래순번 유지, 지우고 다시 넣기).
+     */
+    @Transactional
+    public SalesEntryResponse edit(String orderNo, DealerOrderRequest req) {
+        Partner partner = requirePartner(req.partnerCode());
+        requireOwnedAndReceived(orderNo, partner);
+
+        SalesEntryRequest entry = buildEntry(partner, orderDateOf(orderNo, req), defaultWarehouse().getId(), req);
+        return saleService.replaceEntry(orderNo, entry);
+    }
+
+    /** 본인 주문 삭제(§2-3·§2-9와 같은 규칙, 다만 거부 문구는 §2-4 전용). */
+    @Transactional
+    public int delete(String orderNo, String partnerCode) {
+        Partner partner = requirePartner(partnerCode);
+        requireOwnedAndReceived(orderNo, partner);
+        return saleService.deleteEntry(orderNo, "특약점 사이트 삭제");
+    }
+
+    /**
+     * 그 주문이 <b>이 거래처 것</b>이고 <b>접수완료</b> 상태인지 확인한다. 어느 쪽이든
+     * 아니면 <b>같은 메시지</b>로 거부한다 — "남의 주문이라 거부"와 "상태가 달라 거부"를
+     * 구분해서 알려주면, 전자가 "그 주문번호가 존재한다"는 사실을 알려주게 된다.
+     */
+    private void requireOwnedAndReceived(String orderNo, Partner partner) {
+        if (orderNo == null || orderNo.startsWith("#")) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, EDIT_LOCKED_MESSAGE);
+        }
+        List<Shipment> shipments = shipmentRepository.findByOrderKeys(List.of(orderNo));
+        boolean owned = !shipments.isEmpty() && shipments.stream()
+                .allMatch(s -> s.getPartner() != null
+                        && s.getPartner().getId().equals(partner.getId()));
+        if (!owned) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, EDIT_LOCKED_MESSAGE);
+        }
+        if (OrderProgress.groupState(shipments) != OrderState.RECEIVED) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, EDIT_LOCKED_MESSAGE);
+        }
+    }
+
+    /** 수정 때 거래일자를 바꾸면 거래순번 범위가 달라진다 — 요청에 없으면 원래 날짜를 쓴다. */
+    private LocalDate orderDateOf(String orderNo, DealerOrderRequest req) {
+        if (req.orderDate() != null) {
+            return req.orderDate();
+        }
+        return shipmentRepository.findByOrderKeys(List.of(orderNo)).stream()
+                .findFirst().map(Shipment::getTradeDate).orElseGet(LocalDate::now);
+    }
+
+    /**
+     * {@link DealerOrderRequest} → {@link SalesEntryRequest}. 접수·수정이 <b>같은 변환</b>을
+     * 쓴다 — 복붙하면 둘이 다르게 동작하기 시작한다.
+     *
+     * <p>★가격·창고·발송구분 칸은 전부 비워 둔다 — 10/26 §1 "매출 금액은 매출프로그램 기준으로
+     * 계산한다", §2-10 "발송구분은 특약점 사이트에서 고르지 않는다". 담당자 정보(§4)만
+     * "보낸 값 우선, 없으면 거래처 마스터"로 채운다.
+     */
+    private SalesEntryRequest buildEntry(Partner partner, LocalDate date, Long warehouseId,
+                                         DealerOrderRequest req) {
         List<SalesEntryRequest.Item> items = new ArrayList<>();
         for (DealerOrderRequest.Item i : req.items()) {
             Product product = productRepository.findByCode(i.productCode())
                     .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT,
                             "도서를 찾을 수 없습니다: " + i.productCode()));
-            // ★가격 칸은 전부 null 로 넘긴다 — 서버가 거래처별 단가(V19) → 마스터 순으로 정한다
-            //   (10/26 §1 "매출 금액은 매출프로그램 기준으로 계산한다").
             items.add(new SalesEntryRequest.Item(
                     product.getId(), ShipmentType.NORMAL_SHIP,
                     null, null, null,          // 정가·공급률·할인액 — 서버가 정한다
@@ -79,7 +182,7 @@ public class DealerOrderService {
 
         // onlySales·발송구분은 비워 둔다 — §2-10 "특약점 사이트에서는 고르지 않는다"(택배/화물
         // 선택 얘기다). 발송구분은 등록 쪽이 "아무것도 없으면 화물"로 정한다
-        // (decideDeliveryTypeIfBlank — 다만 아래 담당자정보가 채워지면 택배로 자동 판정된다,
+        // (decideDeliveryTypeIfBlank — 다만 담당자정보가 채워지면 택배로 자동 판정된다,
         // §8-6 "담당자명·연락처가 있을 때만 택배").
         //
         // ‼️§2-10 과 §4 "담당자 정보"는 **다른 요구사항**이다 — 전자는 발송구분(화물/택배)
@@ -88,17 +191,19 @@ public class DealerOrderService {
         //
         // ★접수경로는 **서버가 ONLINE 으로 박는다**(프론트 I-2) — 요청으로 바꿀 수 없다.
         //   사이트에서 온 주문을 수기로 위장할 수 있으면 §2-1 의 "함께 보여주고"가 무의미해진다.
-        SalesEntryRequest entry = new SalesEntryRequest(
-                date, partner.getId(), warehouse.getId(),
+        return new SalesEntryRequest(
+                date, partner.getId(), warehouseId,
                 null, null,
                 receiverOrDefault(req.receiverName(), partner.getBossName()),
                 receiverOrDefault(req.receiverPhone(), partner.getTel1()),
                 receiverOrDefault(req.receiverEmail(), partner.getEmail1()),
                 com.daesung.sales.sale.entity.OrderChannel.ONLINE, items);
-        SalesEntryResponse res = saleService.createEntries(entry);
+    }
 
-        markReceived(res.entryNo());
-        return res;
+    private Partner requirePartner(String partnerCode) {
+        return partnerRepository.findByCode(partnerCode)
+                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT,
+                        "거래처를 찾을 수 없습니다: " + partnerCode));
     }
 
     /**
@@ -118,21 +223,6 @@ public class DealerOrderService {
     }
 
     /**
-     * 특약점 주문이 나갈 <b>물류창고</b>. 특약점은 창고를 고르지 않으므로 서버가 정한다.
-     *
-     * <p>순서가 중요하다 —
-     * <ol>
-     *   <li>설정({@code daesung.dealer-site.warehouse-code})이 있으면 그 창고. 운영은 이쪽이다.</li>
-     *   <li>없으면 실물재고 물류창고(MAIN·사용중)가 <b>하나일 때만</b> 그것.</li>
-     *   <li>둘 이상인데 설정이 없으면 <b>거부하고 사유를 말한다</b>.</li>
-     * </ol>
-     *
-     * <p>‼️2번을 "여러 개 중 아무거나"로 하지 않는 이유: 재고가 엉뚱한 창고에서 빠지고
-     * 수불부가 조용히 틀어진다. 틀린 답을 주는 것보다 못 받는 게 낫다.
-     * ★처음엔 2번만 뒀는데, 물류창고가 둘인 환경에서 <b>모든 특약점 주문이 실패</b>했다 —
-     * 설정으로 못 박을 길이 반드시 있어야 한다.
-     */
-    /**
      * 담당자 정보 — "보낸 값이 있으면 그대로, 없으면 거래처 마스터 기본값"(10/26 §4).
      *
      * <p>★<b>레거시 매핑을 실측으로 확인했다</b>(DSRE2 {@code tbl_cust_info} DDL — 담당자명에
@@ -148,6 +238,21 @@ public class DealerOrderService {
         return (sent != null) ? sent : masterDefault;
     }
 
+    /**
+     * 특약점 주문이 나갈 <b>물류창고</b>. 특약점은 창고를 고르지 않으므로 서버가 정한다.
+     *
+     * <p>순서가 중요하다 —
+     * <ol>
+     *   <li>설정({@code daesung.dealer-site.warehouse-code})이 있으면 그 창고. 운영은 이쪽이다.</li>
+     *   <li>없으면 실물재고 물류창고(MAIN·사용중)가 <b>하나일 때만</b> 그것.</li>
+     *   <li>둘 이상인데 설정이 없으면 <b>거부하고 사유를 말한다</b>.</li>
+     * </ol>
+     *
+     * <p>‼️2번을 "여러 개 중 아무거나"로 하지 않는 이유: 재고가 엉뚱한 창고에서 빠지고
+     * 수불부가 조용히 틀어진다. 틀린 답을 주는 것보다 못 받는 게 낫다.
+     * ★처음엔 2번만 뒀는데, 물류창고가 둘인 환경에서 <b>모든 특약점 주문이 실패</b>했다 —
+     * 설정으로 못 박을 길이 반드시 있어야 한다.
+     */
     private Warehouse defaultWarehouse() {
         if (properties.warehouseCode() != null) {
             return warehouseRepository.findByCode(properties.warehouseCode())
