@@ -42,8 +42,10 @@ class DealerOrderSelfServiceIntegrationTest extends IntegrationTestSupport {
         token();
         Long sup = createId("/masters/clients",
                 Map.of("code", "DXS" + SFX, "name", "인쇄소", "type", "NORMAL"));
-        createId("/masters/clients", Map.of("code", MINE, "name", "본인거래처", "type", "NORMAL"));
-        createId("/masters/clients", Map.of("code", OTHER, "name", "남의거래처", "type", "NORMAL"));
+        Long mineId = createId("/masters/clients",
+                Map.of("code", MINE, "name", "본인거래처", "type", "NORMAL"));
+        Long otherId = createId("/masters/clients",
+                Map.of("code", OTHER, "name", "남의거래처", "type", "NORMAL"));
         wh = findOrCreateDealerWarehouse();
 
         Map<String, Object> b = new HashMap<>();
@@ -55,7 +57,13 @@ class DealerOrderSelfServiceIntegrationTest extends IntegrationTestSupport {
         b.put("catCode", "X2097A01");
         b.put("catName", "본인주문검증");
         b.put("salesDivision", "교재");
+        // ★노출 조건(10/26 §3)을 깔아 둔다 — 없으면 접수가 PRODUCT_NOT_VISIBLE 로 막힌다.
+        b.put("webVisible", true);
         book = createId("/masters/products", b);
+        for (Long pid : List.of(mineId, otherId)) {
+            put("/masters/partner-supply-rates/" + pid + "/TEXTBOOK",
+                    Map.of("supplyRate", 70, "webVisible", true, "useYn", true));
+        }
 
         assertThat(post("/stock/inbound", Map.of(
                 "processedDate", "2097-01-05", "supplierClientId", sup,

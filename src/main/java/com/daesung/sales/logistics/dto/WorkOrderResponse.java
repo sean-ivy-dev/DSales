@@ -60,6 +60,10 @@ public record WorkOrderResponse(
         @Schema(description = "수령인 — 정본 26p \"'택배' 선택 시 담당자 정보가 노출\"") String receiverName,
         @Schema(description = "수령인 연락처") String receiverPhone,
         @Schema(description = "수령인 이메일") String receiverEmail,
+        @Schema(description = """
+                배송지 우편번호 — 특약점팀 요청 2026-11-03 §2. 주문별로 저장된 값이다
+                (거래처·학교 마스터 주소가 아니다).""") String zipCode,
+        @Schema(description = "배송지 주소 — 이 주소로 나간다") String address,
         @Schema(description = "택배사") String courierName,
         @Schema(description = """
                 송장번호 — **1번 박스**의 것(기존 화면 호환용).
@@ -84,6 +88,10 @@ public record WorkOrderResponse(
     @Schema(name = "WorkOrderLine")
     public record Line(
             @Schema(description = "분류코드") String catCode,
+            @Schema(description = """
+                    세부구분 — 특약점팀 요청 2026-11-03 §4. 사이트 화면 표시가
+                    「세부구분 / 분류명 / 도서명」이다.""") String salesDivision,
+            @Schema(description = "분류명") String catName,
             @Schema(description = "도서코드") String productCode,
             @Schema(description = "도서명") String productName,
             @Schema(description = "회차") Integer bookRound,

@@ -73,6 +73,7 @@ public class DealerOrderService {
     private final SaleService saleService;
     private final PartnerRepository partnerRepository;
     private final ProductRepository productRepository;
+    private final DealerProductService dealerProductService;
     private final WarehouseRepository warehouseRepository;
     private final ShipmentRepository shipmentRepository;
     private final SalesOrderQueryService salesOrderQueryService;
@@ -114,6 +115,24 @@ public class DealerOrderService {
 
         SalesEntryRequest entry = buildEntry(partner, orderDateOf(orderNo, req), defaultWarehouse().getId(), req);
         return saleService.replaceEntry(orderNo, entry);
+    }
+
+    /**
+     * 신청 화면 노출 도서(10/26 §3). 판정은 {@link DealerProductService} 한 곳에만 있고,
+     * 접수·수정의 거부 검증도 같은 것을 쓴다.
+     */
+    @Transactional(readOnly = true)
+    public List<com.daesung.sales.dealer.dto.DealerProductRow> visibleProducts(String partnerCode) {
+        return dealerProductService.visible(requirePartner(partnerCode).getId());
+    }
+
+    /**
+     * 담당자 정보 기본값(10/26 §4). ★<b>{@code buildEntry} 의 기본값과 같은 출처</b>를 쓴다 —
+     * 화면에 미리 채워 보여준 값과 비워 보냈을 때 저장되는 값이 갈리면 안 된다.
+     */
+    @Transactional(readOnly = true)
+    public com.daesung.sales.dealer.dto.DealerContactResponse contact(String partnerCode) {
+        return com.daesung.sales.dealer.dto.DealerContactResponse.from(requirePartner(partnerCode));
     }
 
     /** 본인 주문 삭제(§2-3·§2-9와 같은 규칙, 다만 거부 문구는 §2-4 전용). */
@@ -180,6 +199,14 @@ public class DealerOrderService {
                     req.memo()));
         }
 
+        // ★노출되지 않는 도서는 거부한다(특약점팀 요청 2026-11-03 §1 "접수·수정도 같은 계산으로").
+        //   목록(GET /dealer-site/products)과 **같은 판정**을 쓴다 — 따로 두면
+        //   "목록엔 없는데 주문은 되는" 구멍이나 그 반대가 생긴다.
+        //   ‼️**도서 존재 확인(위 루프) 뒤에** 본다 — 순서를 바꾸면 아예 없는 도서코드에도
+        //     "노출되지 않는 도서"라고 답해, 담당자가 마스터를 뒤지게 된다.
+        dealerProductService.assertAllVisible(partner.getId(),
+                req.items().stream().map(DealerOrderRequest.Item::productCode).toList());
+
         // onlySales·발송구분은 비워 둔다 — §2-10 "특약점 사이트에서는 고르지 않는다"(택배/화물
         // 선택 얘기다). 발송구분은 등록 쪽이 정하는데, **이 경로(channel=ONLINE)는 담당자정보가
         // 있어도 화물**이다(발주처 추가요청 J-1 2026-11-03). 아래 §4대로 담당자정보를 거래처
@@ -199,13 +226,23 @@ public class DealerOrderService {
                 receiverOrDefault(req.receiverName(), partner.getBossName()),
                 receiverOrDefault(req.receiverPhone(), partner.getTel1()),
                 receiverOrDefault(req.receiverEmail(), partner.getEmail1()),
+                // 배송지는 마스터 기본값이 없다 — 사이트가 학교 주소를 미리 채워 보낸다(§2).
+                req.zipCode(), req.address(),
                 com.daesung.sales.sale.entity.OrderChannel.ONLINE, items);
     }
 
+    /**
+     * 사이트가 보낸 거래처코드(DSRE 매출코드 {@code tbl_cust_info.MACHUL_CD})로 우리 거래처를 찾는다.
+     *
+     * <p>★못 찾으면 {@link ErrorCode#PARTNER_NOT_LINKED} 다 — {@code INVALID_INPUT} 이 아니다.
+     * 사이트가 이 상황에만 "매출 거래처 연결이 되어 있지 않습니다" 안내를 띄우는데,
+     * 예전엔 문구로 구분하고 있어서 우리가 메시지만 다듬어도 그 안내가 깨졌다
+     * (특약점팀 전달 2026-11-03 §5 요청).
+     */
     private Partner requirePartner(String partnerCode) {
         return partnerRepository.findByCode(partnerCode)
-                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT,
-                        "거래처를 찾을 수 없습니다: " + partnerCode));
+                .orElseThrow(() -> new BusinessException(ErrorCode.PARTNER_NOT_LINKED,
+                        "매출 거래처 연결이 되어 있지 않습니다: " + partnerCode));
     }
 
     /**

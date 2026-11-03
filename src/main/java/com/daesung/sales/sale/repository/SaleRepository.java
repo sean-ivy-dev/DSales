@@ -1350,7 +1350,9 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
                    coalesce(s.schoolCode, '') as schoolCode,
                    coalesce(s.tradeClass, p.salesDivision, '') as tradeClass,
                    coalesce(s.entryNo, '') as entryNo,
-                   p.catCode as catCode, p.code as productCode, p.name as productName,
+                   p.catCode as catCode, p.catName as catName,
+                   p.salesDivision as salesDivision,
+                   p.code as productCode, p.name as productName,
                    s.bookRound as bookRound,
                    s.unitPrice as unitPrice, s.supplyRate as supplyRate,
                    sum(s.qty) as qty, sum(s.supplyAmount) as amount
@@ -1359,7 +1361,8 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
                and s.salesCategory <> com.daesung.sales.salestype.entity.SalesCategory.RETURN
                and s.salesDate between :from and :to
              group by s.salesDate, s.partner.id, coalesce(s.schoolCode, ''), coalesce(s.tradeClass, p.salesDivision, ''), coalesce(s.entryNo, ''),
-                      p.catCode, p.code, p.name, s.bookRound, s.unitPrice, s.supplyRate
+                      p.catCode, p.catName, p.salesDivision,
+                      p.code, p.name, s.bookRound, s.unitPrice, s.supplyRate
              order by p.catCode, p.code
             """)
     List<WorkOrderLineAgg> workOrderLines(@Param("from") LocalDate from, @Param("to") LocalDate to);

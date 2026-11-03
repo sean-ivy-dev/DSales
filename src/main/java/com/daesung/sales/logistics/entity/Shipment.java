@@ -135,6 +135,19 @@ public class Shipment extends BaseEntity {
     @Column(name = "receiver_email", length = 100)
     private String receiverEmail;
 
+    /**
+     * 배송지 우편번호 — 특약점팀 요청 2026-11-03 §2. 수령인 3칸과 <b>같은 축</b>이다
+     * (그 발송 건의 배송 정보). 거래처·학교 마스터 주소와 다를 수 있다 —
+     * 사이트가 학교 주소를 미리 채워 주고 사용자가 고칠 수 있게 되어 있다.
+     * ‼️마스터 주소를 고치는 것이 아니다(§4와 같은 원칙).
+     */
+    @Column(name = "zip_code", length = 7)
+    private String zipCode;
+
+    /** 배송지 주소 — {@link #zipCode} 와 같은 축. */
+    @Column(name = "address", length = 300)
+    private String address;
+
     /** 택배사(예: CJ대한통운). 수기·엑셀 일괄 입력. ⚠️택배사 API 연동은 하지 않는다. */
     @Column(name = "courier_name", length = 30)
     private String courierName;
@@ -362,6 +375,29 @@ public class Shipment extends BaseEntity {
         }
         if (isBlank(this.receiverEmail) && email != null && !email.isBlank()) {
             this.receiverEmail = email.trim();
+            changed = true;
+        }
+        return changed;
+    }
+
+    /**
+     * 배송지(우편번호·주소)를 <b>비어 있을 때만</b> 채운다 — 특약점팀 요청 2026-11-03 §2.
+     *
+     * <p>★{@link #fillDeliveryIfBlank} 와 <b>같은 규칙·다른 축</b>이라 메서드를 따로 둔다.
+     * 저쪽은 발송구분 기본값 판정({@link #decideDeliveryTypeIfBlank})과 순서가 얽혀 있는데,
+     * 배송지는 그 판정과 아무 상관이 없다 — 한 메서드에 밀어넣으면 그 미묘한 순서 규칙에
+     * 배송지까지 딸려 들어간다.
+     *
+     * <p>주문 수정(PUT)에서 배송지를 안 보내면 <b>이미 저장된 값이 유지된다</b>(덮지 않는다).
+     */
+    public boolean fillAddressIfBlank(String zipCode, String address) {
+        boolean changed = false;
+        if (isBlank(this.zipCode) && zipCode != null && !zipCode.isBlank()) {
+            this.zipCode = zipCode.trim();
+            changed = true;
+        }
+        if (isBlank(this.address) && address != null && !address.isBlank()) {
+            this.address = address.trim();
             changed = true;
         }
         return changed;

@@ -82,6 +82,17 @@ public record SalesEntryRequest(
         String receiverEmail,
 
         @Schema(description = """
+                배송지 우편번호 — 특약점 사이트 신청 화면이 보낸다(요청 2026-11-03 §2).
+                비워 보내면 기존 값을 유지한다(수정 때 덮지 않는다).""", example = "06236")
+        String zipCode,
+
+        @Schema(description = """
+                배송지 주소 — 학교 주소 기본값을 사용자가 고칠 수 있다. 거래처·학교 마스터
+                주소를 고치는 것이 아니라 **그 주문에만** 저장된다.""",
+                example = "서울 강남구 테헤란로 1")
+        String address,
+
+        @Schema(description = """
                 접수경로 — `ONLINE`(특약점 사이트) / `MANUAL`(수기). **안 보내면 수기**다.
                 근거: 10/27 §2-1 "수기 주문과 온라인(특약점) 주문을 **함께** 보여주고".
                 ‼️특약점 접수(`POST /dealer-site/orders`)는 서버가 ONLINE 으로 박으므로

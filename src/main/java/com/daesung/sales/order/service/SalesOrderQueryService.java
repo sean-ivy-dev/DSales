@@ -141,6 +141,13 @@ public class SalesOrderQueryService {
         String schoolName = head.schoolName();
         String tradeClass = head.tradeClass();
         DeliveryType deliveryType = head.deliveryType();
+        // 담당자·배송지는 발송 건 단위 값이다. 한 주문이 학교·분류로 여러 건에 갈릴 수 있어,
+        // 건마다 값이 다르면 null 로 둔다 — 아무 하나를 골라 내려주면 화면이 그걸 전체 값으로 믿는다.
+        String receiverName = head.receiverName();
+        String receiverPhone = head.receiverPhone();
+        String receiverEmail = head.receiverEmail();
+        String zipCode = head.zipCode();
+        String address = head.address();
         boolean allDeleted = true;
         long qty = 0;
         long amount = 0;
@@ -170,6 +177,21 @@ public class SalesOrderQueryService {
             if (!java.util.Objects.equals(deliveryType, w.deliveryType())) {
                 deliveryType = null;
             }
+            if (!java.util.Objects.equals(receiverName, w.receiverName())) {
+                receiverName = null;
+            }
+            if (!java.util.Objects.equals(receiverPhone, w.receiverPhone())) {
+                receiverPhone = null;
+            }
+            if (!java.util.Objects.equals(receiverEmail, w.receiverEmail())) {
+                receiverEmail = null;
+            }
+            if (!java.util.Objects.equals(zipCode, w.zipCode())) {
+                zipCode = null;
+            }
+            if (!java.util.Objects.equals(address, w.address())) {
+                address = null;
+            }
             if (w.tradeDate() != null && (date == null || w.tradeDate().isBefore(date))) {
                 date = w.tradeDate();
             }
@@ -185,6 +207,7 @@ public class SalesOrderQueryService {
                 ch.name(), ch.label(),
                 allDeleted,
                 deliveryType, (deliveryType == null) ? null : deliveryType.label(),
+                receiverName, receiverPhone, receiverEmail, zipCode, address,
                 qty, amount, shipmentIds, new ArrayList<>(reqCds), lines);
     }
 

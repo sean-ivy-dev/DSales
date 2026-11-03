@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Size;
 import jakarta.validation.constraints.Positive;
 import java.time.LocalDate;
 import java.util.List;
@@ -63,6 +64,18 @@ public record DealerOrderRequest(
         @Schema(description = "담당자 이메일(선택). 규칙은 `receiverName` 과 같다",
                 example = "teacher@example.com")
         String receiverEmail,
+
+        @Schema(description = """
+                배송지 우편번호 — 선택. 특약점팀 요청 2026-11-03 §2.
+                신청 화면이 학교 주소를 미리 채우고 사용자가 고칠 수 있게 되어 있다.""",
+                example = "06236")
+        @Size(max = 7) String zipCode,
+
+        @Schema(description = """
+                배송지 주소 — 선택. **그 주문에만** 저장된다(거래처·학교 마스터는 안 바뀐다).
+                작업요청서가 이 주소로 나간다. 수정(PUT)에서 비워 보내면 기존 값을 유지한다.""",
+                example = "서울 강남구 테헤란로 1")
+        @Size(max = 300) String address,
 
         @Schema(description = "주문 도서", requiredMode = Schema.RequiredMode.REQUIRED)
         @NotEmpty @Valid List<Item> items

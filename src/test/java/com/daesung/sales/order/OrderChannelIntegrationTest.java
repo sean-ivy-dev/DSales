@@ -57,7 +57,11 @@ class OrderChannelIntegrationTest extends IntegrationTestSupport {
         b.put("catCode", "O2098A01");
         b.put("catName", "접수경로검증");
         b.put("salesDivision", "교재");
+        // ★특약점 접수는 노출되는 도서만 받는다(10/26 §3) — Web게시 + 거래처×대분류 매핑 필요.
+        b.put("webVisible", true);
         book = createId("/masters/products", b);
+        put("/masters/partner-supply-rates/" + partner + "/TEXTBOOK",
+                Map.of("supplyRate", 70, "webVisible", true, "useYn", true));
 
         assertThat(post("/stock/inbound", Map.of(
                 "processedDate", "2098-01-05", "supplierClientId", sup,

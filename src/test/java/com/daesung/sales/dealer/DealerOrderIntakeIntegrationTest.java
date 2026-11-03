@@ -66,7 +66,12 @@ class DealerOrderIntakeIntegrationTest extends IntegrationTestSupport {
         b.put("catCode", "D2092A01");
         b.put("catName", "특약점검증");
         b.put("salesDivision", "교재");
+        // ★특약점 접수는 **노출되는 도서만** 받는다(10/26 §3 + 특약점팀 요청 2026-11-03 §1) —
+        //   Web게시 Y + 거래처×대분류 매핑(Web게시 Y·사용 Y)이 있어야 주문이 통과한다.
+        b.put("webVisible", true);
         book = createId("/masters/products", b);
+        put("/masters/partner-supply-rates/" + partner + "/TEXTBOOK",
+                Map.of("supplyRate", 70, "webVisible", true, "useYn", true));
 
         assertThat(post("/stock/inbound", Map.of(
                 "processedDate", "2092-01-05", "supplierClientId", supplier,
@@ -172,7 +177,9 @@ class DealerOrderIntakeIntegrationTest extends IntegrationTestSupport {
         bad.put("partnerCode", "없는거래처" + SFX);
         JsonNode r1 = postAsDealerSite("/dealer-site/orders", bad, DEALER_SITE_KEY);
         assertThat(r1.path("success").asBoolean()).isFalse();
-        assertThat(r1.path("error").path("message").asText()).contains("거래처를 찾을 수 없습니다");
+        // ★에러코드를 PARTNER_NOT_LINKED 로 분리했다(특약점팀 요청 2026-11-03 §5) —
+        //   사이트가 문구가 아니라 코드로 "매출 거래처 연결 안 됨" 안내를 띄운다.
+        assertThat(r1.path("error").path("code").asText()).isEqualTo("PARTNER_NOT_LINKED");
 
         Map<String, Object> bad2 = new HashMap<>(order(1));
         bad2.put("items", List.of(Map.of("productCode", "없는도서" + SFX, "qty", 1)));
@@ -194,6 +201,9 @@ class DealerOrderIntakeIntegrationTest extends IntegrationTestSupport {
         Long p = createId("/masters/clients", Map.of(
                 "code", "DOM" + SFX, "name", "담당자거래처", "type", "NORMAL",
                 "bossName", "김대표", "tel1", "02-111-2222", "email1", "boss@example.com"));
+        // ★이 테스트가 만든 거래처에도 노출 매핑이 필요하다(10/26 §3 ④ "매핑 없으면 비노출").
+        put("/masters/partner-supply-rates/" + p + "/TEXTBOOK",
+                Map.of("supplyRate", 70, "webVisible", true, "useYn", true));
 
         Map<String, Object> req = new HashMap<>();
         req.put("partnerCode", "DOM" + SFX);
@@ -233,6 +243,8 @@ class DealerOrderIntakeIntegrationTest extends IntegrationTestSupport {
         Long p = createId("/masters/clients", Map.of(
                 "code", "DOV" + SFX, "name", "담당자override거래처", "type", "NORMAL",
                 "bossName", "마스터대표", "tel1", "02-999-9999", "email1", "master@example.com"));
+        put("/masters/partner-supply-rates/" + p + "/TEXTBOOK",
+                Map.of("supplyRate", 70, "webVisible", true, "useYn", true));
 
         Map<String, Object> req = new HashMap<>();
         req.put("partnerCode", "DOV" + SFX);

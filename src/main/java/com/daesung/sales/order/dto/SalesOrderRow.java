@@ -73,6 +73,20 @@ public record SalesOrderRow(
         DeliveryType deliveryType,
         @Schema(description = "발송구분 명칭(택배/화물)") String deliveryTypeName,
 
+        @Schema(description = """
+                담당자명 — 특약점팀 확인 2026-11-03 (d). 사이트 [조회/수정]이 수량만 고치고
+                담당자 칸을 안 보낼 때, **이 값을 그대로 다시 보내도록** 목록에 싣는다.
+                (안 보내도 이미 저장된 값은 유지된다 — 덮지 않는다.)
+                발송 건이 여럿이고 값이 서로 다르면 null.""")
+        String receiverName,
+        @Schema(description = "담당자 연락처 — receiverName 과 같은 규칙") String receiverPhone,
+        @Schema(description = "담당자 이메일 — receiverName 과 같은 규칙") String receiverEmail,
+        @Schema(description = """
+                배송지 우편번호 — 특약점팀 요청 2026-11-03 §2 "목록에도 실어 주세요".
+                수정 화면이 이 값을 보여주고 고칠 수 있다.""")
+        String zipCode,
+        @Schema(description = "배송지 주소 — zipCode 와 같은 규칙") String address,
+
         @Schema(description = "총 수량") long totalQty,
         @Schema(description = "총 금액(공급가 합계)") long totalAmount,
 

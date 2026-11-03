@@ -231,6 +231,10 @@ public class SaleService {
                 //   건은 물류가 작업요청서에서 바꾼다.
                 shipmentService.decideDeliveryTypeIfBlank(shipment,
                         req.channel() != OrderChannel.ONLINE);
+                // ★배송지(우편번호·주소)는 발송구분 판정과 무관한 별개 축이라 따로 적용한다
+                //   (특약점팀 요청 2026-11-03 §2). 비어 있을 때만 채운다 — 수정(PUT)에서
+                //   안 보내면 이미 저장된 배송지가 유지된다.
+                shipmentService.applyAddressIfBlank(shipment, req.zipCode(), req.address());
             }
 
             lines.add(new SalesEntryResponse.Line(salesNo, product.getId(), product.getCode(),

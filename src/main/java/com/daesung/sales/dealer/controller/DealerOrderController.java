@@ -68,6 +68,52 @@ public class DealerOrderController {
         return ApiResponse.success(dealerOrderService.accept(req));
     }
 
+    @Operation(summary = "★신청 화면 노출 도서 목록", description = """
+            그 거래처에 **노출되는 도서만** 내려준다. 근거: 10/26 §3 + 특약점팀 전달
+            2026-11-03 요청 1번.
+
+            **노출 조건** — 넷을 모두 만족해야 한다.
+            ① 도서 Web게시 = Y
+            ② 거래처별 매핑(거래처 × 도서 **대분류**, [거래처별 단가·물류비용등록])의 Web게시 = Y
+            ③ 그 매핑의 사용여부 = Y (삭제된 매핑은 없는 것으로 본다)
+            ④ **매핑이 없으면 비노출** — 신규 거래처는 매핑을 깔기 전까지 아무것도 안 보인다
+
+            · 대분류는 도서의 **세부구분**을 거쳐 정해진다(세부구분 → 대분류). 세부구분이
+              비었거나 마스터에 없는 도서는 대분류를 알 수 없어 ④에 걸려 **비노출**이다.
+            · **캐시가 없다** — 도서관리에서 바꾸면 다음 호출에 바로 반영된다(§3).
+            · 공급률·정가·Web게시 값은 **담지 않는다** — §1 "매출 금액은 매출프로그램 기준으로
+              계산한다", §3 "Web게시여부 값은 사이트에 보여주지 않는다".
+            · `POST /dealer-site/orders`·`PUT …/{orderNo}` 도 **같은 판정**을 쓴다 —
+              노출되지 않는 도서를 담아 보내면 `PRODUCT_NOT_VISIBLE` 로 거부한다.
+
+            ⚠️**아직 반영하지 않은 조건이 하나 있습니다** — 전달 주신 ②"거래처 × **도서**
+            예외(열기/닫기)"는 **도서 단위** 축인데, 우리 쪽은 그 표를 V42에서 의도적으로
+            없애고 **거래처 × 대분류** 한 축으로 통일했습니다(정본 34p 기준. 두 축을 같이 두면
+            "무엇이 먼저냐" 규칙이 또 생겨, 같은 도서가 화면마다 달라지는 레거시 문제가
+            돌아옵니다). 도서 단위 예외가 실제로 필요하면 알려 주세요 — 축을 되살리는
+            작업이라 확인 후 진행하겠습니다.""")
+    @GetMapping("/products")
+    public ApiResponse<java.util.List<com.daesung.sales.dealer.dto.DealerProductRow>> products(
+            @Parameter(description = "주문 거래처 코드(DSRE 매출코드)", example = "A10A195")
+            @RequestParam String partnerCode) {
+        return ApiResponse.success(dealerOrderService.visibleProducts(partnerCode));
+    }
+
+    @Operation(summary = "담당자 정보 미리채우기용 조회", description = """
+            신청 화면이 담당자 3칸을 **미리 채울** 때 쓴다. 근거: 10/26 §4 "신청 화면에
+            들어가면 거래처관리에 저장된 값을 미리 채운다" + 특약점팀 전달 2026-11-03 요청 3번.
+
+            · 출처는 **접수 때 비워 보내면 채우는 값과 같다**(거래처관리 대표자명·연락처1·
+              이메일1) — 화면에 보인 값과 저장되는 값이 어긋나지 않게 한 곳에서 가져온다.
+            · 값이 없으면 **빈 값**(`null`)으로 준다.
+            · 사용자가 고친 값은 **그 주문에만** 저장된다 — 거래처관리 원본은 UPDATE하지 않는다(§4).""")
+    @GetMapping("/contact")
+    public ApiResponse<com.daesung.sales.dealer.dto.DealerContactResponse> contact(
+            @Parameter(description = "주문 거래처 코드(DSRE 매출코드)", example = "A10A195")
+            @RequestParam String partnerCode) {
+        return ApiResponse.success(dealerOrderService.contact(partnerCode));
+    }
+
     @Operation(summary = "★내 주문 목록(조회·수정·삭제 가능 여부 포함)", description = """
             그 거래처가 넣은 주문 목록. 10/26 §2-1 "'신청완료'를 '접수완료'로" —
             진행상태 라벨은 이미 정본 6단계 명칭 그대로다(`progressStateName`).

@@ -42,7 +42,16 @@ public enum ErrorCode {
     OVER_SETTLEMENT(HttpStatus.CONFLICT, "정산 수량이 미결 잔여를 초과했습니다."),  // ✝️경고로만
     // 같은 Idempotency-Key 의 요청이 아직 처리 중이거나, 저장된 응답을 복원하지 못한 경우.
     // ★이때 **다시 실행하지 않는다** — 그게 이중처리다.
-    DUPLICATE_REQUEST(HttpStatus.CONFLICT, "이미 처리 중이거나 처리된 요청입니다.");
+    DUPLICATE_REQUEST(HttpStatus.CONFLICT, "이미 처리 중이거나 처리된 요청입니다."),
+
+    // --- 특약점 사이트(서버 간 호출) ---
+    // 사이트가 보낸 거래처코드(DSRE 매출코드)로 우리 거래처를 못 찾은 경우.
+    // ★INVALID_INPUT 과 **따로 둔 이유**: 사이트가 이 상황에만 "매출 거래처 연결이 되어
+    //   있지 않습니다" 안내를 띄운다(특약점팀 전달 2026-11-03 §5). 문구로 분기하면 우리가
+    //   메시지를 다듬는 순간 그 안내가 깨지므로, 코드로 구분할 수 있게 한다.
+    PARTNER_NOT_LINKED(HttpStatus.BAD_REQUEST, "매출 거래처 연결이 되어 있지 않습니다."),
+    // 그 거래처에 노출되지 않는 도서를 주문·수정에 담은 경우(10/26 §3 노출 조건).
+    PRODUCT_NOT_VISIBLE(HttpStatus.BAD_REQUEST, "그 거래처에 노출되지 않는 도서입니다.");
 
     private final HttpStatus status;
     private final String message;

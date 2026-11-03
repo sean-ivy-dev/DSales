@@ -179,6 +179,14 @@ public class ShipmentService {
         }
     }
 
+    /** 배송지(우편번호·주소)를 비어 있을 때만 채운다 — 특약점팀 요청 2026-11-03 §2. */
+    @Transactional
+    public void applyAddressIfBlank(Shipment shipment, String zipCode, String address) {
+        if (shipment != null) {
+            shipment.fillAddressIfBlank(zipCode, address);
+        }
+    }
+
     /**
      * 발송구분 기본값 확정(10/27 피드백 §8-6) — 명시적 지정·담당자정보 적용을 **전부 마친 뒤**
      * 호출해야 한다. 그래도 비어 있으면 담당자정보 유무로 택배/화물을 가른다

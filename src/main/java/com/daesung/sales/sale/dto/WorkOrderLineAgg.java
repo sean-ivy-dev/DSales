@@ -17,6 +17,12 @@ public interface WorkOrderLineAgg {
 
     String getCatCode();
 
+    /** 분류명 — 사이트 화면 표시가 「세부구분 / 분류명 / 도서명」(특약점팀 요청 2026-11-03 §4). */
+    String getCatName();
+
+    /** 세부구분(도서 마스터 salesDivision). */
+    String getSalesDivision();
+
     String getProductCode();
 
     String getProductName();

@@ -325,7 +325,8 @@ public class WorkService {
         Map<String, List<WorkOrderResponse.Line>> linesByKey = new LinkedHashMap<>();
         for (WorkOrderLineAgg a : saleRepository.workOrderLines(lineFrom, lineTo)) {
             WorkOrderResponse.Line line = new WorkOrderResponse.Line(
-                    a.getCatCode(), a.getProductCode(), a.getProductName(),
+                    a.getCatCode(), a.getSalesDivision(), a.getCatName(),
+                    a.getProductCode(), a.getProductName(),
                     a.getBookRound(), a.getUnitPrice(), a.getSupplyRate(),
                     a.getQty(), a.getAmount() == null ? 0 : a.getAmount());
             for (String k : bothKeys(a.getTradeDate(), a.getPartnerId(), a.getSchoolCode(),
@@ -343,7 +344,11 @@ public class WorkService {
                             legacyKey(c.getTradeDate(), c.getPartnerId(), c.getSchoolCode(),
                                     c.getTradeClass()),
                             k -> new ArrayList<>())
-                    .add(new WorkOrderResponse.Line(c.getCatCode(), c.getProductCode(),
+                    .add(new WorkOrderResponse.Line(c.getCatCode(),
+                            // ★위탁출고 집계엔 세부구분·분류명 칸이 없다 — 억지로 분류(tradeClass)를
+                            //   넣지 않고 비운다(틀린 값을 채우면 화면이 그걸 믿는다).
+                            null, null,
+                            c.getProductCode(),
                             c.getProductName(), null, c.getUnitPrice(), c.getSupplyRate(),
                             c.getQty() == null ? 0 : c.getQty(), 0));
         }
@@ -377,6 +382,7 @@ public class WorkService {
                     s.getBoxCount(), s.getSentDate(), s.getSendMemo(),
                     dt, (dt == null) ? null : dt.label(),
                     s.getReceiverName(), s.getReceiverPhone(), s.getReceiverEmail(),
+                    s.getZipCode(), s.getAddress(),
                     s.getCourierName(), s.getTrackingNo(),
                     trackingsOf(s),
                     total, lines));
