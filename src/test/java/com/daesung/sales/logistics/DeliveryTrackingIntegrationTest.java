@@ -66,18 +66,24 @@ class DeliveryTrackingIntegrationTest extends IntegrationTestSupport {
     @DisplayName("★★작업요청서 발송취소 — 발송일만 내리고 송장·수령인은 남긴다(2026-10-12 A-3)")
     void 작업요청서_발송취소() {
         // 발송완료 + 송장·수령인까지 채운 상태를 만든다.
-        put("/logistics/work-orders/" + freightShipment + "/shipping", Map.of(
+        // ‼️송장은 발송구분이 '택배'인 건에만 들어간다(11/04 §3) — 실제 화면도 발송구분을
+        //   먼저 택배로 바꾼 뒤 담당자정보·송장을 입력한다. 같은 요청에 함께 보내면
+        //   updateDelivery 가 가드보다 먼저 반영돼 한 번에 된다.
+        // ‼️freightShipment 는 '기본값_화물' 테스트가 "끝까지 아무도 안 건드린다"고 가정한다
+        //   — 송장 전환이 필요한 이 테스트는 courierShipment 를 쓴다(이름대로 택배로 쓰인다).
+        put("/logistics/work-orders/" + courierShipment + "/shipping", Map.of(
+                "deliveryType", "COURIER",
                 "sentDate", "2033-05-20", "boxCount", 7,
                 "receiverName", "김수령", "receiverPhone", "010-9999-0000",
                 "courierName", "CJ대한통운", "trackingNo", "1234567890"));
-        assertThat(row(freightShipment).path("sentDate").asText()).isEqualTo("2033-05-20");
+        assertThat(row(courierShipment).path("sentDate").asText()).isEqualTo("2033-05-20");
 
-        JsonNode r = del("/logistics/work-orders/" + freightShipment + "/shipping",
+        JsonNode r = del("/logistics/work-orders/" + courierShipment + "/shipping",
                 Map.of("reason", "오발송"));
         assertThat(r.path("success").asBoolean()).as("발송취소: %s", r).isTrue();
         assertThat(data(r).path("changed").asBoolean()).isTrue();
 
-        JsonNode after = row(freightShipment);
+        JsonNode after = row(courierShipment);
         // ★발송일만 내려간다.
         assertThat(after.hasNonNull("sentDate")).as("발송완료가 풀려야 한다").isFalse();
         // ‼️송장·수령인·박스는 남는다 — 다시 보낼 때 필요하고, 송장번호는 복원할 수 없다.
@@ -203,9 +209,114 @@ class DeliveryTrackingIntegrationTest extends IntegrationTestSupport {
                 Map.of("courierName", "CJ", "trackingNo", "T-2"));   // 코드명
         assertThat(orderById(courierShipment).path("courierName").asText()).isEqualTo("CJ대한통운");
 
-        put("/logistics/work-orders/" + freightShipment + "/shipping",
+        // ‼️freightShipment 는 건드리지 않는다('기본값_화물' 테스트가 쓴다) — courierShipment 재사용.
+        put("/logistics/work-orders/" + courierShipment + "/shipping",
                 Map.of("courierName", "대신택배", "trackingNo", "T-3"));   // 한글 라벨
-        assertThat(orderById(freightShipment).path("courierName").asText()).isEqualTo("대신택배");
+        assertThat(orderById(courierShipment).path("courierName").asText()).isEqualTo("대신택배");
+    }
+
+    @Test
+    @DisplayName("★★★발송구분 (가)안 — '화물' 명시만 거부, 미지정은 허용한다(11/04 §3)")
+    void 가안_화물만_거부_미지정은_허용() {
+        // 화물로 **명시**된 건은 거부.
+        put("/logistics/work-orders/" + freightShipment + "/shipping", Map.of("deliveryType", "FREIGHT"));
+        JsonNode rejected = put("/logistics/work-orders/" + freightShipment + "/shipping",
+                Map.of("courierName", "CJ대한통운", "trackingNo", "FR-1"));
+        assertThat(rejected.path("success").asBoolean()).as("화물 명시 + 송장 → 거부: %s", rejected).isFalse();
+        assertThat(rejected.path("error").path("code").asText()).isEqualTo("TRACKING_NOT_ALLOWED");
+
+        // 발송구분을 아예 비운 새 발송 건은 **미지정**이다 — (가)안은 이걸 허용한다.
+        Long unspecified = freshUnspecifiedShipment();
+        JsonNode allowed = put("/logistics/work-orders/" + unspecified + "/shipping",
+                Map.of("courierName", "CJ대한통운", "trackingNo", "UN-1"));
+        assertThat(allowed.path("success").asBoolean())
+                .as("미지정 + 송장 → 허용(수기 등록 건은 발송구분이 비어 있을 수 있다): %s", allowed).isTrue();
+        assertThat(orderById(unspecified).path("trackingNo").asText()).isEqualTo("UN-1");
+
+        // 같은 요청에 발송구분을 택배로 함께 보내면(화면이 실제로 하는 조작) 통과한다.
+        // ‼️courierShipment 를 쓴다 — freightShipment 는 '기본값_화물' 테스트가
+        //   "끝까지 아무도 안 건드린다"고 가정하므로 여기서 COURIER로 못 바꾼다.
+        JsonNode switched = put("/logistics/work-orders/" + courierShipment + "/shipping",
+                Map.of("deliveryType", "COURIER", "courierName", "CJ대한통운", "trackingNo", "FR-2"));
+        assertThat(switched.path("success").asBoolean()).as("택배로 바꾸며 함께 보내면 허용: %s", switched).isTrue();
+    }
+
+    @Test
+    @DisplayName("★가안 — 박스별 송장(/trackings)·엑셀 업로드도 화물 명시 건을 거부한다")
+    void 가안_다른경로도_화물명시_거부() throws Exception {
+        put("/logistics/work-orders/" + freightShipment + "/shipping", Map.of("deliveryType", "FREIGHT"));
+
+        JsonNode boxResult = put("/logistics/work-orders/" + freightShipment + "/trackings",
+                Map.of("trackings", List.of(Map.of("boxNo", 1, "trackingNo", "B-1"))));
+        assertThat(boxResult.path("success").asBoolean()).as("박스별 송장도 화물이면 거부: %s", boxResult).isFalse();
+        assertThat(boxResult.path("error").path("code").asText()).isEqualTo("TRACKING_NOT_ALLOWED");
+
+        // 엑셀 업로드는 한 행만 ERROR 로 남고, 나머지(courierShipment)는 반영된다.
+        put("/logistics/work-orders/" + courierShipment + "/shipping", Map.of("deliveryType", "COURIER"));
+        byte[] xlsx = trackingFile(new Object[][]{
+                {freightShipment, "CJ대한통운", "EXCEL-FR"},
+                {courierShipment, "CJ대한통운", "EXCEL-OK"},
+        });
+        JsonNode r = data(uploadTracking(xlsx));
+        assertThat(r.path("updated").asInt()).as("화물 건만 실패, 나머지는 반영: %s", r).isEqualTo(1);
+        assertThat(r.path("failed").asInt()).isEqualTo(1);
+        boolean foundTrackingNotAllowed = false;
+        for (JsonNode l : r.path("lines")) {
+            if ("ERROR".equals(l.path("status").asText()) && l.path("message").asText().contains("화물")) {
+                foundTrackingNotAllowed = true;
+            }
+        }
+        assertThat(foundTrackingNotAllowed).as("화물 건 실패 사유가 담긴다: %s", r).isTrue();
+    }
+
+    @Test
+    @DisplayName("★가안 — 송장 삭제(발송취소·빈 배열)는 화물 건에도 허용한다")
+    void 가안_삭제는_화물에도_허용() {
+        put("/logistics/work-orders/" + freightShipment + "/shipping", Map.of("deliveryType", "FREIGHT"));
+
+        // 빈 배열(전부 지우기)은 막지 않는다 — 잘못 넣은 것을 되돌리는 길.
+        JsonNode cleared = put("/logistics/work-orders/" + freightShipment + "/trackings",
+                Map.of("trackings", List.of()));
+        assertThat(cleared.path("success").asBoolean()).as("화물 건이라도 비우기는 허용: %s", cleared).isTrue();
+
+        // 발송취소(DELETE /shipping)도 화물 건에 그대로 동작한다(송장 자체가 없어도 됨).
+        put("/logistics/work-orders/" + freightShipment + "/shipping", Map.of("sentDate", "2033-06-01"));
+        JsonNode revert = del("/logistics/work-orders/" + freightShipment + "/shipping",
+                Map.of("reason", "화물 발송취소 확인"));
+        assertThat(revert.path("success").asBoolean()).as("화물 건 발송취소도 허용: %s", revert).isTrue();
+    }
+
+    /**
+     * 발송구분이 <b>진짜로 미지정(null)</b>인 발송 건.
+     *
+     * <p>‼️<b>일반 매출등록으로는 못 만든다</b> — {@code SaleService.createEntries} 는
+     * {@code decideDeliveryTypeIfBlank} 를 등록 직후 항상 호출해, 담당자정보가 없으면
+     * 그 즉시 FREIGHT로 확정한다(10/27 §8-6). null로 남는 유일한 경로는
+     * <b>위탁출고</b>({@code ConsignmentService.consignmentOut} → {@code ensureForConsignment})다 —
+     * 그쪽은 이 결정을 호출하지 않는다(물류가 작업요청서에서 직접 고르는 전제).
+     */
+    private Long freshUnspecifiedShipment() {
+        String sfx = SFX + java.util.UUID.randomUUID().toString().substring(0, 4);
+        Long partner = createId("/masters/clients",
+                Map.of("code", "DTU" + sfx, "name", "미지정거래처", "type", "NORMAL"));
+        Long main = createId("/masters/warehouses",
+                Map.of("code", "DTUM" + sfx, "name", "미지정물류창고", "type", "MAIN"));
+        Long consign = createId("/masters/warehouses", Map.of("code", "DTUC" + sfx, "name", "미지정위탁창고",
+                "type", "CONSIGN", "ownerClientId", partner));
+        Long book = createId("/masters/products", Map.of(
+                "code", "DTUB" + sfx, "name", "미지정도서", "contentType", "SELF", "price", 10000,
+                "supplyRate", 75, "salesDivision", "교재"));
+        post("/stock/inbound", Map.of("processedDate", "2033-05-01",
+                "supplierClientId", partner, "destinationWarehouseId", main,
+                "items", List.of(Map.of("productId", book, "unitCost", 1000, "qty", 100))));
+        post("/consignment/out", Map.of("processedDate", "2033-05-11", "partnerId", partner,
+                "fromWarehouseId", main, "toWarehouseId", consign,
+                "items", List.of(Map.of("productId", book, "qty", 10,
+                        "unitPrice", 10000, "supplyRate", 70))));
+        JsonNode orders = data(get("/logistics/work-orders" + RANGE + "&partnerId=" + partner)).path("content");
+        assertThat(orders.get(0).hasNonNull("deliveryType"))
+                .as("위탁출고 발송 건은 발송구분이 정말 비어 있다(전제 확인): %s", orders.get(0)).isFalse();
+        return orders.get(0).path("id").asLong();
     }
 
     @Test
@@ -222,14 +333,17 @@ class DeliveryTrackingIntegrationTest extends IntegrationTestSupport {
     @Test
     @DisplayName("★엑셀 일괄 — 목록에 없는 택배사는 그 행만 오류, 나머지는 반영된다")
     void 일괄_모르는택배사는_그행만오류() throws Exception {
+        // 엑셀 업로드엔 발송구분 칸이 없다 — freightShipment는 '기본값_화물' 테스트가 쓰므로
+        // 건드리지 않고, 정상행 대상은 courierShipment로 바꾼다(미리 택배로 전환해 둔다).
+        put("/logistics/work-orders/" + courierShipment + "/shipping", Map.of("deliveryType", "COURIER"));
         byte[] xlsx = trackingFile(new Object[][]{
-                {courierShipment, "우체국택배", "777777777777"},   // 모르는 값
-                {freightShipment, "CJ대한통운", "666666666666"},   // 정상
+                {freightShipment, "우체국택배", "777777777777"},   // 모르는 값(발송구분과 무관하게 거부돼야 한다)
+                {courierShipment, "CJ대한통운", "666666666666"},   // 정상
         });
         JsonNode r = data(uploadTracking(xlsx));
         assertThat(r.path("updated").asInt()).as("정상 행만 반영").isEqualTo(1);
         assertThat(r.path("failed").asInt()).isEqualTo(1);
-        assertThat(orderById(freightShipment).path("trackingNo").asText()).isEqualTo("666666666666");
+        assertThat(orderById(courierShipment).path("trackingNo").asText()).isEqualTo("666666666666");
 
         boolean foundCourierError = false;
         for (JsonNode l : r.path("lines")) {

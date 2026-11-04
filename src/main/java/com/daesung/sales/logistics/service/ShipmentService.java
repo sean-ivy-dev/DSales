@@ -457,6 +457,11 @@ public class ShipmentService {
         s.updateShipping(req.boxCount(), req.sentDate(), req.sendMemo());
         s.updateDelivery(req.deliveryType(), req.receiverName(), req.receiverPhone(),
                 req.receiverEmail());
+        // ‼️가드는 updateDelivery **뒤**에 둔다 — 같은 요청에서 발송구분을 택배로 바꾸면서
+        //   송장을 함께 넣을 수 있어야 한다(바뀐 뒤의 값으로 판단).
+        if (hasTrackingInput(req.courierName(), req.trackingNo())) {
+            assertTrackingAllowed(s);
+        }
         s.updateTracking(labelOf(req.courierName()), req.trackingNo());
         // 발송일이 들어오면 = 발송 처리. 묶인 신청의 DSRE 상태도 발송완료로(2026-10-23).
         return (req.sentDate() == null) ? List.of() : shipToDsre(s, req.sentDate());
@@ -476,6 +481,10 @@ public class ShipmentService {
 
         List<Shipment.TrackingLine> lines = new ArrayList<>();
         java.util.Set<Integer> seen = new java.util.HashSet<>();
+        // 빈 목록(전부 삭제)은 막지 않는다 — 잘못 넣은 것을 되돌리는 길은 열어 둔다.
+        if (req != null && req.trackings() != null && !req.trackings().isEmpty()) {
+            assertTrackingAllowed(s);
+        }
         if (req != null && req.trackings() != null) {
             for (TrackingsUpdateRequest.Line l : req.trackings()) {
                 if (!seen.add(l.boxNo())) {
@@ -505,6 +514,32 @@ public class ShipmentService {
      * 전체가 취소되면, 담당자는 어느 줄이 문제인지 모른 채 처음부터 다시 해야 한다.
      * ⚠️택배사 API를 부르지 않는다(연동 여부는 물류팀 인터뷰 회신 대기).
      */
+    /**
+     * 송장·택배사는 <b>발송구분 '택배'</b> 건에만 입력한다. 근거: 11/04 클라이언트 회신 §3
+     * ("택배사 선택·송장 입력은 발송구분 '택배' 건만. '화물' 건은 입력 대상 아님").
+     *
+     * <p>★<b>미지정(null)은 막지 않는다</b>(사용자 확정 (가)안). 수기 등록 건은 발송구분이
+     * 비어 있을 수 있고, 거기서 막으면 송장을 넣을 길이 아예 없어진다. <b>화물로 명시된</b>
+     * 건만 거부한다.
+     *
+     * <p>‼️이 제한은 <b>신규</b>다 — 사이트팀 전달문에 "현재 동작 유지"로 적혀 있었지만,
+     * 엔티티·서비스·컨트롤러 어디에도 그런 검사가 없었고 정본(26p 작업요청서)에도 없다.
+     * 발송취소(DELETE /shipping)·송장 전체 삭제는 막지 않는다(되돌리는 길).
+     */
+    private static void assertTrackingAllowed(Shipment s) {
+        if (s.getDeliveryType() == DeliveryType.FREIGHT) {
+            throw new BusinessException(ErrorCode.TRACKING_NOT_ALLOWED,
+                    "발송구분이 '화물'인 건에는 송장·택배사를 입력할 수 없습니다"
+                            + " — 택배로 바꾼 뒤 입력하세요. (발송건 id=" + s.getId() + ")");
+        }
+    }
+
+    /** 실제로 송장을 '넣는' 요청인지. 빈 값은 삭제·무변경이라 가드 대상이 아니다. */
+    private static boolean hasTrackingInput(com.daesung.sales.logistics.entity.CourierCompany courier,
+                                            String trackingNo) {
+        return courier != null || (trackingNo != null && !trackingNo.isBlank());
+    }
+
     /** DB에는 enum 이름이 아니라 한글 라벨을 저장한다(기존 값·엑셀 내보내기와 호환). */
     private static String labelOf(com.daesung.sales.logistics.entity.CourierCompany courier) {
         return (courier == null) ? null : courier.label();
@@ -547,6 +582,8 @@ public class ShipmentService {
                     }
                     Shipment s = shipmentRepository.findById(id).orElseThrow(() ->
                             new BusinessException(ErrorCode.NOT_FOUND, "발송 건이 없습니다. id=" + id));
+                    // 화물 건은 이 행만 ERROR 로 남기고 나머지는 계속 반영한다(11/04 §3).
+                    assertTrackingAllowed(s);
                     s.updateTracking(courier, tracking);
                     updated++;
                     lines.add(new TrackingUploadResponse.Line(rowNo, "UPDATED", id, tracking, null));

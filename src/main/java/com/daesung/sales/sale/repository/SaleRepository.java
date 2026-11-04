@@ -457,6 +457,29 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
             + "      and s.salesType <> com.daesung.sales.sale.entity.SalesType.CONSIGN_SALES ";
 
     /**
+     * [특약점 사이트] 재고현황 목록 범위 확장(11/04 회신 §4)용 — 그 거래처에 <b>최근 N개월
+     * 매출 출고 이력</b>이 있는 도서 id. 근거: "(노출되는 교재) ∪ (그 특약점에 출고 또는
+     * 재고 입력 이력이 있는 교재)".
+     *
+     * <p>★<b>{@link #SHIPPED_PREDICATE} 를 그대로 쓰지 않는다</b> — 거긴 특강·정산매출
+     * 제외가 통합매출조회라는 다른 화면의 의도로 묶여 있다. 여기는 "그 거래처에 매출
+     * 출고가 있었나"만 보면 된다. 취소·삭제는 당연히 뺀다(소프트 삭제는
+     * {@code SoftDeletableEntity} 가 걸러준다).
+     *
+     * <p>DSRE 출고는 포함하지 않는다(사용자 확정) — DSRE 연동이 꺼진 환경에서 목록이
+     * 달라지는 환경 의존을 만들지 않는다.
+     */
+    @org.springframework.data.jpa.repository.Query("""
+            select distinct s.product.id from Sale s
+             where s.partner.id = :partnerId
+               and s.salesDate >= :from
+               and s.canceled = false
+            """)
+    java.util.List<Long> shippedProductIdsSince(
+            @org.springframework.data.repository.query.Param("partnerId") Long partnerId,
+            @org.springframework.data.repository.query.Param("from") java.time.LocalDate from);
+
+    /**
      * 통합 매출 조회의 <b>WHERE 절</b>. {@link #search} 와 {@link #groupTotalsByPartner}·
      * {@link #groupTotalsByDate} 가 <b>같은 문자열을 공유</b>한다.
      *
@@ -608,6 +631,11 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
      * <p>거는 조건은 기간·거래처·학교·도서·세부구분·키워드다. 매출에만 있는 축
      * (회계구분·출고유형·창고·판매채널·거래순번)은 위탁 미결에 그 값이 없어 걸지 않는다 —
      * 억지로 맞추면 "위탁출고인데 출고유형으로 걸러 사라지는" 일이 생긴다.
+     *
+     * <p>★<b>이 조건은 이 파일 하나에만 있다.</b> {@code ConsignmentOutRepository}에
+     * 같은 조건을 그대로 복사한 {@code findForShippedView}가 있었는데 <b>호출부가 0건</b>이었다
+     * — 둘 중 하나만 고쳐지면 조회 결과가 갈릴 위험이라 2026-11-04 삭제했다. 위탁 미결 조회가
+     * 필요하면 여기(또는 {@link com.daesung.sales.consignment.service.ConsignmentService})를 거친다.
      */
     String CONSIGN_SHIPPED_WHERE = """
              where (:from is null or co.tradeDate >= :from)

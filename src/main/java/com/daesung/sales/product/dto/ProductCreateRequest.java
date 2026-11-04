@@ -67,6 +67,14 @@ public record ProductCreateRequest(
         @Schema(description = "Web게시 여부(미지정 시 false)", example = "false")
         Boolean webVisible,
 
+        @Schema(description = """
+                지정 거래처 전용(화이트리스트, 미지정 시 false). 근거: 11/04 클라이언트 회신 §1.
+                true면 특약점 사이트에 **'열기'로 지정한 거래처에만** 노출하고
+                거래처x대분류 매핑은 보지 않는다. 지정은 [도서관리] '거래처별 노출' 탭에서 한다.""",
+                example = "false")
+        Boolean restrictedVisible,
+
+
         @Schema(description = "재고관리 여부(미지정 시 true). false=모의고사 등 인원기반, 매출 시 재고 미차감",
                 example = "true")
         Boolean stockManaged

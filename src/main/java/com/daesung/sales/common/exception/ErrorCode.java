@@ -51,7 +51,11 @@ public enum ErrorCode {
     //   메시지를 다듬는 순간 그 안내가 깨지므로, 코드로 구분할 수 있게 한다.
     PARTNER_NOT_LINKED(HttpStatus.BAD_REQUEST, "매출 거래처 연결이 되어 있지 않습니다."),
     // 그 거래처에 노출되지 않는 도서를 주문·수정에 담은 경우(10/26 §3 노출 조건).
-    PRODUCT_NOT_VISIBLE(HttpStatus.BAD_REQUEST, "그 거래처에 노출되지 않는 도서입니다.");
+    PRODUCT_NOT_VISIBLE(HttpStatus.BAD_REQUEST, "그 거래처에 노출되지 않는 도서입니다."),
+    // 발송구분이 '화물'인 건에 송장·택배사를 입력하려 한 경우(11/04 회신 §3).
+    // ★전용 코드로 둔 이유: 사이트·화면이 "택배 건만 입력 가능"이라는 안내를 띄우고
+    //   입력칸을 비활성화해야 한다 — 문구로 분기하면 메시지를 다듬는 순간 깨진다.
+    TRACKING_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "발송구분이 '택배'인 건에만 송장을 입력할 수 있습니다.");
 
     private final HttpStatus status;
     private final String message;

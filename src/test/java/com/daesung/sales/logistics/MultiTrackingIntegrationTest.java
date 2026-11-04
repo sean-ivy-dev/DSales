@@ -68,6 +68,9 @@ class MultiTrackingIntegrationTest extends IntegrationTestSupport {
 
         shipmentId = data(get("/logistics/work-orders?fromDate=" + DAY + "&toDate=" + DAY
                 + "&partnerId=" + partner)).path("content").get(0).path("id").asLong();
+        // 박스별 송장은 발송구분이 '택배'인 건에만 들어간다(11/04 §3) — 담당자정보를
+        //   안 줘서 기본값은 화물이라, 이 묶음의 모든 테스트가 쓰기 전에 택배로 바꿔 둔다.
+        put("/logistics/work-orders/" + shipmentId + "/shipping", Map.of("deliveryType", "COURIER"));
     }
 
     private JsonNode order() {

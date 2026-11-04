@@ -81,8 +81,10 @@ public class Product extends BaseEntity {
     /**
      * 기본 공급률(%). 근거: 정본 구분값정리 [6.도서관리-1.기본정보] "정가 / 공급률 = 판매가 계산 기준".
      *
-     * <p>거래처별 매핑({@code product_partner_price})이 없을 때 쓰는 바탕값이다.
+     * <p>거래처별 매핑({@code partner_supply_rate} — 거래처×대분류)이 없을 때 쓰는 바탕값이다.
      * 매출등록 자동적용 우선순위는 <b>입력값 &gt; 거래처별 매핑 &gt; 이 값</b>.
+     * (옛 도서×거래처 표 {@code product_partner_price} 는 V42 가 지웠다 — 축이 둘이면
+     * "무엇을 먼저 보나"라는 규칙이 하나 더 생긴다.)
      */
     @Column(name = "supply_rate")
     private Integer supplyRate;
@@ -103,6 +105,19 @@ public class Product extends BaseEntity {
     /** Web/신청사이트 게시 여부. 기본 false. */
     @Column(name = "web_visible", nullable = false)
     private boolean webVisible = false;
+
+    /**
+     * <b>지정 거래처 전용</b>(화이트리스트 모드). 근거: 11/04 클라이언트 회신 §1(10/31 §1-1 대체).
+     *
+     * <p>true면 <b>열기 행이 있는 거래처에만</b> 노출하고 거래처×대분류 매핑은 보지 않는다.
+     * 10/31 판은 이 자리를 '닫기' 예외로 대신했는데, 그러면 나머지 거래처마다 닫기 행을
+     * 깔아야 하고 신규 거래처는 기본 노출이라 의도와 반대로 열렸다.
+     *
+     * <p>판정은 {@link com.daesung.sales.product.repository.ProductRepository#findDealerVisible}
+     * <b>한 곳</b>에만 있다.
+     */
+    @Column(name = "restricted_visible", nullable = false)
+    private boolean restrictedVisible = false;
 
     /**
      * 재고관리 여부. 기본 true. false면 매출 시 재고 차감·재고이벤트 없음(수불부·재고 대상 아님).
@@ -202,6 +217,7 @@ public class Product extends BaseEntity {
         m.put("ledgerVisible|수불부노출", String.valueOf(ledgerVisible));
         m.put("priceVisible|단가노출", String.valueOf(priceVisible));
         m.put("webVisible|Web게시", String.valueOf(webVisible));
+        m.put("restrictedVisible|지정거래처전용", String.valueOf(restrictedVisible));
         m.put("stockManaged|재고관리", String.valueOf(stockManaged));
         return m;
     }
@@ -211,18 +227,25 @@ public class Product extends BaseEntity {
      * 근거: 발주처 요청(1-3) "각 열을 일괄로 처리(전체선택 등)".
      */
     public void updateFlags(Boolean webVisible, Boolean taxFree, Boolean ledgerVisible,
-                            Boolean useYn, Boolean stockManaged, Boolean priceVisible) {
+                            Boolean useYn, Boolean stockManaged, Boolean priceVisible,
+                            Boolean restrictedVisible) {
         this.webVisible = keep(webVisible, this.webVisible);
         this.taxFree = keep(taxFree, this.taxFree);
         this.ledgerVisible = keep(ledgerVisible, this.ledgerVisible);
         this.useYn = keep(useYn, this.useYn);
         this.stockManaged = keep(stockManaged, this.stockManaged);
         this.priceVisible = keep(priceVisible, this.priceVisible);
+        this.restrictedVisible = keep(restrictedVisible, this.restrictedVisible);
     }
 
     /** 단가노출 설정(등록·수정 경로 공용). */
     public void applyPriceVisible(Boolean priceVisible) {
         this.priceVisible = keep(priceVisible, this.priceVisible);
+    }
+
+    /** 지정 거래처 전용 설정(등록·수정 경로 공용). */
+    public void applyRestrictedVisible(Boolean restrictedVisible) {
+        this.restrictedVisible = keep(restrictedVisible, this.restrictedVisible);
     }
 
     /** 요청에 값이 없으면(null) 기존 값을 그대로 둔다. */

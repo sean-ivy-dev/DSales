@@ -102,6 +102,9 @@ daesung:
   dealer-site:
     api-key: ${DEALER_SITE_API_KEY:}
     warehouse-code: ${DEALER_SITE_WAREHOUSE_CODE:}
+    # 재고현황 목록 범위 확장(11/04 §4) — 기간·출처는 발주처 회신 대기 항목이라 설정값으로 둔다.
+    stock-history-months: ${DEALER_SITE_STOCK_HISTORY_MONTHS:12}
+    stock-history-source: ${DEALER_SITE_STOCK_HISTORY_SOURCE:SALES}
   mail:
     # ‼️기본 off. 설정이 비어 있는 채로 켜 두면 화면에서 '전송'을 눌렀을 때
     #   조용히 실패하고 담당자는 보냈다고 믿는다. 값을 넣은 환경에서만 켠다.

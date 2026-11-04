@@ -123,6 +123,8 @@ public class ProductService {
         // 단가노출은 미지정 시 수불부노출을 따른다 — V60 분리 이전 데이터와 같은 모양이 되게.
         product.applyPriceVisible((req.priceVisible() != null)
                 ? req.priceVisible() : req.ledgerVisibleOrDefault());
+        // 지정 거래처 전용은 미지정이면 false — 기본은 '매핑대로'다(11/04 회신 §1).
+        product.applyRestrictedVisible((req.restrictedVisible() != null) && req.restrictedVisible());
         Product saved = productRepository.save(product);
         return ProductResponse.from(saved, findDivision(saved.getSalesDivision()));
     }
@@ -159,6 +161,7 @@ public class ProductService {
         product.applyExtra(req.productYear(), req.productType(), req.supplyRate());
         // 수정에서는 미지정이면 기존 값을 그대로 둔다(다른 필드와 같은 규칙).
         product.applyPriceVisible(req.priceVisible());
+        product.applyRestrictedVisible(req.restrictedVisible());
         masterChangeLogService.recordDiff(MasterEntityType.PRODUCT, product.getId(), product.getCode(),
                 before, product.auditSnapshot());
         return ProductResponse.from(product, findDivision(product.getSalesDivision()));
@@ -241,7 +244,7 @@ public class ProductService {
             Product p = found.get();
             Map<String, String> before = p.auditSnapshot();
             p.updateFlags(req.webVisible(), req.taxFree(), req.ledgerVisible(),
-                    req.useYn(), req.stockManaged(), req.priceVisible());
+                    req.useYn(), req.stockManaged(), req.priceVisible(), req.restrictedVisible());
             Map<String, String> after = p.auditSnapshot();
             if (before.equals(after)) {
                 unchanged++;

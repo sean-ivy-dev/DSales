@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * 주문 등록에서 <b>위탁출고</b> — 10/27 명세 §4-1, 프론트 C-1.
@@ -39,6 +40,12 @@ class ConsignOrderEntryIntegrationTest extends IntegrationTestSupport {
     private Long main;
     private Long consign;
     private Long book;
+
+    @Autowired
+    private com.daesung.sales.inventory.repository.InventoryTxnRepository inventoryTxnRepository;
+
+    @Autowired
+    private com.daesung.sales.consignment.repository.ConsignmentOutRepository consignmentOutRepository;
 
     @BeforeAll
     void seed() {
@@ -200,6 +207,74 @@ class ConsignOrderEntryIntegrationTest extends IntegrationTestSupport {
             saleQty += r.path("qty").asLong();
         }
         assertThat(saleQty).as("통합 매출에는 정산분 40").isEqualTo(40);
+    }
+
+    @Test
+    @DisplayName("★★자동이고 재고이벤트에 전표번호(OUT-)가 찍힌다(2026-11-04 결함수정)")
+    void 자동이고_전표번호가_찍힌다() {
+        JsonNode r = post("/sales/entries", Map.of("salesDate", "2048-08-01",
+                "partnerId", partner, "warehouseId", main, "items", List.of(item(12))));
+        assertThat(r.path("success").asBoolean()).as("%s", r).isTrue();
+        String outNo = data(r).path("items").get(0).path("salesNo").asText();
+        assertThat(outNo).startsWith("OUT-");
+
+        // javadoc(InventoryService.moveStock)이 "OUT-를 그대로 넘겨 한 전표로 묶인다"고
+        // 적어 뒀는데, 예전엔 실제로 refNo 없이 나가 이 조회가 0건이었다.
+        var txns = inventoryTxnRepository.findAllByRefNo(outNo);
+        assertThat(txns).as("출발·도착 두 다리가 refNo=%s 로 묶여야 한다", outNo).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("★미결 집계(건수·합계)가 같은 조건을 쓴다(2026-11-04 결함수정)")
+    void 미결집계_건수와_합계가_같은조건() {
+        // 이 테스트만의 미결을 만든 뒤, 전체 건수·합계 증가분이 그 미결 하나와 일치하는지 본다
+        // (초과정산 차단이 없어 remainingQty가 음수여도 건수·합 둘 다 반영돼야 한다).
+        long beforeCount = countPending();
+        long beforeSum = sumPending();
+
+        post("/sales/entries", Map.of("salesDate", "2048-08-02",
+                "partnerId", partner, "warehouseId", main, "items", List.of(item(9))));
+
+        assertThat(countPending() - beforeCount).as("건수 +1").isEqualTo(1);
+        assertThat(sumPending() - beforeSum).as("합계도 +9(같은 조건이면 건수·합이 같은 건을 센다)")
+                .isEqualTo(9);
+    }
+
+    private long countPending() {
+        return consignmentOutRepository.countPending();
+    }
+
+    private long sumPending() {
+        return consignmentOutRepository.sumPendingQty();
+    }
+
+    @Test
+    @DisplayName("★★품목마다 학교가 다르면 거부한다(2026-11-04 결함수정) — 조용히 첫 품목 학교로 뭉개지 않는다")
+    void 품목별_학교가_다르면_거부() {
+        Map<String, Object> itemA = new HashMap<>(item(5));
+        itemA.put("schoolCode", "SCA" + SFX);
+        Map<String, Object> itemB = new HashMap<>(item(3));
+        itemB.put("schoolCode", "SCB" + SFX);
+
+        JsonNode r = post("/sales/entries", Map.of("salesDate", "2048-08-03",
+                "partnerId", partner, "warehouseId", main, "items", List.of(itemA, itemB)));
+
+        assertThat(r.path("success").asBoolean())
+                .as("품목마다 학교가 다르면 거부돼야 한다: %s", r).isFalse();
+        assertThat(r.path("error").path("code").asText()).isEqualTo("INVALID_INPUT");
+    }
+
+    @Test
+    @DisplayName("같은 학교거나 일부만 학교를 줘도(나머지 null) 통과한다")
+    void 같은학교이거나_일부null이면_통과() {
+        Map<String, Object> itemA = new HashMap<>(item(5));
+        itemA.put("schoolCode", "SCC" + SFX);
+        Map<String, Object> itemB = item(3);   // schoolCode 없음(null)
+
+        JsonNode r = post("/sales/entries", Map.of("salesDate", "2048-08-04",
+                "partnerId", partner, "warehouseId", main, "items", List.of(itemA, itemB)));
+
+        assertThat(r.path("success").asBoolean()).as("%s", r).isTrue();
     }
 
     @Test

@@ -52,6 +52,29 @@ public interface PartnerRepository extends JpaRepository<Partner, Long> {
             org.springframework.data.domain.Pageable pageable);
 
     /**
+     * 위와 같은 검색에 <b>거래처구분</b> 필터를 더한 것. [도서관리] '거래처별 노출' 탭이
+     * "거래처구분으로 좁힌 뒤 여러 거래처를 체크"하는 조작을 쓴다(정본 1탭 도서관리).
+     *
+     * <p>거래처구분은 자유 문자열이라 <b>정확일치</b>로 본다 — 거래처별 단가 매핑
+     * ({@code PartnerSupplyRateRepository.search})과 같은 규칙을 쓴다. 한쪽만 부분일치로
+     * 두면 같은 화면의 두 탭이 다른 거래처 집합을 보여준다.
+     */
+    @org.springframework.data.jpa.repository.Query("""
+            select p from Partner p
+             where (:keyword is null
+                    or lower(p.code) like lower(concat('%', :keyword, '%'))
+                    or lower(p.name) like lower(concat('%', :keyword, '%')))
+               and (:clientCategory is null or p.clientCategory = :clientCategory)
+               and (:includeExpired = true or p.endDate is null)
+             order by p.code
+            """)
+    org.springframework.data.domain.Page<Partner> searchByCategory(
+            @org.springframework.data.repository.query.Param("keyword") String keyword,
+            @org.springframework.data.repository.query.Param("clientCategory") String clientCategory,
+            @org.springframework.data.repository.query.Param("includeExpired") boolean includeExpired,
+            org.springframework.data.domain.Pageable pageable);
+
+    /**
      * 쓰이고 있는 지역·관할지역 목록(거래처 등록 화면 선택용).
      *
      * <p>★분류코드와 같은 이유다 — 지역은 조회 필터({@code ?region=})로 쓰이는데 자유 입력이라

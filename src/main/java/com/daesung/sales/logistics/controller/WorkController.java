@@ -111,7 +111,12 @@ public class WorkController {
 
                     ‼️기존 단일 필드(`courierName`·`trackingNo`)는 그대로 둔다 —
                     화면·엑셀 양식·일괄 업로드가 아직 쓴다. **1번 박스를 비추며**, 서버가
-                    한 곳에서만 갱신하므로 둘이 갈릴 수 없다.""")
+                    한 곳에서만 갱신하므로 둘이 갈릴 수 없다.
+
+                    ‼️**발송구분이 '화물'인 건은 입력할 수 없다**(11/04 회신 §3, `TRACKING_NOT_ALLOWED`).
+                    발송구분이 **미지정**이면 허용한다 — 수기 등록 건은 비어 있을 수 있어
+                    거기서 막으면 송장을 넣을 길이 없다.
+                    (빈 배열=전부 삭제는 화물 건에도 허용한다.)""")
     @PutMapping("/work-orders/{id}/trackings")
     public ApiResponse<List<WorkOrderResponse.Tracking>> replaceTrackings(
             @PathVariable Long id,
@@ -221,7 +226,12 @@ public class WorkController {
                     · 한 신청이 다른 발송 건에도 걸려 있으면, 그 건들이 다 발송된 뒤에 옮긴다.
                     · DSRE 처리가 실패하면 **전체가 실패**한다(우리 발송일도 저장 안 됨).
 
-                    응답 `dsre` = 신청별 결과. 묶인 신청이 없거나(수기 매출) 발송일을 안 보냈으면 빈 목록.""")
+                    응답 `dsre` = 신청별 결과. 묶인 신청이 없거나(수기 매출) 발송일을 안 보냈으면 빈 목록.
+
+                    ‼️**발송구분이 '화물'인 건은 입력할 수 없다**(11/04 회신 §3, `TRACKING_NOT_ALLOWED`).
+                    발송구분이 **미지정**이면 허용한다 — 수기 등록 건은 비어 있을 수 있어
+                    거기서 막으면 송장을 넣을 길이 없다.
+                    송장을 **안 보내는** 요청(박스수·발송일만)은 화물 건에도 그대로 동작한다.""")
     @PutMapping("/work-orders/{id}/shipping")
     public ApiResponse<ShippingResult> updateShipping(@PathVariable Long id,
                                                       @Valid @RequestBody ShippingUpdateRequest req) {
@@ -305,7 +315,8 @@ public class WorkController {
                     · **한 행이 실패해도 나머지는 반영한다.** 택배사 파일에 우리가 모르는 행이
                       섞였다고 전체가 취소되면, 담당자는 어느 줄이 문제인지 모른 채 처음부터 다시 해야 한다.
                     · 행별 결과(UPDATED/ERROR·사유)를 돌려준다.
-                    · ⚠️택배사 API를 부르지 않는다 — 연동 여부는 물류팀 인터뷰 회신 대기 항목이다.""")
+                    · ⚠️택배사 API를 부르지 않는다 — 연동 여부는 물류팀 인터뷰 회신 대기 항목이다.
+                    · ‼️**발송구분이 '화물'인 행은 그 행만 ERROR**로 남는다(11/04 §3). 미지정은 통과.""")
     @PostMapping(value = "/work-orders/tracking/upload",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResponse<TrackingUploadResponse> uploadTracking(

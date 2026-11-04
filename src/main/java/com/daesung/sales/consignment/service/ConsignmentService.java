@@ -105,9 +105,15 @@ public class ConsignmentService {
                     .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
                             "상품이 없습니다. id=" + item.productId()));
 
+            // ★전표번호를 먼저 뽑는다 — moveStock에 refNo로 넘겨야 한다(아래 1).
+            //   예전엔 저장(2) 단계에서야 번호를 뽑아 moveStock이 refNo 없이 나갔다
+            //   (javadoc은 "OUT-를 그대로 넘겨 한 전표로 묶인다"고 적어 뒀는데 실제로는 안 그랬다 —
+            //   그래서 refNo 기반 조회·되돌리기가 위탁 자동이고 건에는 안 걸렸다).
+            String outNo = "OUT-" + datePart + "-" + sequenceService.next(SequenceService.SEQ_CONSIGNMENT);
+
             // 1) 재고 이동(물류 −, 위탁 +) — 출발다리 이벤트를 미결의 origin_txn으로 링크
             InventoryTxn outLeg = inventoryService.moveStock(
-                    product, from, to, item.qty(), req.processedDate(), "위탁출고 자동이고");
+                    product, from, to, item.qty(), req.processedDate(), outNo, "위탁출고 자동이고");
 
             // 2) 미결원장 생성 — 출고 시점 단가를 함께 박는다.
             //    ★매출등록(createEntries)과 **같은 우선순위**로 정한다: 입력값 > 거래처×대분류 매핑 > 도서 기본.
@@ -138,7 +144,6 @@ public class ConsignmentService {
             Integer discount = (item.discountAmount() != null)
                     ? item.discountAmount() : partnerSupplyRateService.discountFor(product, partner.getId());
 
-            String outNo = "OUT-" + datePart + "-" + sequenceService.next(SequenceService.SEQ_CONSIGNMENT);
             ConsignmentOut co = consignmentOutRepository.save(
                     ConsignmentOut.create(outNo, product, partner, item.qty(), outLeg,
                             unitPrice, supplyRate, discount,

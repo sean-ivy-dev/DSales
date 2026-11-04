@@ -12,6 +12,7 @@ import com.daesung.sales.product.entity.SalesDivision;
 import com.daesung.sales.product.repository.PartnerProductStockRepository;
 import com.daesung.sales.product.repository.ProductRepository;
 import com.daesung.sales.product.repository.SalesDivisionRepository;
+import com.daesung.sales.sale.repository.SaleRepository;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -41,6 +42,8 @@ public class DealerStockService {
     private final ProductRepository productRepository;
     private final SalesDivisionRepository salesDivisionRepository;
     private final PartnerProductStockRepository stockRepository;
+    private final SaleRepository saleRepository;
+    private final com.daesung.sales.dealer.config.DealerSiteProperties properties;
 
     /** 재고현황 목록 — 그 거래처에 노출되는 교재만, 저장된 값이 있으면 채우고 없으면 0. */
     @Transactional(readOnly = true)
@@ -90,10 +93,40 @@ public class DealerStockService {
         return DealerStockRow.ofSaved(saved);
     }
 
-    /** {@link DealerProductService}의 노출 판정을 재사용해 **교재만** 추린다. */
+    /**
+     * 그 거래처가 볼 교재 전체 — <b>(노출 교재) ∪ (이력 있는 교재)</b>. 근거: 11/04 회신 §4
+     * "현행 그대로 — 범위는 그 거래처에 §1 노출 규칙으로 노출되는 교재"를 재고 입력 이력이
+     * 있는 교재까지 넓힌 것. 노출이 꺼진 뒤에도 특약점이 들고 있는 재고 숫자가 화면에서
+     * 사라지면 안 된다(이미 입력한 값을 잃어버린 것처럼 보인다).
+     *
+     * <p>이력 = ① {@code partner_product_stock} 에 행이 있는 교재(기간 무관 — 이미 입력된
+     * 숫자다) ∪ ② 최근 N개월(설정값, 기본 12) 매출 출고가 있는 교재. ①은 노출 판정과
+     * 무관하게 항상 포함해야 하므로 {@link #list} 가 저장값을 붙일 때 따로 조회하지 않고
+     * 여기서 교재 목록에 먼저 합쳐 둔다.
+     */
     private List<Product> textbooksVisibleTo(Long partnerId) {
         List<Product> visible = productRepository.findDealerVisible(partnerId);
-        Map<String, MajorCategory> majorByDivisionCode = visible.stream()
+        Map<Long, Product> byId = visible.stream()
+                .collect(Collectors.toMap(Product::getId, p -> p, (a, b) -> a, java.util.LinkedHashMap::new));
+
+        // ① 재고 입력 이력이 있는 도서 — 노출 여부와 무관하게 항상 포함.
+        for (PartnerProductStock saved : stockRepository.findByPartnerId(partnerId)) {
+            Product p = saved.getProduct();
+            byId.putIfAbsent(p.getId(), p);
+        }
+
+        // ② 최근 N개월 매출 출고가 있는 도서(설정값, 기본 12개월 — 회신 대기라 상수로 안 박음).
+        if (properties.stockHistoryFromSales()) {
+            java.time.LocalDate from = java.time.LocalDate.now().minusMonths(properties.stockHistoryMonths());
+            List<Long> shippedIds = saleRepository.shippedProductIdsSince(partnerId, from);
+            for (Long id : shippedIds) {
+                if (!byId.containsKey(id)) {
+                    productRepository.findById(id).ifPresent(p -> byId.put(id, p));
+                }
+            }
+        }
+
+        Map<String, MajorCategory> majorByDivisionCode = byId.values().stream()
                 .map(Product::getSalesDivision)
                 .filter(java.util.Objects::nonNull)
                 .distinct()
@@ -101,7 +134,7 @@ public class DealerStockService {
                 .flatMap(java.util.Optional::stream)
                 .collect(Collectors.toMap(SalesDivision::getCode, SalesDivision::getMajorCategory));
 
-        return visible.stream()
+        return byId.values().stream()
                 .filter(p -> majorByDivisionCode.get(p.getSalesDivision()) == MajorCategory.TEXTBOOK)
                 .toList();
     }

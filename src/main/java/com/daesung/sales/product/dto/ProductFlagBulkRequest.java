@@ -34,6 +34,10 @@ public record ProductFlagBulkRequest(
         @Schema(description = "Web게시여부 — 미지정이면 건드리지 않음", example = "true")
         Boolean webVisible,
 
+        @Schema(description = "지정 거래처 전용(화이트리스트) — 미지정이면 건드리지 않음. "
+                + "true면 '열기'로 지정한 거래처에만 노출(11/04 회신 §1)", example = "false")
+        Boolean restrictedVisible,
+
         @Schema(description = "면세여부 — 미지정이면 건드리지 않음", example = "true")
         Boolean taxFree,
 
@@ -53,6 +57,6 @@ public record ProductFlagBulkRequest(
     /** 바꿀 플래그가 하나도 없으면 무의미한 요청이다(전 건을 훑고 아무것도 안 한다). */
     public boolean hasNoFlag() {
         return webVisible == null && taxFree == null && ledgerVisible == null && priceVisible == null
-                && useYn == null && stockManaged == null;
+                && useYn == null && stockManaged == null && restrictedVisible == null;
     }
 }

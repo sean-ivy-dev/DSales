@@ -99,6 +99,9 @@ public class ProductUploadService {
                             r.boolOrNull(H_USE), r.str(H_DIVISION),
                             r.intOrNull(H_YEAR), r.str(H_TYPE), r.intOrNull(H_SUPPLY),
                             r.boolOrNull(H_LEDGER), r.boolOrNull(H_PRICE_VIS), r.boolOrNull(H_WEB),
+                            // 지정 거래처 전용(11/04 §1)은 업로드 양식에 칸이 없다 — 기본(매핑대로)으로 둔다.
+                            //   화이트리스트는 도서 한 권씩 따지는 설정이라 일괄 업로드로 켜지면 위험하다.
+                            null,
                             r.boolOrNull(H_STOCK)));
                     out.created(r.rowNo(), code);
                 } else {
@@ -121,6 +124,7 @@ public class ProductUploadService {
                             or(r.str(H_TYPE), existing.getProductType()),
                             or(r.intOrNull(H_SUPPLY), existing.getSupplyRate()),
                             r.boolOrNull(H_LEDGER), r.boolOrNull(H_PRICE_VIS), r.boolOrNull(H_WEB),
+                            null,   // 지정 거래처 전용 — 양식에 칸이 없다(null=유지)
                             r.boolOrNull(H_STOCK),
                             // ★업로드는 버전을 보내지 않는다 — 파일 한 장으로 수백 건을 고치는 경로라
                             //   한 건이 그 사이 바뀌었다고 전체를 멈추면 담당자가 손쓸 방법이 없다.

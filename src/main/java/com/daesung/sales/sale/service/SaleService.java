@@ -923,8 +923,20 @@ public class SaleService {
             items.add(new ConsignmentOutRequest.Item(i.productId(), i.qty(),
                     i.unitPrice(), i.supplyRate(), i.discountAmount()));
         }
-        // 학교는 품목마다 다를 수 있으나 위탁출고 요청은 건 단위다 — 첫 품목 것을 쓴다
-        // (한 번의 위탁출고는 한 거래처·한 학교로 나간다).
+        // 학교는 위탁출고 요청 자체가 건 단위라 품목 하나의 값을 쓴다
+        // (한 번의 위탁출고는 한 거래처·한 학교로 나간다 — ConsignmentOut.schoolCode는
+        //  행 단위라 원래 더 세밀하게 담을 수 있지만, 이 입구(DTO)는 건 단위라 거기까지는 못 받는다).
+        // ‼️품목마다 학교가 **다르면 거부**한다. 조용히 첫 품목 것만 쓰면 나머지 품목은
+        //   엉뚱한 학교로 적힌 채 나간다 — 조용히 틀리는 것보다 거부가 안전하다.
+        java.util.Set<String> distinctSchools = req.items().stream()
+                .map(SalesEntryRequest.Item::schoolCode)
+                .filter(c -> c != null && !c.isBlank())
+                .collect(java.util.stream.Collectors.toSet());
+        if (distinctSchools.size() > 1) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "위탁출고는 한 건에 학교를 하나만 담을 수 있습니다 — 품목마다 학교가 다릅니다("
+                            + String.join(", ", distinctSchools) + "). 학교별로 나눠 등록하세요.");
+        }
         SalesEntryRequest.Item first = req.items().get(0);
         ConsignmentOutResponse out = consignmentService.consignmentOut(new ConsignmentOutRequest(
                 req.salesDate(), req.partnerId(), req.warehouseId(),

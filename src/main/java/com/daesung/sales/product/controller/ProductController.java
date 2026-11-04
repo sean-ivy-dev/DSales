@@ -39,6 +39,7 @@ public class ProductController {
     private final com.daesung.sales.product.service.ProductUploadService uploadService;
 
     private final ProductService productService;
+    private final com.daesung.sales.product.service.PartnerProductVisibilityService partnerProductVisibilityService;
     private final com.daesung.sales.common.excel.ExcelExportUtil excel;
 
     @Operation(summary = "상품 목록 조회", description = "keyword(코드/명 부분일치)로 검색, 페이징·정렬 지원")
@@ -166,6 +167,68 @@ public class ProductController {
     public ApiResponse<ProductFlagBulkResult> bulkUpdateFlags(
             @Valid @RequestBody ProductFlagBulkRequest req) {
         return ApiResponse.success(productService.bulkUpdateFlags(req));
+    }
+
+    @Operation(summary = "★거래처별 노출 — 거래처 목록(도서 1권 기준)", description = """
+            [도서관리] 도서 상세 → '거래처별 노출' 탭. 근거: **11/04 클라이언트 회신 §2**
+            (10/31 판의 [거래처관리] 거래처 축을 대체한다 — 축이 뒤집혔다).
+
+            한 도서를 놓고 **거래처별 상태**를 본다.
+            · `open` = 이 거래처에 '열기'로 지정돼 있는지 = **체크박스 상태**
+            · `visible` = 노출 판단 순서를 전부 적용한 **실제 노출 결과**
+              (① 도서 Web게시 N → 비노출 / ② 지정 거래처 전용 → 열기 있는 곳만
+               / ③ 열기 있음 → 노출 / ④ 거래처×대분류 매핑)
+            · `productWebVisible=false` 면 무엇을 지정해도 비노출이다(①이 최우선) → 화면은 경고를 띄운다
+            · `productRestrictedVisible=true` 면 열기 없는 거래처는 매핑과 무관하게 비노출이다
+
+            ‼️**'닫기'는 없다.** 지정은 열기 하나뿐이고 닫는 것은 지정을 지우는 것이다
+            (11/04 §1 — 예전 '닫기' 예외는 '지정 거래처 전용' 스위치로 대체됐다).""")
+    @GetMapping("/{productId}/partner-visibility")
+    public ApiResponse<PageResponse<
+            com.daesung.sales.product.dto.ProductPartnerVisibilityRow>> partnerVisibility(
+            @PathVariable Long productId,
+            @Parameter(description = "거래처코드·거래처명 부분일치") @RequestParam(required = false) String keyword,
+            @Parameter(description = "거래처구분(정확일치) — 거래처별 단가 탭과 같은 필터") @RequestParam(required = false) String clientCategory,
+            @Parameter(description = "거래 종료된 거래처도 포함할지(기본 false)") @RequestParam(defaultValue = "false") boolean includeExpired,
+            @ParameterObject PageRequestDto page) {
+        return ApiResponse.success(PageResponse.of(
+                partnerProductVisibilityService.list(productId, keyword, clientCategory,
+                        includeExpired, page.toPageable())));
+    }
+
+    @Operation(summary = "★거래처별 노출 — 선택 거래처 일괄 적용", description = """
+            체크한 거래처들에 '열기'를 **한 번에** 걸거나 푼다(정본 1탭 도서관리
+            "거래처구분 필터로 좁힌 뒤 여러 거래처를 체크해 '선택 거래처 일괄 적용'").
+
+            · `open=true` → 열기 지정 / `open=false` → 지정 해제
+            · 이미 그 상태인 거래처는 `unchanged` 로 센다(이력을 부풀리지 않는다)
+            · 건별로 **변경 이력**이 남는다(누가·언제·열기/해제·사유)
+
+            ‼️해제는 '강제 비노출'이 **아니다**. 해제 뒤 노출은 도서가 '지정 거래처 전용'이면
+            비노출, 아니면 거래처×대분류 매핑을 따른다.""")
+    @PutMapping("/{productId}/partner-visibility")
+    public ApiResponse<com.daesung.sales.product.dto.ProductVisibilityBulkResult> bulkPartnerVisibility(
+            @PathVariable Long productId,
+            @Valid @RequestBody com.daesung.sales.product.dto.ProductVisibilityBulkRequest req) {
+        return ApiResponse.success(partnerProductVisibilityService.bulkApply(productId, req));
+    }
+
+    @Operation(summary = "★★거래처별 노출 — 분류 단위 일괄 적용", description = """
+            [도서관리] '거래처별 노출' 탭의 **"분류명 체크 → 하위 도서 일괄 선택"** 조작.
+            근거: 11/04 클라이언트 회신 §2.
+
+            `catCode`를 주면 그 분류의 **도서 전체**가 대상이다(`productIds`는 무시).
+            분류 없이 화면에서 도서를 개별 체크했다면 `productIds`를 준다.
+            거기에 체크한 **거래처 여러 곳**(`partnerIds`)을 곱해 전부에 같은 열기/해제를
+            건다 — 도서 10권 × 거래처 5곳을 체크하면 50개 조합을 한 번에 처리한다.
+
+            ‼️위 단건 API({@code PUT /{productId}/partner-visibility})와 **같은 규칙**을
+            쓴다 — 도서마다 그 API를 호출해 합산할 뿐이라 결과(열기/닫기/이미그상태)가
+            두 경로 사이에서 어긋나지 않는다.""")
+    @PutMapping("/partner-visibility/bulk")
+    public ApiResponse<com.daesung.sales.product.dto.ProductVisibilityCategoryBulkResult> bulkPartnerVisibilityByCategory(
+            @Valid @RequestBody com.daesung.sales.product.dto.ProductVisibilityCategoryBulkRequest req) {
+        return ApiResponse.success(partnerProductVisibilityService.bulkApplyByCategory(req));
     }
 
 
