@@ -31,9 +31,15 @@ import org.springframework.transaction.annotation.Transactional;
  * 특약점 재고현황. 근거: 10/31 클라이언트 회신 §3(10/26 §6 확정) + <b>11/05 회신 §4
  * 매입·반품 자동집계로 전면 재설계</b>.
  *
+ * <p>‼️<b>누가 무엇을 입력하는지</b>(PM 정정 2026-11-05, 레거시 {@code FM_DSRE_BookList}
+ * 확인): 매입·반품을 손으로 넣는 쪽은 <b>본사</b>다(DSRE [도서신청 주문내역]).
+ * <b>특약점은 재고만</b> 입력한다 — 사이트는 {@code STOCK}({@code EDIT_WEB})만 쓴다.
+ * 아래에서 "수기 입력"은 그래서 <b>본사가 DSRE에 넣던 값</b>을 가리킨다.
+ *
  * <pre>
  *   cutover 전(기본, {@code dealer_stock_cutover_setting.cutover_date} 비어 있음)
- *     로직   구매·반품·재고 전부 수기 입력, 출고 = 구매−재고−반품(계산만, 저장 안 함)
+ *     로직   매입·반품은 본사가 DSRE에 넣은 값(우리 쪽은 이관값), 재고는 특약점 입력,
+ *           출고 = 매입−재고−반품(계산만, 저장 안 함)
  *   cutover 후(기준일 설정됨)
  *     로직   매입 = 이관 시작값 + 기준일 이후 매출프로그램 정상출고(NORMAL_SHIP) 합계
  *           반품 = 이관 시작값 + 기준일 이후 매출프로그램 반품(RETURN) 합계
@@ -180,7 +186,7 @@ public class DealerStockService {
                 addedPurchase, addedReturn, stockUpdatedOn);
     }
 
-    /** cutover 가 설정되지 않았으면 비워 둔다(자동집계 없음 — 현행 수기입력 그대로). */
+    /** cutover 가 설정되지 않았으면 비워 둔다(자동집계 없음 — 매입·반품은 이관값 그대로). */
     private Map<Long, DealerStockPostCutoverAgg> postCutoverAggByProductId(Long partnerId) {
         DealerStockCutoverSetting setting = cutoverSetting();
         if (!setting.autoAggregationEnabled()) {
@@ -203,7 +209,7 @@ public class DealerStockService {
 
     /**
      * [관리자] 매입·반품 자동집계 전환일 변경 — 즉시 적용된다(배포 불필요, 11/05 §4).
-     * {@code cutoverDate=null} 이면 전환을 끄고 현행 수기입력으로 되돌린다.
+     * {@code cutoverDate=null} 이면 전환을 끄고 매입·반품이 이관값에서 멈추는 상태로 되돌린다.
      */
     @Transactional
     public DealerStockCutoverSettingResponse updateCutoverSetting(java.time.LocalDate cutoverDate) {

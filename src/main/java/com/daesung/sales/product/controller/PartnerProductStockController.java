@@ -43,7 +43,7 @@ public class PartnerProductStockController {
     }
 
     @Operation(summary = "재고현황 매입·반품 자동집계 전환일 조회",
-            description = "DB 설정값(V117) — null이면 아직 전환 전(지금처럼 수기입력).")
+            description = "DB 설정값(V117) — null이면 아직 전환 전(매입·반품이 이관값에서 멈춘 상태).")
     @GetMapping("/cutover-date")
     public ApiResponse<DealerStockCutoverSettingResponse> cutoverDate() {
         return ApiResponse.success(dealerStockService.getCutoverSetting());
@@ -51,7 +51,7 @@ public class PartnerProductStockController {
 
     @Operation(summary = "재고현황 매입·반품 자동집계 전환일 변경",
             description = "즉시 적용된다 — 배포·재시작 불필요(11/05 §4). cutoverDate를 null로 "
-                    + "보내면 전환을 끄고 현행 수기입력으로 되돌린다.")
+                    + "보내면 전환을 끄고 이관값에서 멈추는 상태로 되돌린다.")
     @PutMapping("/cutover-date")
     public ApiResponse<DealerStockCutoverSettingResponse> updateCutoverDate(
             @RequestBody DealerStockCutoverSettingUpdateRequest req) {
