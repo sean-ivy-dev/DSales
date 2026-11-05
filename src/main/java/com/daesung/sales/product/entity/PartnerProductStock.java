@@ -57,6 +57,16 @@ public class PartnerProductStock extends BaseEntity {
     @Column(name = "stock_qty", nullable = false)
     private int stockQty;
 
+    /**
+     * 재고(stockQty)를 마지막으로 <b>저장한 날</b>(특약점팀 요청 2026-11-05, V118).
+     *
+     * <p>★{@code BaseEntity.updatedAt} 과 다르다 — 그쪽은 이관 시딩·매입/반품 변경에도
+     * 바뀌는데, 이 값은 <b>재고를 고칠 때만</b> 바뀐다("내가 안 고쳤는데 날짜가 바뀌었다"가
+     * 되면 안 된다). 이관 행은 DSRE {@code EDIT_WEB} 값을 그대로 넣는다.
+     */
+    @Column(name = "stock_updated_on")
+    private java.time.LocalDate stockUpdatedOn;
+
     public static PartnerProductStock create(Partner partner, Product product,
                                               int purchaseQty, int returnQty, int stockQty) {
         PartnerProductStock e = new PartnerProductStock();
@@ -66,7 +76,10 @@ public class PartnerProductStock extends BaseEntity {
         return e;
     }
 
-    /** 현행(레거시)과 같은 덮어쓰기 — null인 항목은 그대로 둔다(부분 입력 허용). */
+    /**
+     * 현행(레거시)과 같은 덮어쓰기 — null인 항목은 그대로 둔다(부분 입력 허용).
+     * <b>재고를 받은 경우에만</b> {@link #stockUpdatedOn} 을 오늘로 올린다.
+     */
     public void apply(Integer purchaseQty, Integer returnQty, Integer stockQty) {
         if (purchaseQty != null) {
             this.purchaseQty = purchaseQty;
@@ -76,6 +89,17 @@ public class PartnerProductStock extends BaseEntity {
         }
         if (stockQty != null) {
             this.stockQty = stockQty;
+            this.stockUpdatedOn = java.time.LocalDate.now();
+        }
+    }
+
+    /**
+     * 이관 전용 — 재고 최종수정일을 <b>주어진 날짜로</b> 덮어쓴다(DSRE {@code EDIT_WEB}).
+     * {@code null}이면 건드리지 않는다(이관 원본에 값이 없던 행).
+     */
+    public void applyStockUpdatedOn(java.time.LocalDate stockUpdatedOn) {
+        if (stockUpdatedOn != null) {
+            this.stockUpdatedOn = stockUpdatedOn;
         }
     }
 

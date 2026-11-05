@@ -22,7 +22,12 @@ public record DealerStockRow(
         int returnQty,
         @Schema(description = "재고(수기입력, 항상)") int stockQty,
         @Schema(description = "출고 = 매입 − 재고 − 반품(서버가 계산, 저장하지 않음)")
-        int shipQty
+        int shipQty,
+        @Schema(description = "재고 최종수정일(특약점이 재고를 마지막으로 저장한 날). "
+                + "이관 행은 DSRE EDIT_WEB 값. 없으면 null. "
+                + "★이관·자동집계로는 바뀌지 않는다 — 재고를 저장할 때만 바뀐다",
+                example = "2026-11-05")
+        java.time.LocalDate stockUpdatedOn
 ) {
     /**
      * @param basePurchase  이관 시작값(또는 cutover 전엔 저장된 수기입력값) 매입
@@ -30,13 +35,15 @@ public record DealerStockRow(
      * @param stockQty      재고(항상 수기입력)
      * @param addedPurchase cutover 기준일 이후 매출프로그램 자동집계 매입(비활성 시 0)
      * @param addedReturn   같은 의미의 반품(비활성 시 0)
+     * @param stockUpdatedOn 재고 최종수정일(없으면 null)
      */
     public static DealerStockRow of(com.daesung.sales.product.entity.Product p,
                                      int basePurchase, int baseReturn, int stockQty,
-                                     int addedPurchase, int addedReturn) {
+                                     int addedPurchase, int addedReturn,
+                                     java.time.LocalDate stockUpdatedOn) {
         int purchase = basePurchase + addedPurchase;
         int ret = baseReturn + addedReturn;
         return new DealerStockRow(p.getCode(), p.getName(), p.getCatName(),
-                purchase, ret, stockQty, purchase - stockQty - ret);
+                purchase, ret, stockQty, purchase - stockQty - ret, stockUpdatedOn);
     }
 }

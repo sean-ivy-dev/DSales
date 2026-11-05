@@ -16,6 +16,10 @@ public record PartnerProductStockSeedRequest(
         @NotBlank String productCode,
         @Schema(description = "매입 이관 시작값") @PositiveOrZero Integer purchaseQty,
         @Schema(description = "반품 이관 시작값") @PositiveOrZero Integer returnQty,
-        @Schema(description = "재고 이관 시작값") @PositiveOrZero Integer stockQty
+        @Schema(description = "재고 이관 시작값") @PositiveOrZero Integer stockQty,
+        @Schema(description = "재고 최종수정일 — DSRE `tbl_booklist_cnt.EDIT_WEB`을 그대로 넘긴다. "
+                + "비우면 '재고를 지금 저장한 것'으로 보고 오늘 날짜가 찍힌다",
+                example = "2024-09-13")
+        java.time.LocalDate stockUpdatedOn
 ) {
 }

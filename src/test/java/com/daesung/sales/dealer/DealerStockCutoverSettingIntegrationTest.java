@@ -130,4 +130,68 @@ class DealerStockCutoverSettingIntegrationTest extends IntegrationTestSupport {
                 .as("cutover 후엔 수기 매입 입력이 무시된다 — 그대로 107").isEqualTo(107);
         assertThat(data(saveAttempt).path("stockQty").asInt()).as("재고는 수기 입력 그대로 반영").isEqualTo(30);
     }
+
+    @Test
+    @DisplayName("★★「매출만(배송X)」 건은 매입 집계에 안 들어간다(프론트 2026-11-05 지적)")
+    void 매출만_배송X는_집계제외() {
+        String code = "COC" + SFX;
+        Long productId = textbook(code);
+        put("/masters/partner-product-stock/cutover-date",
+                Map.of("cutoverDate", LocalDate.now().minusDays(10).toString()));
+        post("/masters/partner-product-stock/seed-baseline",
+                Map.of("items", java.util.List.of(Map.of(
+                        "partnerCode", partnerCode, "productCode", code,
+                        "purchaseQty", 50, "returnQty", 0, "stockQty", 0))));
+
+        Long wh = createId("/masters/warehouses",
+                Map.of("code", "COW2" + SFX, "name", "매출만창고", "type", "MAIN"));
+        Long sup = createId("/masters/clients",
+                Map.of("code", "COSUP2" + SFX, "name", "매출만입고처", "type", "NORMAL"));
+        post("/stock/inbound", Map.of("processedDate", LocalDate.now().toString(), "supplierClientId", sup,
+                "destinationWarehouseId", wh,
+                "items", java.util.List.of(Map.of("productId", productId, "unitCost", 1000, "qty", 100))));
+
+        // 「매출만(배송X)」로 등록 — 실제로 나가지 않았으므로 매입에 더해지면 안 된다.
+        post("/sales/entries", Map.of("salesDate", LocalDate.now().toString(),
+                "partnerId", partnerId, "warehouseId", wh, "onlySales", true,
+                "items", java.util.List.of(Map.of("productId", productId, "shipmentType", "NORMAL_SHIP", "qty", 11))));
+
+        JsonNode row = rowOf(code);
+        assertThat(row).isNotNull();
+        assertThat(row.path("purchaseQty").asInt())
+                .as("매출만(배송X) 11부는 빠지고 시작값 50 그대로").isEqualTo(50);
+    }
+
+    @Test
+    @DisplayName("★재고 최종수정일 — 재고 저장할 때만 바뀐다(이관값은 EDIT_WEB 그대로, 특약점팀 요청)")
+    void 재고최종수정일() {
+        String code = "COD" + SFX;
+        textbook(code);
+
+        // 이관: DSRE EDIT_WEB(2024-09-13)을 그대로 넘긴다 → 그 날짜가 유지돼야 한다.
+        post("/masters/partner-product-stock/seed-baseline",
+                Map.of("items", java.util.List.of(Map.of(
+                        "partnerCode", partnerCode, "productCode", code,
+                        "purchaseQty", 30, "returnQty", 0, "stockQty", 5,
+                        "stockUpdatedOn", "2024-09-13"))));
+        assertThat(rowOf(code).path("stockUpdatedOn").asText())
+                .as("이관 행은 EDIT_WEB 날짜 그대로 — '오늘'로 덮이면 지금 화면과 값이 달라진다")
+                .isEqualTo("2024-09-13");
+
+        // 특약점이 재고를 저장하면 그때 오늘로 바뀐다.
+        postAsDealerSite("/dealer-site/stock", Map.of("partnerCode", partnerCode,
+                "productCode", code, "stockQty", 7), DEALER_SITE_KEY);
+        assertThat(rowOf(code).path("stockUpdatedOn").asText())
+                .as("재고를 저장한 날로 갱신").isEqualTo(LocalDate.now().toString());
+    }
+
+    private JsonNode rowOf(String code) {
+        JsonNode list = getAsDealerSite("/dealer-site/stock?partnerCode=" + partnerCode, DEALER_SITE_KEY);
+        for (JsonNode r : list.path("data")) {
+            if (code.equals(r.path("productCode").asText())) {
+                return r;
+            }
+        }
+        return null;
+    }
 }

@@ -492,6 +492,7 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
              where s.partner.id = :partnerId
                and s.canceled = false
                and s.salesDate >= :from
+               and coalesce(s.onlySales, false) = false
              group by p.id
             """)
     java.util.List<com.daesung.sales.sale.dto.DealerStockPostCutoverAgg> dealerStockPostCutoverAgg(

@@ -129,7 +129,8 @@ public class DealerStockService {
         for (PartnerProductStockSeedRequest item : items) {
             try {
                 seedBaseline(item.partnerCode(), item.productCode(),
-                        item.purchaseQty(), item.returnQty(), item.stockQty());
+                        item.purchaseQty(), item.returnQty(), item.stockQty(),
+                        item.stockUpdatedOn());
                 succeeded++;
             } catch (BusinessException e) {
                 failures.add(new PartnerProductStockSeedResult.Failure(
@@ -139,10 +140,16 @@ public class DealerStockService {
         return new PartnerProductStockSeedResult(items.size(), succeeded, failures);
     }
 
-    /** {@link #seedBaselineBulk} 의 한 건 — 노출 판정 없이 바로 베이스라인을 쓴다. */
+    /**
+     * {@link #seedBaselineBulk} 의 한 건 — 노출 판정 없이 바로 베이스라인을 쓴다.
+     *
+     * <p>{@code stockUpdatedOn}(DSRE {@code EDIT_WEB})을 주면 재고 최종수정일을 그 날짜로
+     * 맞춘다 — 이관 행이 "오늘 고쳐진 것"으로 보이면 지금 화면과 값이 달라진다.
+     */
     @Transactional
     public DealerStockRow seedBaseline(String partnerCode, String productCode,
-                                       Integer purchaseQty, Integer returnQty, Integer stockQty) {
+                                       Integer purchaseQty, Integer returnQty, Integer stockQty,
+                                       java.time.LocalDate stockUpdatedOn) {
         Partner partner = requirePartner(partnerCode);
         Product product = productRepository.findByCode(productCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
@@ -155,6 +162,7 @@ public class DealerStockService {
                 })
                 .orElseGet(() -> stockRepository.save(PartnerProductStock.create(partner, product,
                         zeroIfNull(purchaseQty), zeroIfNull(returnQty), zeroIfNull(stockQty))));
+        saved.applyStockUpdatedOn(stockUpdatedOn);
 
         return toRow(product, saved, postCutoverAggByProductId(partner.getId()));
     }
@@ -168,7 +176,9 @@ public class DealerStockService {
         DealerStockPostCutoverAgg agg = aggByProductId.get(p.getId());
         int addedPurchase = (agg != null) ? (int) agg.getPurchasedQty() : 0;
         int addedReturn = (agg != null) ? (int) agg.getReturnedQty() : 0;
-        return DealerStockRow.of(p, basePurchase, baseReturn, stockQty, addedPurchase, addedReturn);
+        java.time.LocalDate stockUpdatedOn = (saved != null) ? saved.getStockUpdatedOn() : null;
+        return DealerStockRow.of(p, basePurchase, baseReturn, stockQty,
+                addedPurchase, addedReturn, stockUpdatedOn);
     }
 
     /** cutover 가 설정되지 않았으면 비워 둔다(자동집계 없음 — 현행 수기입력 그대로). */
