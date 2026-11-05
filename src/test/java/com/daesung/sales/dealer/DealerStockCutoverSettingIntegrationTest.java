@@ -185,6 +185,42 @@ class DealerStockCutoverSettingIntegrationTest extends IntegrationTestSupport {
                 .as("재고를 저장한 날로 갱신").isEqualTo(LocalDate.now().toString());
     }
 
+    @Test
+    @DisplayName("★이관에 최종수정일을 안 주면 비워 둔다 — 오늘로 찍지 않는다(2026-11-05 운영 검증에서 잡힌 결함)")
+    void 이관은_최종수정일을_오늘로_찍지않는다() {
+        String code = "COE" + SFX;
+        textbook(code);
+
+        // DSRE EDIT_WEB 이 비어 있던 행 — stockUpdatedOn 을 안 넘긴다.
+        post("/masters/partner-product-stock/seed-baseline",
+                Map.of("items", java.util.List.of(Map.of(
+                        "partnerCode", partnerCode, "productCode", code,
+                        "purchaseQty", 40, "returnQty", 0, "stockQty", 9))));
+
+        JsonNode row = rowOf(code);
+        assertThat(row).isNotNull();
+        assertThat(row.path("stockQty").asInt()).as("수량은 들어간다").isEqualTo(9);
+        assertThat(row.has("stockUpdatedOn"))
+                .as("이관은 '특약점이 저장한 것'이 아니다 — 날짜가 비어야 한다(null이면 응답에서 생략)")
+                .isFalse();
+
+        // 한 번 날짜가 찍힌 뒤에도, 날짜 없는 이관을 다시 돌리면 비워진다(덮어쓰기).
+        post("/masters/partner-product-stock/seed-baseline",
+                Map.of("items", java.util.List.of(Map.of(
+                        "partnerCode", partnerCode, "productCode", code,
+                        "purchaseQty", 40, "returnQty", 0, "stockQty", 9,
+                        "stockUpdatedOn", "2024-05-01"))));
+        assertThat(rowOf(code).path("stockUpdatedOn").asText()).isEqualTo("2024-05-01");
+
+        post("/masters/partner-product-stock/seed-baseline",
+                Map.of("items", java.util.List.of(Map.of(
+                        "partnerCode", partnerCode, "productCode", code,
+                        "purchaseQty", 40, "returnQty", 0, "stockQty", 9))));
+        assertThat(rowOf(code).has("stockUpdatedOn"))
+                .as("날짜 없는 재이관은 기존 날짜를 비운다 — DSRE에 없으면 우리도 없어야 한다")
+                .isFalse();
+    }
+
     private JsonNode rowOf(String code) {
         JsonNode list = getAsDealerSite("/dealer-site/stock?partnerCode=" + partnerCode, DEALER_SITE_KEY);
         for (JsonNode r : list.path("data")) {

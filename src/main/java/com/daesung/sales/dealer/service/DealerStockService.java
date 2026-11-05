@@ -155,14 +155,13 @@ public class DealerStockService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
                         "도서를 찾을 수 없습니다: " + productCode));
 
-        PartnerProductStock saved = stockRepository.findByPartnerIdAndProductId(partner.getId(), product.getId())
-                .map(e -> {
-                    e.apply(purchaseQty, returnQty, stockQty);
-                    return e;
-                })
-                .orElseGet(() -> stockRepository.save(PartnerProductStock.create(partner, product,
-                        zeroIfNull(purchaseQty), zeroIfNull(returnQty), zeroIfNull(stockQty))));
-        saved.applyStockUpdatedOn(stockUpdatedOn);
+        PartnerProductStock saved = stockRepository
+                .findByPartnerIdAndProductId(partner.getId(), product.getId())
+                .orElseGet(() -> stockRepository.save(
+                        PartnerProductStock.create(partner, product, 0, 0, 0)));
+        // ★이관은 apply()가 아니라 applyBaselineSeed() — 재고를 넘겨도 최종수정일을
+        //   오늘로 찍지 않는다(찍으면 특약점 화면이 "안 고쳤는데 오늘 고침"으로 보인다).
+        saved.applyBaselineSeed(purchaseQty, returnQty, stockQty, stockUpdatedOn);
 
         return toRow(product, saved, postCutoverAggByProductId(partner.getId()));
     }
