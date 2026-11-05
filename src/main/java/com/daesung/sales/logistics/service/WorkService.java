@@ -115,11 +115,21 @@ public class WorkService {
      * 그 건들은 여러 주문이 한 건에 합쳐져 있어 주문 하나로 되돌릴 수 없으므로,
      * <b>주문을 뺀 네 칸으로 맞춘다</b>({@link #legacyKey}). 소급해 채우면 없던 사실을 만드는 것이다.
      */
-    /** 박스별 송장을 응답 모양으로. 명세 §8-3 — 박스 수만큼 줄이 있다. */
+    /**
+     * 박스별 송장을 응답 모양으로. 명세 §8-3 — 박스 수만큼 줄이 있다.
+     *
+     * <p>★택배사는 {@link com.daesung.sales.logistics.entity.CourierCompany#displayLabel}을
+     * 통과시킨다(10/31 §2 "courier_name 이 비어 있으면 CJ대한통운으로 간주"). 예전엔 여기서
+     * 원문을 그대로 내보내, 코드화 전에 등록된 건(택배사 공란)이 <b>특약점 사이트 거래명세서엔
+     * "CJ대한통운", 백오피스 작업요청서엔 빈 칸</b>으로 서로 다르게 보였다 — 담당자가 빈 칸을
+     * 보고 미입력으로 판단해 다시 입력할 수 있었다. 규칙은 하나이므로 구현도 한 곳만 쓴다.
+     */
     private static List<WorkOrderResponse.Tracking> trackingsOf(Shipment s) {
         List<WorkOrderResponse.Tracking> out = new ArrayList<>();
         for (var t : s.getTrackings()) {
-            out.add(new WorkOrderResponse.Tracking(t.getBoxNo(), t.getCourierName(), t.getTrackingNo()));
+            out.add(new WorkOrderResponse.Tracking(t.getBoxNo(),
+                    com.daesung.sales.logistics.entity.CourierCompany.displayLabel(t.getCourierName()),
+                    t.getTrackingNo()));
         }
         // 읽는 쪽에서도 한 번 더 못 박는다 — 정렬을 JPA 동작에 기대면 조용히 섞인다.
         out.sort(java.util.Comparator.comparingInt(WorkOrderResponse.Tracking::boxNo));
@@ -383,7 +393,9 @@ public class WorkService {
                     dt, (dt == null) ? null : dt.label(),
                     s.getReceiverName(), s.getReceiverPhone(), s.getReceiverEmail(),
                     s.getZipCode(), s.getAddress(),
-                    s.getCourierName(), s.getTrackingNo(),
+                    // 택배사 표기는 displayLabel 한 곳으로 — 사이트/백오피스가 다르게 보이면 안 된다.
+                    com.daesung.sales.logistics.entity.CourierCompany.displayLabel(s.getCourierName()),
+                    s.getTrackingNo(),
                     trackingsOf(s),
                     total, lines));
         }

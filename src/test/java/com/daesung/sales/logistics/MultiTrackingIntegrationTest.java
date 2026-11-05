@@ -149,6 +149,25 @@ class MultiTrackingIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
+    @org.junit.jupiter.api.Order(6)
+    @DisplayName("★★택배사 공란은 작업요청서에서도 CJ대한통운으로 보인다 — 사이트와 같은 규칙(2026-11-04)")
+    void 택배사_공란_표기가_사이트와_같다() {
+        // 10/31 §2: "courier_name 이 비어 있으면 CJ대한통운으로 간주".
+        // ‼️예전엔 이 규칙이 **특약점 사이트 경로에만** 적용돼, 코드화 전에 등록된 건(택배사
+        //   공란)이 사이트 거래명세서엔 "CJ대한통운", 백오피스 작업요청서엔 빈 칸으로 서로
+        //   다르게 보였다. 담당자가 빈 칸을 보고 미입력으로 판단해 다시 입력할 수 있었다.
+        //   규칙은 하나이므로 두 경로가 같은 값을 보여야 한다.
+        put("/logistics/work-orders/" + shipmentId + "/trackings", Map.of(
+                "trackings", List.of(Map.of("boxNo", 1, "trackingNo", "NOCOURIER-1"))));
+
+        JsonNode o = order();
+        assertThat(o.path("trackings").get(0).path("courierName").asText())
+                .as("박스별 송장도 공란이면 CJ대한통운").isEqualTo("CJ대한통운");
+        assertThat(o.path("courierName").asText())
+                .as("발송 건 단일 필드도 같은 규칙").isEqualTo("CJ대한통운");
+    }
+
+    @Test
     @org.junit.jupiter.api.Order(5)
     @DisplayName("기존 단건 입력도 그대로 동작한다 — 1번 박스로 들어간다")
     void 단건입력_호환() {
