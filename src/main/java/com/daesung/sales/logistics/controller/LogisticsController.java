@@ -145,8 +145,13 @@ public class LogisticsController {
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("기본작업비", "basicAmount"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("출고비", "tradeAmount"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("금액합계", "totalAmount"));
+        // 제목·조회기준 2행 + 집계행 색(발주처 검수 F-33). 집계행(시행계·학년계·상품계·총계)은
+        // 응답에 이미 들어 있는데 이 두 인자를 안 넘겨 본문과 같은 서식으로 나가고 있었다.
         byte[] xlsx = excel.toXlsx("물류작업비", cols,
-                logisCostDetailService.outboundDetail(fromDate, toDate, mode, dtlCds, includeCancel, grain).rows());
+                logisCostDetailService.outboundDetail(fromDate, toDate, mode, dtlCds, includeCancel, grain).rows(),
+                com.daesung.sales.common.excel.ExcelExportUtil.Heading.period(
+                        "물류비계산", fromDate, toDate),
+                com.daesung.sales.common.excel.ExcelExportUtil.AGG_BY_ROW_TYPE);
         return excel.asDownload(xlsx, "물류작업비_" + fromDate + "_" + toDate + ".xlsx");
     }
 

@@ -73,9 +73,14 @@ public class ProductController {
                     ★기본(미지정)은 **전체 칸 그대로**다 — 다른 화면이 쓰는 칸을 말없이 빼면 그쪽이 깨진다.""",
                     schema = @io.swagger.v3.oas.annotations.media.Schema(allowableValues = {"slim"}))
             @RequestParam(required = false) String view,
+            @Parameter(description = "사용여부 N(=삭제한 도서)도 포함할지. 기본 false(제외). "
+                    + "근거: 발주처 검수 F-36 — 삭제 API가 use_yn=false 논리삭제인데 목록이 그걸 "
+                    + "안 걸러서 \"삭제했는데 그대로 보인다\"가 됐다. 지난 도서를 봐야 할 때만 켠다.")
+            @RequestParam(defaultValue = "false") boolean includeUnused,
             @ParameterObject PageRequestDto pageReq) {
         var page = productService.findAll(
-                keyword, ledgerVisible, priceVisible, updatedSince, pageReq.toPageable());
+                keyword, ledgerVisible, priceVisible, updatedSince, includeUnused,
+                pageReq.toPageable());
         // ‼️대소문자를 접지 않고 **정확히** 비교한다. 접으면 정적분석(IMPROPER_UNICODE)에 걸리고,
         //   로케일을 명시해도 마찬가지다 — 규칙이 '대소문자 변환 후 분기' 자체를 본다.
         //   값은 우리가 정하는 것이라(화면이 보내는 고정 문자열) 접을 이유가 없다.

@@ -51,7 +51,7 @@ public class ProductService {
      */
     public PageResponse<ProductResponse> findAll(String keyword, Boolean ledgerVisible,
                                                  Boolean priceVisible, Pageable pageable) {
-        return findAll(keyword, ledgerVisible, priceVisible, null, pageable);
+        return findAll(keyword, ledgerVisible, priceVisible, null, false, pageable);
     }
 
     /** 위와 같되 {@code updatedSince} 이후 등록·수정된 것만(B-1). */
@@ -59,8 +59,23 @@ public class ProductService {
                                                  Boolean priceVisible,
                                                  java.time.LocalDateTime updatedSince,
                                                  Pageable pageable) {
+        return findAll(keyword, ledgerVisible, priceVisible, updatedSince, false, pageable);
+    }
+
+    /**
+     * 위와 같되 사용여부 N(=삭제한 도서)을 포함할지 고를 수 있다.
+     *
+     * <p>근거: 발주처 검수 F-36. 기본은 <b>제외</b>다 — 삭제 API가 {@code use_yn=false}
+     * 논리삭제인데 목록이 그걸 안 걸러서 "지웠는데 그대로 있다"로 보였다.
+     */
+    public PageResponse<ProductResponse> findAll(String keyword, Boolean ledgerVisible,
+                                                 Boolean priceVisible,
+                                                 java.time.LocalDateTime updatedSince,
+                                                 boolean includeUnused,
+                                                 Pageable pageable) {
         String kw = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
-        Page<Product> page = productRepository.search(kw, ledgerVisible, priceVisible, updatedSince, pageable);
+        Page<Product> page = productRepository.search(
+                kw, ledgerVisible, priceVisible, includeUnused, updatedSince, pageable);
         // 세부구분 마스터는 몇 줄짜리라 한 번에 읽어 맵으로 쓴다 — 상품마다 조회하면 목록 한 장에 수백 번이 된다.
         Map<String, SalesDivision> divisions = divisionsByCode();
         return PageResponse.of(page.map(p -> ProductResponse.from(p, divisions.get(p.getSalesDivision()))));

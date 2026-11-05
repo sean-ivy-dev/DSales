@@ -101,6 +101,21 @@ public class ExcelExportUtil {
     }
 
     /**
+     * 집계행 판정자 — <b>{@code rowType} 이 {@code DETAIL} 이 아니면 집계행</b>.
+     *
+     * <p>★같은 식을 리포트마다 새로 쓰지 않기 위해 상수로 둔다. 우리 리포트는 전부
+     * {@code rowType} 에 {@code DETAIL}/소계/합계/총계를 담는 같은 규약을 쓴다
+     * (물류작업비 {@code DTL_SUBTOTAL}·{@code GRADE_SUBTOTAL}·{@code PRODUCT_SUBTOTAL}·
+     * {@code TOTAL}, 매출액명세서·월별매출액명세서 {@code MAJOR_SUBTOTAL}·
+     * {@code GRAND_TOTAL} 등). 판정식을 export 마다 적으면 한 곳만 고쳐져 어긋난다.
+     *
+     * <p>근거: 발주처 검수 F-19·F-28·F-33 — "집계행에 색이 없다". 행 자체는 이미 들어가는데
+     * 이 판정자를 {@code toXlsx} 에 넘기지 않아 색이 안 입던 export 가 8개였다.
+     */
+    public static final java.util.function.Predicate<Map<String, Object>> AGG_BY_ROW_TYPE =
+            m -> m.get("rowType") != null && !"DETAIL".equals(m.get("rowType"));
+
+    /**
      * 필드 값 추출. 평범한 키 외에 <b>{@code 이름[인덱스]}</b> 표기를 지원한다.
      *
      * <p>월별 크로스탭(1월[수량] … 12월[수량])처럼 값이 리스트로 오는 리포트가 있는데,

@@ -84,13 +84,14 @@ public interface ConsignmentOutRepository extends JpaRepository<ConsignmentOut, 
             select c.tradeDate as tradeDate, c.partner.id as partnerId,
                    coalesce(c.schoolCode, '') as schoolCode,
                    coalesce(p.salesDivision, '') as tradeClass,
-                   p.catCode as catCode, p.code as productCode, p.name as productName,
+                   p.catCode as catCode, p.catName as catName,
+                   p.code as productCode, p.name as productName,
                    c.unitPrice as unitPrice, c.supplyRate as supplyRate,
                    sum(c.originalQty) as qty
               from ConsignmentOut c join c.product p
              where c.tradeDate between :from and :to
              group by c.tradeDate, c.partner.id, coalesce(c.schoolCode, ''),
-                      coalesce(p.salesDivision, ''), p.catCode, p.code, p.name,
+                      coalesce(p.salesDivision, ''), p.catCode, p.catName, p.code, p.name,
                       c.unitPrice, c.supplyRate
             """)
     java.util.List<ConsignWorkOrderLine> workOrderLines(
@@ -108,6 +109,9 @@ public interface ConsignmentOutRepository extends JpaRepository<ConsignmentOut, 
         String getTradeClass();
 
         String getCatCode();
+
+        /** 분류명. 근거: 발주처 검수 F-29 — 작업요청서에 분류가 코드로 보인다는 지적. */
+        String getCatName();
 
         String getProductCode();
 

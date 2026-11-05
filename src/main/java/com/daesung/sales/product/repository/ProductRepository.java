@@ -72,6 +72,12 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * 이관 뒤 도서가 14,808권(약 5.4MB)이 되어 화면이 30분마다 전량을 다시 받고 있었다.
      * ‼️{@code coalesce(updatedAt, createdAt)} 로 본다 — 등록만 하고 한 번도 안 고친 도서는
      * {@code updatedAt} 이 비어 있어서, 그것만 보면 <b>새로 등록된 도서가 영영 안 잡힌다</b>.
+     *
+     * <p>★{@code includeUnused} — 기본 {@code false}로 <b>사용여부 N(=삭제한 도서)을 뺀다</b>.
+     * 근거: 발주처 검수 F-36 — "삭제 기능이 없다"는 지적의 실제 원인이 이것이었다.
+     * 삭제 API({@code DELETE /masters/products/{id}})가 {@code use_yn=false} 논리삭제인데
+     * 이 쿼리에 {@code useYn} 조건이 없어 <b>지운 도서가 목록에 계속 보였다</b>.
+     * 거래처의 {@code includeExpired} 와 같은 방식 — 지난 것을 봐야 할 때만 켠다.
      */
     @org.springframework.data.jpa.repository.Query("""
             select p from Product p
@@ -79,6 +85,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
                     or lower(p.name) like lower(concat('%', :keyword, '%')))
                and (:ledgerVisible is null or p.ledgerVisible = :ledgerVisible)
                and (:priceVisible is null or p.priceVisible = :priceVisible)
+               and (:includeUnused = true or p.useYn = true)
                and (:updatedSince is null
                     or coalesce(p.updatedAt, p.createdAt) >= :updatedSince)
             """)
@@ -86,6 +93,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             @org.springframework.data.repository.query.Param("keyword") String keyword,
             @org.springframework.data.repository.query.Param("ledgerVisible") Boolean ledgerVisible,
             @org.springframework.data.repository.query.Param("priceVisible") Boolean priceVisible,
+            @org.springframework.data.repository.query.Param("includeUnused") boolean includeUnused,
             @org.springframework.data.repository.query.Param("updatedSince") java.time.LocalDateTime updatedSince,
             org.springframework.data.domain.Pageable pageable);
 

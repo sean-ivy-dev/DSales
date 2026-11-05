@@ -27,10 +27,20 @@ public class WarehouseService {
     private final com.daesung.sales.inventory.repository.InventoryRepository inventoryRepository;
 
     public PageResponse<WarehouseResponse> findAll(String keyword, Pageable pageable) {
-        Page<Warehouse> page = (keyword == null || keyword.isBlank())
-                ? warehouseRepository.findAll(pageable)
-                : warehouseRepository.findByCodeContainingIgnoreCaseOrNameContainingIgnoreCase(
-                        keyword, keyword, pageable);
+        return findAll(keyword, false, pageable);
+    }
+
+    /**
+     * 창고 목록 — 기본은 <b>사용 중지한 창고 제외</b>.
+     *
+     * <p>‼️{@code discontinue()} 주석이 "미사용 창고는 목록·선택지에서 빠진다"고 적어 둔 것이
+     * 실제로는 안 지켜지고 있었다(쿼리에 조건이 없었다). 중지한 창고가 출고 창고 드롭다운에
+     * 계속 떠서 담당자가 고를 수 있었다 — 도서 목록의 같은 결함(발주처 검수 F-36)과 함께 고친다.
+     */
+    public PageResponse<WarehouseResponse> findAll(String keyword, boolean includeUnused,
+                                                   Pageable pageable) {
+        String kw = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
+        Page<Warehouse> page = warehouseRepository.search(kw, includeUnused, pageable);
         return PageResponse.of(page.map(WarehouseResponse::from));
     }
 

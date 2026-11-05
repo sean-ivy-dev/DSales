@@ -355,9 +355,11 @@ public class WorkService {
                                     c.getTradeClass()),
                             k -> new ArrayList<>())
                     .add(new WorkOrderResponse.Line(c.getCatCode(),
-                            // ★위탁출고 집계엔 세부구분·분류명 칸이 없다 — 억지로 분류(tradeClass)를
-                            //   넣지 않고 비운다(틀린 값을 채우면 화면이 그걸 믿는다).
-                            null, null,
+                            // 세부구분·분류명을 채운다(발주처 검수 F-29 — 작업요청서에 분류가
+                            // 코드로 보인다는 지적). 예전엔 "집계에 칸이 없다"고 비워 뒀는데
+                            // **세부구분은 이미 뽑고 있었고**(tradeClass=salesDivision) 분류명만
+                            // 없었다 — 쿼리에 p.catName 을 더해 둘 다 내려준다.
+                            c.getTradeClass(), c.getCatName(),
                             c.getProductCode(),
                             c.getProductName(), null, c.getUnitPrice(), c.getSupplyRate(),
                             c.getQty() == null ? 0 : c.getQty(), 0));

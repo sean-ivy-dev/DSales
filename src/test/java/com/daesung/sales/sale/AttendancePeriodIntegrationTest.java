@@ -114,10 +114,27 @@ class AttendancePeriodIntegrationTest extends IntegrationTestSupport {
                 .getBody();
         try (var wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook(
                 new java.io.ByteArrayInputStream(xlsx))) {
-            var header = wb.getSheetAt(0).getRow(0);
+            // ‼️0행을 헤더로 보면 안 된다 — 제목·조회기준 2행이 붙으면(2026-11-05 F-19 대응으로
+            //   응시현황에도 붙였다) 헤더가 아래로 밀린다. 칸이 2개 이상 채워진 첫 행이 헤더다.
+            var sheet = wb.getSheetAt(0);
+            org.apache.poi.ss.usermodel.Row header = null;
+            for (org.apache.poi.ss.usermodel.Row row : sheet) {
+                int filled = 0;
+                for (int i = 0; i < row.getLastCellNum(); i++) {
+                    if (row.getCell(i) != null) {
+                        filled++;
+                    }
+                }
+                if (filled > 1) {
+                    header = row;
+                    break;
+                }
+            }
+            assertThat(header).as("헤더 행을 찾지 못했다").isNotNull();
             int n = 0;
             for (int i = 0; i < header.getLastCellNum(); i++) {
-                if (MONTH_HEADER.matcher(header.getCell(i).getStringCellValue()).matches()) {
+                var cell = header.getCell(i);
+                if (cell != null && MONTH_HEADER.matcher(cell.getStringCellValue()).matches()) {
                     n++;
                 }
             }

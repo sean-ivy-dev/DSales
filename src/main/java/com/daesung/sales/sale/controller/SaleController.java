@@ -735,7 +735,8 @@ public class SaleController {
                 new Col("금액", "amount"), new Col("세액", "tax"), new Col("합계", "total"));
         byte[] xlsx = excel.toXlsx("매출액명세서", cols,
                 saleReportService.statement(from, to, partnerId, kind, salesType, tradeClasses, keyword).rows(),
-                Heading.period("매출액명세서", from, to));
+                Heading.period("매출액명세서", from, to),
+                com.daesung.sales.common.excel.ExcelExportUtil.AGG_BY_ROW_TYPE);
         return excel.asDownload(xlsx, "매출액명세서_" + from + "_" + to + ".xlsx");
     }
 
@@ -771,7 +772,8 @@ public class SaleController {
                 new Col("계인원", "totalQty"), new Col("계금액", "totalAmount"),
                 new Col("과세매출액", "taxableAmount"), new Col("부가세", "vat"));
         byte[] xlsx = excel.toXlsx("월별매출액명세서", cols, saleReportService.monthlyStatement(y, m).rows(),
-                new Heading("월별매출액명세서", "조회기준 : " + y + "년 " + m + "월"));
+                new Heading("월별매출액명세서", "조회기준 : " + y + "년 " + m + "월"),
+                com.daesung.sales.common.excel.ExcelExportUtil.AGG_BY_ROW_TYPE);
         return excel.asDownload(xlsx, "월별매출액명세서_" + y + "-" + String.format("%02d", m) + ".xlsx");
     }
 
@@ -1068,7 +1070,9 @@ public class SaleController {
         }
         cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("합계[수량]", "totalQty"));
         cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("합계[매출]", "totalAmount"));
-        byte[] xlsx = excel.toXlsx("응시현황", cols, attendanceService.yearly(year, grade, productType, keyword).rows());
+        byte[] xlsx = excel.toXlsx("응시현황", cols, attendanceService.yearly(year, grade, productType, keyword).rows(),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Heading("응시현황(연도별)", "조회기준 : " + year + "년"),
+                com.daesung.sales.common.excel.ExcelExportUtil.AGG_BY_ROW_TYPE);
         return excel.asDownload(xlsx, "응시현황_연도별.xlsx");
     }
 
@@ -1089,7 +1093,7 @@ public class SaleController {
         byte[] xlsx = excel.toXlsx("회차별작업현황", cols,
                 Keywords.filter(saleReportService.roundWorkStatus(fromDate, toDate, catCode), keyword,
                         x -> new Object[]{x.catCode(), x.catName(), x.productCode(), x.productName()}),
-                Heading.period("회차별작업현황", fromDate, toDate));
+                Heading.period("회차별작업현황", fromDate, toDate), com.daesung.sales.common.excel.ExcelExportUtil.AGG_BY_ROW_TYPE);
         return excel.asDownload(xlsx, "회차별작업현황.xlsx");
     }
 
@@ -1170,7 +1174,9 @@ public class SaleController {
         cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("합계[처리]", "gradedTotal"));
         cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("합계[비처리]", "ungradedTotal"));
         cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("합계[계]", "total"));
-        byte[] xlsx = excel.toXlsx("응시현황(기간별)", cols, res.rows());
+        byte[] xlsx = excel.toXlsx("응시현황(기간별)", cols, res.rows(),
+                com.daesung.sales.common.excel.ExcelExportUtil.Heading.period("응시현황(기간별)", fromDate, toDate),
+                com.daesung.sales.common.excel.ExcelExportUtil.AGG_BY_ROW_TYPE);
         return excel.asDownload(xlsx, "응시현황_기간별_" + fromDate + "_" + toDate + ".xlsx");
     }
 

@@ -20,6 +20,24 @@ public interface WarehouseRepository extends JpaRepository<Warehouse, Long> {
             String code, String name, Pageable pageable);
 
     /**
+     * 창고 목록 검색 — 검색어(코드·창고명) + 사용여부.
+     *
+     * <p>‼️{@code includeUnused} 기본 {@code false}로 <b>사용 중지한 창고를 뺀다</b>.
+     * {@code discontinue()} 주석이 "미사용 창고는 목록·선택지에서 빠진다"고 적어 뒀는데
+     * <b>실제로는 안 빠지고 있었다</b>(쿼리에 조건이 없었다) — 중지한 창고가 출고 창고
+     * 드롭다운에 계속 떴다. 도서 목록의 같은 결함(발주처 검수 F-36)과 한 뿌리다.
+     */
+    @Query("""
+            select w from Warehouse w
+             where (:keyword is null or lower(w.code) like lower(concat('%', :keyword, '%'))
+                    or lower(w.name) like lower(concat('%', :keyword, '%')))
+               and (:includeUnused = true or w.useYn = true)
+            """)
+    Page<Warehouse> search(@Param("keyword") String keyword,
+                           @Param("includeUnused") boolean includeUnused,
+                           Pageable pageable);
+
+    /**
      * 그 거래처의 <b>위탁창고</b> — 주문 등록에서 위탁출고를 받을 때 도착 창고를 찾는다
      * (10/27 명세 §4-1 "주문 등록의 출고유형에 '위탁출고'를 포함", 프론트 C-1).
      *

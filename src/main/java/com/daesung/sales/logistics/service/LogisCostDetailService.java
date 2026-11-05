@@ -272,8 +272,14 @@ public class LogisCostDetailService {
             basicAmount += r.basicAmount();
             tradeAmount += r.tradeAmount();
             totalAmount += r.totalAmount();
-            // 접수일자는 가장 이른 것으로 — 거래처 축에서 여러 신청이 합쳐질 때 기준이 필요하다.
-            if (reqDate == null || (r.reqDate() != null && r.reqDate().isBefore(reqDate))) {
+            // 접수일자는 **가장 늦은 것**으로 — 거래처 축에서 여러 신청이 합쳐질 때 기준이 필요하다.
+            //
+            // ‼️레거시와 같은 방향이어야 한다(발주처 검수 F-34). 레거시는
+            //   `ELSE DATE_FORMAT(max(REQ_DATE), '%Y.%m.%d')`(물류비계산2.vb:421)로 **max**를 쓴다.
+            //   우리가 min(isBefore)을 쓰던 동안 2026-09 대조에서 138행 중 56행이 어긋났고
+            //   **56행 전부 우리 쪽이 더 일렀다**(늦은 건 0) — 한 거래처가 한 시행에 신청을
+            //   여러 번 낸 행만, 전부 같은 방향으로 어긋난 것이 그 증거다.
+            if (reqDate == null || (r.reqDate() != null && r.reqDate().isAfter(reqDate))) {
                 reqDate = r.reqDate();
             }
         }

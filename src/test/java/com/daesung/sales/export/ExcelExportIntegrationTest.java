@@ -187,13 +187,16 @@ class ExcelExportIntegrationTest extends IntegrationTestSupport {
         // ★이 화면이 실제로 깨졌던 곳이다 — 헤더 31칸 중 월별 24칸이 통째로 비어 나왔다.
         var att = read("/sales/attendance-yearly/export?year=" + YEAR);
         assertHeader(att, "응시현황", "특약점코드", "1월[수량]", "12월[매출]", "합계[수량]");
-        assertThat(att.get(0)).as("응시현황 컬럼 수").hasSize(31);
+        // ‼️0행이 아니라 headerRow 로 찾는다 — 제목·조회기준 2행이 붙으면(2026-11-05 F-19 대응으로
+        //   응시현황에도 붙였다) 헤더가 0행이 아니다. 0행을 박아 두면 제목만 추가해도 깨진다.
+        int hr = headerRow(att);
+        assertThat(att.get(hr)).as("응시현황 컬럼 수").hasSize(31);
         assertFilled(att, "응시현황", 10);
 
         // 3월 매출을 넣었으므로 3월[수량] 칸에 값이 있어야 한다(칸 위치까지 확인).
-        int idx = att.get(0).indexOf("3월[수량]");
+        int idx = att.get(hr).indexOf("3월[수량]");
         assertThat(idx).as("3월[수량] 컬럼 위치").isGreaterThan(0);
-        boolean any = att.stream().skip(1)
+        boolean any = att.stream().skip(hr + 1L)
                 .anyMatch(r -> idx < r.size() && r.get(idx) instanceof Number n && n.longValue() == 100);
         assertThat(any).as("3월[수량]=100이 실제 칸에 들어 있어야 한다").isTrue();
     }

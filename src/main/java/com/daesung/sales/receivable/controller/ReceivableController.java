@@ -259,7 +259,8 @@ public class ReceivableController {
         List<ArStatusResponse.Row> rows =
                 receivableService.arStatus(fromDate, toDate, partnerId, partnerId == null).rows();
         byte[] xlsx = excel.toXlsx("미수금현황", arStatusCols(), arStatusRows(rows),
-                Heading.period("외상매출현황조회", fromDate, toDate));
+                Heading.period("외상매출현황조회", fromDate, toDate),
+                com.daesung.sales.common.excel.ExcelExportUtil.AGG_BY_ROW_TYPE);
         return excel.asDownload(xlsx, "미수금현황.xlsx");
     }
 
@@ -279,7 +280,8 @@ public class ReceivableController {
         // ★매출상세(arStatusRows)와 달리 **수동 평탄화가 필요 없다** — 담보보기 컬럼은 전부
         //   Row의 단순 필드(리스트인 byCategory는 안 씀)라 record를 그대로 Jackson이 펼친다.
         byte[] xlsx = excel.toXlsx("미수금현황(담보보기)", arStatusCollateralCols(), rows,
-                Heading.period("외상매출현황조회(담보보기)", fromDate, toDate));
+                Heading.period("외상매출현황조회(담보보기)", fromDate, toDate),
+                com.daesung.sales.common.excel.ExcelExportUtil.AGG_BY_ROW_TYPE);
         return excel.asDownload(xlsx, "미수금현황_담보보기.xlsx");
     }
 

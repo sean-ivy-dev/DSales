@@ -417,6 +417,31 @@ class SalesReportIntegrationTest extends IntegrationTestSupport {
         JsonNode grand = rowWhere(rows, "rowType", "GRAND_TOTAL");
         assertThat(grand.path("gradedQty").asLong()).isEqualTo(30);
         assertThat(grand.path("totalQty").asLong()).isEqualTo(50);
+
+        // ★분류 계 행(발주처 검수 F-21) — 대분류 > **분류명** > 도서 3단계.
+        //   이 행이 없어서 같은 도서명이 분류마다 따로 찍히는 게 "중복 표시"로 보였다(F-20).
+        JsonNode catSub = rowWhere(rows, "rowType", "CAT_SUBTOTAL");
+        assertThat(catSub).as("분류 계 행이 있어야 한다").isNotNull();
+        assertThat(catSub.path("catName").asText()).as("분류 계는 분류명을 담는다").isNotBlank();
+        // ‼️null 필드는 응답에서 **생략**된다(NON_NULL) — `path(..).isNull()` 은 '없는 필드'에
+        //   false 를 주므로 쓰면 안 된다. 같은 함정에 두 번 걸렸다(stockUpdatedOn).
+        assertThat(catSub.has("bookCode")).as("분류 계엔 도서코드가 없다").isFalse();
+        assertThat(catSub.path("totalQty").asLong()).isEqualTo(50);
+
+        // 순서: 분류 계가 대분류 계보다 **먼저** 나온다(분류들 → 대분류).
+        int catIdx = -1;
+        int majorIdx = -1;
+        for (int i = 0; i < rows.size(); i++) {
+            String t = rows.get(i).path("rowType").asText();
+            if (catIdx < 0 && "CAT_SUBTOTAL".equals(t)) {
+                catIdx = i;
+            }
+            if (majorIdx < 0 && "MAJOR_SUBTOTAL".equals(t)) {
+                majorIdx = i;
+            }
+        }
+        assertThat(catIdx).isGreaterThanOrEqualTo(0);
+        assertThat(majorIdx).isGreaterThan(catIdx);
     }
 
     @Test

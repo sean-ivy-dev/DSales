@@ -33,12 +33,18 @@ public class WarehouseController {
     private final WarehouseService warehouseService;
     private final com.daesung.sales.common.excel.ExcelExportUtil excel;
 
-    @Operation(summary = "창고 목록 조회", description = "keyword(코드/명 부분일치)로 검색, 페이징·정렬 지원")
+    @Operation(summary = "창고 목록 조회",
+            description = "keyword(코드/명 부분일치)로 검색, 페이징·정렬 지원. "
+                    + "기본으로 사용 중지한 창고는 제외한다(includeUnused=true로 포함).")
     @GetMapping
     public ApiResponse<PageResponse<WarehouseResponse>> list(
             @Parameter(description = "검색어(창고코드 또는 창고명 부분일치)") @RequestParam(required = false) String keyword,
+            @Parameter(description = "사용 중지한 창고도 포함할지. 기본 false(제외) — "
+                    + "중지한 창고가 출고 창고 선택지에 계속 뜨던 것을 막는다.")
+            @RequestParam(defaultValue = "false") boolean includeUnused,
             @ParameterObject PageRequestDto pageReq) {
-        return ApiResponse.success(warehouseService.findAll(keyword, pageReq.toPageable()));
+        return ApiResponse.success(
+                warehouseService.findAll(keyword, includeUnused, pageReq.toPageable()));
     }
 
     @Operation(summary = "창고 목록 엑셀 다운로드", description = "검색조건 전체를 xlsx로.")

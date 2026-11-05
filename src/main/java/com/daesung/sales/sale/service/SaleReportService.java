@@ -622,11 +622,28 @@ public class SaleReportService {
                 .thenComparing(r -> blank((String) r[1]))
                 .thenComparing(r -> blank((String) r[4])));
 
+        // 분류 계(발주처 검수 F-21) — 대분류 안에서 분류가 바뀔 때 끊는다.
+        // ★대분류 소계보다 **먼저** 찍어야 한다(분류 계들 → 대분류 계 순).
+        long[] cat = new long[6];
+        String curCat = null;
+        String curCatName = null;
+        boolean catOpen = false;
+
         for (Object[] r : aggs) {
             String m = (r[0] == null) ? null : r[0].toString();
+            String catCode = (String) r[1];
+            String catName = (String) r[2];
             long[] v = {num(r[6]), num(r[7]), num(r[8]), num(r[9]), num(r[10]), num(r[11])};
 
-            if (majorOpen && !java.util.Objects.equals(m, curMajor)) {
+            boolean majorChanged = majorOpen && !java.util.Objects.equals(m, curMajor);
+            boolean catChanged = catOpen
+                    && (majorChanged || !java.util.Objects.equals(catCode, curCat));
+            if (catChanged) {
+                rows.add(catRow(curMajor, curCatName, cat));
+                cat = new long[6];
+                catOpen = false;
+            }
+            if (majorChanged) {
                 rows.add(majorRow(MonthlyStatementResponse.Row.RowType.MAJOR_SUBTOTAL, curMajor, major));
                 major = new long[6];
                 majorOpen = false;
@@ -635,20 +652,40 @@ public class SaleReportService {
                 curMajor = m;
                 majorOpen = true;
             }
+            if (!catOpen) {
+                curCat = catCode;
+                curCatName = catName;
+                catOpen = true;
+            }
             rows.add(new MonthlyStatementResponse.Row(
                     MonthlyStatementResponse.Row.RowType.DETAIL, m, majorLabel(m),
-                    (String) r[2], (String) r[4], (String) r[5],
+                    catName, (String) r[4], (String) r[5],
                     v[0], v[1], v[2], v[3], v[0] + v[2], v[1] + v[3], v[4], v[5]));
             for (int i = 0; i < 6; i++) {
+                cat[i] += v[i];
                 major[i] += v[i];
                 grand[i] += v[i];
             }
+        }
+        if (catOpen) {
+            rows.add(catRow(curMajor, curCatName, cat));
         }
         if (majorOpen) {
             rows.add(majorRow(MonthlyStatementResponse.Row.RowType.MAJOR_SUBTOTAL, curMajor, major));
         }
         rows.add(majorRow(MonthlyStatementResponse.Row.RowType.GRAND_TOTAL, null, grand));
         return new MonthlyStatementResponse(year, month, rows);
+    }
+
+    /**
+     * 분류 계 행(F-21). 대분류명은 남기고 <b>분류명 칸에 분류명</b>을 넣는다 —
+     * 도서코드·도서명은 비운다(그 자리에 값이 있으면 상세 행으로 읽힌다).
+     */
+    private MonthlyStatementResponse.Row catRow(String majorCode, String catName, long[] v) {
+        return new MonthlyStatementResponse.Row(
+                MonthlyStatementResponse.Row.RowType.CAT_SUBTOTAL, majorCode, majorLabel(majorCode),
+                catName, null, null,
+                v[0], v[1], v[2], v[3], v[0] + v[2], v[1] + v[3], v[4], v[5]);
     }
 
     /** 집계배열 v=[gradedQty,gradedAmt,ungradedQty,ungradedAmt,taxableAmt,vat] → 소계/총계 행. */

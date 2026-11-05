@@ -267,7 +267,8 @@ public class InventoryController {
                 new Col("조정", "adjust"), new Col("재고", "closing"));
         byte[] xlsx = excel.toXlsx("제품수불부결산", cols,
                 inventoryService.stockSettlement(baseDate, productId, warehouseType),
-                Heading.asOf("제품수불부 결산내역", baseDate));
+                Heading.asOf("제품수불부 결산내역", baseDate),
+                com.daesung.sales.common.excel.ExcelExportUtil.AGG_BY_ROW_TYPE);
         return excel.asDownload(xlsx, "제품수불부_결산내역.xlsx");
     }
 

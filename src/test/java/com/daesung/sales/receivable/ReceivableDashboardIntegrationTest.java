@@ -433,7 +433,13 @@ class ReceivableDashboardIntegrationTest extends IntegrationTestSupport {
     @DisplayName("대시보드 누적목표·누적실적 — 1월부터 해당월까지의 합")
     void 대시보드_누적() {
         // 요구 20p 매출 상세 대시보드: 당월목표/누적목표/당월실적/누적실적/달성률/성장률
-        int year = 2037;
+        //
+        // ‼️연도를 **아무 테스트도 쓰지 않는 구간**으로 잡는다. `/dashboard/sales` 는 전사
+        //   합계라 거래처로 좁힐 수 없어서, 같은 연도에 매출을 넣는 테스트가 하나라도 있으면
+        //   누적실적 단정이 깨진다. 2037을 쓰다가 응시현황(기간별) 픽스처(2036-11~2037-03)와
+        //   부딛쳐 실제로 깨졌다 — 실행 순서에 따라 터지는 종류라 더 고약했다.
+        //   2061~2069 구간은 전 테스트에서 미사용(2026-11-05 확인).
+        int year = 2061;
         for (int m = 1; m <= 3; m++) {
             post("/dashboard/targets", Map.of("year", year, "month", m,
                     "scope", "COMPANY", "targetAmount", m * 1_000_000));
