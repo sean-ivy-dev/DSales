@@ -102,9 +102,10 @@ daesung:
   dealer-site:
     api-key: ${DEALER_SITE_API_KEY:}
     warehouse-code: ${DEALER_SITE_WAREHOUSE_CODE:}
-    # 재고현황 목록 범위 확장(11/04 §4) — 기간·출처는 발주처 회신 대기 항목이라 설정값으로 둔다.
-    stock-history-months: ${DEALER_SITE_STOCK_HISTORY_MONTHS:12}
+    # 재고현황 목록 범위(11/05 §2 확정 — 기간 무제한). 출처(SALES/NONE)만 설정값으로 둔다.
     stock-history-source: ${DEALER_SITE_STOCK_HISTORY_SOURCE:SALES}
+    # 재고현황 매입·반품 자동집계 전환일은 여기 없다 — DB 설정값(dealer_stock_cutover_setting,
+    #   V117)으로 관리자 API가 바로 바꾼다. 환경변수·재배포 불필요.
   mail:
     # ‼️기본 off. 설정이 비어 있는 채로 켜 두면 화면에서 '전송'을 눌렀을 때
     #   조용히 실패하고 담당자는 보냈다고 믿는다. 값을 넣은 환경에서만 켠다.

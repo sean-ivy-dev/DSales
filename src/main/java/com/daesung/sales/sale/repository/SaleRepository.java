@@ -457,9 +457,9 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
             + "      and s.salesType <> com.daesung.sales.sale.entity.SalesType.CONSIGN_SALES ";
 
     /**
-     * [특약점 사이트] 재고현황 목록 범위 확장(11/04 회신 §4)용 — 그 거래처에 <b>최근 N개월
-     * 매출 출고 이력</b>이 있는 도서 id. 근거: "(노출되는 교재) ∪ (그 특약점에 출고 또는
-     * 재고 입력 이력이 있는 교재)".
+     * [특약점 사이트] 재고현황 목록 범위(11/05 회신 §2 — 11/04 §4의 "최근 N개월"을
+     * <b>기간 무제한</b>으로 대체)용 — 그 거래처에 매출 출고 이력이 있는 도서 id.
+     * 근거: "(노출되는 교재) ∪ (그 특약점에 출고 또는 재고 입력 이력이 있는 교재)".
      *
      * <p>★<b>{@link #SHIPPED_PREDICATE} 를 그대로 쓰지 않는다</b> — 거긴 특강·정산매출
      * 제외가 통합매출조회라는 다른 화면의 의도로 묶여 있다. 여기는 "그 거래처에 매출
@@ -472,10 +472,29 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
     @org.springframework.data.jpa.repository.Query("""
             select distinct s.product.id from Sale s
              where s.partner.id = :partnerId
-               and s.salesDate >= :from
                and s.canceled = false
             """)
-    java.util.List<Long> shippedProductIdsSince(
+    java.util.List<Long> shippedProductIds(
+            @org.springframework.data.repository.query.Param("partnerId") Long partnerId);
+
+    /**
+     * [특약점 사이트] 재고현황 매입·반품 자동집계(11/05 회신 §4) — 그 거래처의 도서별
+     * <b>기준일({@code from}) 이후</b> 정상출고(매입)·반품 합계. {@link DealerStockPostCutoverAgg}
+     * 참고 — 위탁·증정·교사용·취소는 뺀다.
+     */
+    @org.springframework.data.jpa.repository.Query("""
+            select p.id as productId,
+                   sum(case when s.shipmentType = com.daesung.sales.salestype.entity.ShipmentType.NORMAL_SHIP
+                            then s.qty else 0 end) as purchasedQty,
+                   sum(case when s.shipmentType = com.daesung.sales.salestype.entity.ShipmentType.RETURN
+                            then s.qty else 0 end) as returnedQty
+              from Sale s join s.product p
+             where s.partner.id = :partnerId
+               and s.canceled = false
+               and s.salesDate >= :from
+             group by p.id
+            """)
+    java.util.List<com.daesung.sales.sale.dto.DealerStockPostCutoverAgg> dealerStockPostCutoverAgg(
             @org.springframework.data.repository.query.Param("partnerId") Long partnerId,
             @org.springframework.data.repository.query.Param("from") java.time.LocalDate from);
 

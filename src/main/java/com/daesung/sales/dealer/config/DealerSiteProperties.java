@@ -22,21 +22,26 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param warehouseCode      특약점 주문이 나갈 물류창고 코드. 특약점은 창고를 고르지 않으므로
  *                           서버가 정한다. 비우면 "실물재고 물류창고가 하나일 때 그것"으로 되고,
  *                           둘 이상이면 거부한다 — 임의로 고르면 재고가 엉뚱한 창고에서 빠진다
- * @param stockHistoryMonths 재고현황 목록 범위 확장(11/04 §4)에서 "최근 몇 개월 매출 출고까지
- *                           포함할지". 발주처가 아직 이 기간을 확정하지 않아 상수로 박지 않고
- *                           설정값으로 둔다. 10/26 §7 PDF 보관함이 쓰는 "최근 12개월"과 맞춘다.
  * @param stockHistorySource {@code SALES}면 매출 출고 이력을 범위에 포함하고, {@code NONE}이면
  *                           노출 교재만 보여준다(11/04 §4 이전 동작). DSRE 출고는 포함하지
  *                           않는다 — DSRE 연동이 꺼진 환경에서 목록이 달라지면 안 된다.
+ *                           ‼️기간 제한은 없다(11/05 회신 §2 — 11/04 §4 "최근 12개월"을
+ *                           대체, 전체 기간을 본다).
+ *
+ * <p>★<b>매입·반품 자동집계 전환일은 여기 없다.</b> 처음엔 환경변수
+ * ({@code stock-cutover-date})로 뒀었는데, 그 값은 발주처가 "이제부터" 정하는
+ * 운영 결정이라 바뀔 때마다 GitHub Actions 변수 등록 + 재배포가 필요한 게 맞지
+ * 않았다(월마감 {@code period_locks}처럼 즉시 바뀌어야 한다) → <b>DB 설정값으로
+ * 전환</b>({@link com.daesung.sales.dealer.entity.DealerStockCutoverSetting}, V117).
+ * 관리자 API로 즉시 바꾼다.
  */
 @ConfigurationProperties(prefix = "daesung.dealer-site")
 public record DealerSiteProperties(String apiKey, String auditName, String warehouseCode,
-                                   Integer stockHistoryMonths, String stockHistorySource) {
+                                   String stockHistorySource) {
 
     public DealerSiteProperties {
         auditName = (auditName == null || auditName.isBlank()) ? "dealer-site" : auditName;
         warehouseCode = (warehouseCode == null || warehouseCode.isBlank()) ? null : warehouseCode;
-        stockHistoryMonths = (stockHistoryMonths == null) ? Integer.valueOf(12) : stockHistoryMonths;
         stockHistorySource = (stockHistorySource == null || stockHistorySource.isBlank())
                 ? "SALES" : stockHistorySource;
     }
