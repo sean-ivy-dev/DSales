@@ -65,8 +65,12 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     java.util.List<Long> findIdsByCatCode(@org.springframework.data.repository.query.Param("catCode") String catCode);
 
     /**
-     * 도서 목록 검색 — 검색어(코드·상품명) + 수불부노출 + 단가노출.
+     * 도서 목록 검색 — 검색어(코드·상품명·<b>분류명·분류코드</b>) + 수불부노출 + 단가노출.
      * 모든 조건이 null이면 전체다. 노출 플래그는 <b>서로 다른 축</b>이라 각각 받는다.
+     *
+     * <p>★<b>분류명·분류코드도 검색어에 넣는다</b>(전수 재검사 2026-11-05 X-01). 그전엔
+     * 코드·상품명만 봐서 'COREXACT'(분류명)로 찾으면 0건이었다 — 화면 안내가 '도서명 검색'
+     * 이지만 담당자는 분류명으로도 찾는다(실제로 그렇게 찾다가 못 찾았다).</p>
      *
      * <p>★{@code updatedSince} — <b>그 시각 이후 등록·수정된 것만</b>(프론트 요청 2026-10-20 B-1).
      * 이관 뒤 도서가 14,808권(약 5.4MB)이 되어 화면이 30분마다 전량을 다시 받고 있었다.
@@ -82,7 +86,9 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     @org.springframework.data.jpa.repository.Query("""
             select p from Product p
              where (:keyword is null or lower(p.code) like lower(concat('%', :keyword, '%'))
-                    or lower(p.name) like lower(concat('%', :keyword, '%')))
+                    or lower(p.name) like lower(concat('%', :keyword, '%'))
+                    or lower(coalesce(p.catName, '')) like lower(concat('%', :keyword, '%'))
+                    or lower(coalesce(p.catCode, '')) like lower(concat('%', :keyword, '%')))
                and (:ledgerVisible is null or p.ledgerVisible = :ledgerVisible)
                and (:priceVisible is null or p.priceVisible = :priceVisible)
                and (:includeUnused = true or p.useYn = true)
