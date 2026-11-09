@@ -133,10 +133,35 @@ public class ProductController {
         return ApiResponse.success(productService.update(id, req));
     }
 
-    @Operation(summary = "상품 삭제(비활성화)", description = "물리삭제가 아니라 useYn=false 논리삭제")
+    @Operation(summary = "상품 사용 중지(논리삭제)",
+            description = """
+                    `useYn=false` 로 내린다. 목록에서 빠지지만 **과거 기록은 그대로** 남는다
+                    (`includeUnused=true` 로 다시 볼 수 있다).
+
+                    완전히 지우려면 `DELETE /masters/products/{id}/hard` 를 쓴다 —
+                    **참조가 없을 때만** 지워진다.""")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         productService.deactivate(id);
+        return ApiResponse.success();
+    }
+
+    @Operation(summary = "★상품 완전 삭제 — 참조가 없을 때만(F-36)",
+            description = """
+                    화면의 **(우클릭) 삭제**. 행을 **실제로 지운다**.
+
+                    ‼️**참조가 하나라도 있으면 400 으로 거부**하고 **무엇이 몇 건인지** 알려준다
+                    (예: `참조가 있어 완전 삭제할 수 없습니다 — 매출 1,204건, 재고이벤트 2,350건`).
+                    매출·재고가 가리키는 도서를 지우면 과거 수불부·리포트가 통째로 깨지기 때문이다.
+                    레거시는 FK 가 없어 그냥 지울 수 있었다(`도서관리.vb:467`).
+
+                    세는 곳: 매출 · 재고 · 재고이벤트 · 위탁미결 · 재고실사 · 매출목표 ·
+                    세트구성 · 자재매칭 · 물류단가 · 특약점 노출설정 · 특약점 재고.
+
+                    → **잘못 만든 도서를 바로 지우는 용도**다. 쓰이던 도서는 '사용 중지'로 둔다.""")
+    @DeleteMapping("/{id}/hard")
+    public ApiResponse<Void> deleteHard(@PathVariable Long id) {
+        productService.deleteHard(id);
         return ApiResponse.success();
     }
 

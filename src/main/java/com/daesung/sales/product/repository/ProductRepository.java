@@ -12,6 +12,41 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     Optional<Product> findByCode(String code);
 
     /**
+     * <b>이 상품을 참조하는 곳</b>을 한 번에 센다 — 물리삭제 가능 여부 판정(F-36).
+     *
+     * <p>발주처 요청: "(우클릭) **삭제** 기능. 지금은 사용 중지만 있음".
+     * 레거시는 실제로 <b>물리삭제</b>다 — `도서관리.vb:467` 이 그리드에서 행을 지우고
+     * {@code DataAdapter.Update} 로 DELETE 를 날린다(우클릭 메뉴도 같은 버튼을 부른다).
+     *
+     * <p>‼️<b>우리는 그대로 할 수 없다.</b> 레거시는 FK 가 없어서 가능했고, 우리는 매출·재고가
+     * 이 상품을 가리킨다. 지우면 과거 매출의 상품이 사라져 수불부·리포트가 통째로 깨진다.
+     * → <b>참조가 하나도 없을 때만</b> 물리삭제하고, 있으면 무엇이 몇 건 걸려 있는지 돌려준다.
+     *
+     * <p>★대상은 {@code products} 를 FK 로 참조하는 <b>전부</b>다(마이그레이션 전수 확인).
+     * {@code product_partner_price} 는 V42 에서 삭제돼 빠졌다.
+     * ‼️테이블이 늘면 <b>여기도 늘려야 한다</b> — 빠뜨리면 FK 오류로 500 이 난다.
+     *
+     * @return [참조처 이름, 건수] — 건수가 0인 줄은 빠진다
+     */
+    @Query(value = """
+            SELECT '매출' AS ref, COUNT(*) AS cnt FROM sales WHERE product_id = :id
+            UNION ALL SELECT '재고', COUNT(*) FROM inventory WHERE product_id = :id
+            UNION ALL SELECT '재고이벤트', COUNT(*) FROM inventory_txn WHERE product_id = :id
+            UNION ALL SELECT '위탁미결', COUNT(*) FROM consignment_out WHERE product_id = :id
+            UNION ALL SELECT '재고실사', COUNT(*) FROM stocktake_line WHERE product_id = :id
+            UNION ALL SELECT '매출목표', COUNT(*) FROM sales_target WHERE product_id = :id
+            UNION ALL SELECT '세트구성', COUNT(*) FROM bom_items
+                       WHERE parent_product_id = :id OR child_product_id = :id
+            UNION ALL SELECT '자재매칭', COUNT(*) FROM material_bom
+                       WHERE set_product_id = :id OR round_product_id = :id
+            UNION ALL SELECT '물류단가', COUNT(*) FROM product_logis_rate WHERE product_id = :id
+            UNION ALL SELECT '특약점 노출설정', COUNT(*) FROM partner_product_visibility WHERE product_id = :id
+            UNION ALL SELECT '특약점 재고', COUNT(*) FROM partner_product_stock WHERE product_id = :id
+            """, nativeQuery = true)
+    java.util.List<Object[]> countReferences(
+            @org.springframework.data.repository.query.Param("id") Long id);
+
+    /**
      * 코드 묶음으로 한 번에. 행마다 {@link #findByCode}를 부르던 자리를 대신한다 —
      * 매출일괄등록 미리보기가 2,549행 × 왕복으로 <b>67.8초</b>가 걸려 게이트웨이가 끊었다
      * (2026-11-09 실측. DSRE 쿼리는 0.67초로 무죄였다).

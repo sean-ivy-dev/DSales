@@ -188,6 +188,49 @@ public class ProductService {
     }
 
     /**
+     * <b>완전 삭제</b>(F-36) — 참조가 <b>하나도 없을 때만</b> 행을 지운다.
+     *
+     * <p>발주처 요청: "(우클릭) **삭제** 기능. 지금은 사용 중지만 있음".
+     * 레거시는 실제로 물리삭제다(`도서관리.vb:467` — 그리드 행 제거 후 {@code DataAdapter.Update}).
+     *
+     * <p>‼️<b>레거시를 그대로 따라 할 수 없다.</b> 레거시는 FK 가 없었고 우리는 매출·재고가
+     * 이 상품을 가리킨다. 지우면 과거 매출의 상품이 사라져 수불부·리포트가 통째로 깨진다.
+     * 그래서 <b>참조를 먼저 세고</b>, 하나라도 있으면 무엇이 몇 건인지 알려주며 거부한다.
+     *
+     * <p>★거부가 곧 안내다 — "지울 수 없습니다"만 띄우면 담당자는 왜인지 모른 채
+     * 사용 중지로 돌아간다. 걸린 곳과 건수를 주면 스스로 판단할 수 있다.
+     *
+     * <p>잘못 만든 도서를 바로 지우는 것이 이 기능의 쓰임이다 — 그런 도서는 참조가 없다.
+     */
+    @Transactional
+    public void deleteHard(Long id) {
+        Product product = getOrThrow(id);
+        String refs = referenceSummary(id);
+        if (refs != null) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "참조가 있어 완전 삭제할 수 없습니다 — " + refs
+                            + ". 더 쓰지 않을 도서는 '사용 중지'로 두면 목록에서만 빠지고"
+                            + " 과거 기록은 그대로 남습니다.");
+        }
+        productRepository.delete(product);
+    }
+
+    /** 참조 요약 문자열. 없으면 null. */
+    private String referenceSummary(Long id) {
+        StringBuilder sb = new StringBuilder();
+        for (Object[] r : productRepository.countReferences(id)) {
+            long cnt = ((Number) r[1]).longValue();
+            if (cnt > 0) {
+                if (sb.length() > 0) {
+                    sb.append(", ");
+                }
+                sb.append(r[0]).append(' ').append(cnt).append("건");
+            }
+        }
+        return (sb.length() == 0) ? null : sb.toString();
+    }
+
+    /**
      * BOM 구성 등록(기존 구성 대체). 완제품은 세트(is_set)로 표시.
      *
      * <p>기존 구성은 물리삭제가 아니라 논리삭제로 대체된다(게이트규칙) — 언제 어떤 구성이었는지가
