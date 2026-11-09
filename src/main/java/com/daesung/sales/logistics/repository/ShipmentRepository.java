@@ -332,4 +332,33 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
     @Query(value = "SELECT s.* FROM shipment s WHERE " + ORDER_KEY + " IN (:keys)",
             nativeQuery = true)
     List<Shipment> findByOrderKeys(@Param("keys") Collection<String> keys);
+
+    /**
+     * CJ 송장 일괄 등록의 <b>매칭 쿼리</b>(F-30) — 수령인명 + 연락처로 발송 건을 찾는다.
+     *
+     * <p>‼️<b>CJ 파일에는 우리 작업번호가 없다.</b> 열이 11개
+     * (No·상태·운송장번호·보내는분·내품수량·받는분·받는분전화번호·받는분주소·상품명·단품명·배송메시지)
+     * 이고 그 안에 우리 식별자가 없어, 예전 양식의 '발송건ID' 기준으로는 매칭이 불가능하다.
+     *
+     * <p>★<b>연락처는 숫자만 비교한다.</b> 우리는 {@code 010-9963-7011} 로, CJ 파일은 표기가
+     * 다를 수 있다. 하이픈·공백을 지우고 맞춘다.
+     *
+     * <p>‼️<b>후보가 둘 이상이면 호출부가 거부한다.</b> 같은 수령인·연락처로 여러 발송 건이
+     * 있을 수 있고(다른 날짜·다른 거래처), 아무 쪽에 붙이면 <b>남의 송장이 붙는다</b>.
+     *
+     * <p>★삭제된 건과 <b>화물</b>은 제외한다 — 화물에는 송장을 넣을 수 없다(11/04 §3).
+     */
+    @org.springframework.data.jpa.repository.Query(value = """
+            SELECT s.* FROM shipment s
+             WHERE s.deleted_at IS NULL
+               AND (s.delivery_type IS NULL OR s.delivery_type <> 'FREIGHT')
+               AND s.trade_date BETWEEN :fromDate AND :toDate
+               AND TRIM(COALESCE(s.receiver_name, '')) = :receiverName
+               AND REPLACE(REPLACE(COALESCE(s.receiver_phone, ''), '-', ''), ' ', '') = :phoneDigits
+            """, nativeQuery = true)
+    List<Shipment> findForTrackingMatch(
+            @org.springframework.data.repository.query.Param("receiverName") String receiverName,
+            @org.springframework.data.repository.query.Param("phoneDigits") String phoneDigits,
+            @org.springframework.data.repository.query.Param("fromDate") java.time.LocalDate fromDate,
+            @org.springframework.data.repository.query.Param("toDate") java.time.LocalDate toDate);
 }

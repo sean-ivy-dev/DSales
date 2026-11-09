@@ -545,8 +545,197 @@ public class ShipmentService {
         return (courier == null) ? null : courier.label();
     }
 
+    /** CJ 양식의 표식 열 — 1행에 이 머리글이 있으면 CJ 파일로 본다. */
+    private static final String CJ_HEADER_MARK = "운송장번호";
+
+    /**
+     * 송장 일괄 등록. <b>파일의 머리글을 보고 양식을 가른다</b>(F-30).
+     *
+     * <p>· <b>CJ 양식</b>(11열: No·상태·운송장번호·보내는분·내품수량·받는분·받는분전화번호·
+     *   받는분주소·상품명·단품명·배송메시지) → {@link #uploadCjTracking}
+     * <p>· <b>우리 양식</b>(발송건ID·택배사·송장번호) → 종전 경로
+     *
+     * <p>★<b>담당자가 어느 파일을 올리든 되게 한다.</b> 버튼을 둘로 나누면
+     * 잘못 고른 쪽에서 "행이 전부 실패"로 떨어지고, 그때 이유를 알기 어렵다.
+     */
     @Transactional
     public TrackingUploadResponse uploadTracking(MultipartFile file) {
+        if (looksLikeCjForm(file)) {
+            return uploadCjTracking(file);
+        }
+        return uploadOwnFormTracking(file);
+    }
+
+    /**
+     * <b>CJ 양식</b> 송장 일괄 등록(F-30).
+     *
+     * <p>양식 11열 — No · 상태 · <b>운송장번호</b> · 보내는분 · 내품수량 ·
+     * <b>받는분</b> · <b>받는분전화번호</b> · 받는분주소 · 상품명 · 단품명 · 배송메시지.
+     *
+     * <p>‼️<b>우리 작업번호가 없다.</b> 그래서 <b>받는분 + 받는분전화번호</b>로 발송 건을 찾는다.
+     * 연락처는 하이픈·공백을 지우고 숫자만 비교한다(표기가 다를 수 있다).
+     *
+     * <p>★<b>같은 수령인의 여러 행은 박스별 송장이다.</b> 실파일에 한 수령인에 3행이 있고
+     * 운송장만 다르다(내품수량 동일) — CJ 는 박스마다 한 줄을 돌려준다.
+     * 그래서 수령인별로 모아 <b>박스 1..N 으로 한 번에</b> 등록한다.
+     *
+     * <p>‼️<b>후보가 둘 이상이면 그 묶음을 거부한다.</b> 같은 수령인·연락처로 여러 발송 건이
+     * 있을 수 있고(다른 날짜·거래처), 아무 쪽에 붙이면 <b>남의 송장이 붙는다</b>.
+     * 0건이면 찾지 못했다고 남긴다. 어느 쪽이든 <b>그 묶음만</b> 실패하고 나머지는 반영된다.
+     *
+     * <p>★택배사는 <b>CJ대한통운 고정</b>이다 — CJ 가 돌려준 파일이다.
+     *
+     * <p>★매칭 기간은 <b>파일에 없다.</b> 거래일자 칸이 없어서, 오늘부터 과거
+     * {@value #CJ_MATCH_DAYS}일로 좁힌다 — 전 기간을 뒤지면 몇 해 전 같은 수령인까지 걸려
+     * 후보가 늘고, 늘면 전부 거부돼 담당자는 이유를 알 수 없다.
+     */
+    @Transactional
+    protected TrackingUploadResponse uploadCjTracking(MultipartFile file) {
+        java.time.LocalDate to = java.time.LocalDate.now();
+        java.time.LocalDate from = to.minusDays(CJ_MATCH_DAYS);
+        // 수령인+연락처로 모은다 — 같은 사람의 여러 행이 박스별 송장이다.
+        java.util.Map<String, CjGroup> groups = new java.util.LinkedHashMap<>();
+        List<TrackingUploadResponse.Line> lines = new ArrayList<>();
+        int failed = 0;
+
+        com.daesung.sales.common.excel.ExcelSheetReader.assertReadable(file);
+        try (Workbook wb = WorkbookFactory.create(file.getInputStream())) {
+            Sheet sheet = wb.getSheetAt(0);
+            for (int r = 1; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) {
+                    continue;
+                }
+                int rowNo = r + 1;
+                String tracking = str(row.getCell(2));      // 운송장번호
+                String receiver = str(row.getCell(5));      // 받는분
+                String phone = digitsOnly(str(row.getCell(6)));  // 받는분전화번호
+                if (tracking == null || tracking.isBlank()) {
+                    continue;   // 운송장이 없으면 설명행·빈행 → 스킵(오류로 세지 않는다)
+                }
+                if (receiver == null || receiver.isBlank() || phone.isEmpty()) {
+                    failed++;
+                    lines.add(new TrackingUploadResponse.Line(rowNo, "ERROR", null, tracking,
+                            "받는분·받는분전화번호가 있어야 발송 건을 찾을 수 있습니다"));
+                    continue;
+                }
+                groups.computeIfAbsent(receiver.trim() + "\u0000" + phone,
+                        k -> new CjGroup(receiver.trim(), phone)).add(rowNo, tracking.trim());
+            }
+        } catch (IOException e) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "엑셀 파일을 읽을 수 없습니다: " + e.getMessage());
+        }
+
+        int updated = 0;
+        for (CjGroup g : groups.values()) {
+            List<Shipment> found = shipmentRepository.findForTrackingMatch(g.receiver, g.phone, from, to);
+            if (found.isEmpty()) {
+                failed += g.rows.size();
+                g.fail(lines, "받는분 '" + g.receiver + "' 로 최근 " + CJ_MATCH_DAYS
+                        + "일 안의 발송 건을 찾지 못했습니다");
+                continue;
+            }
+            if (found.size() > 1) {
+                failed += g.rows.size();
+                // ‼️아무 쪽에 붙이지 않는다 — 남의 송장이 붙는 쪽이 못 붙이는 쪽보다 나쁘다.
+                g.fail(lines, "받는분 '" + g.receiver + "' 로 발송 건이 " + found.size()
+                        + "건 걸립니다 — 어느 건인지 가릴 수 없어 등록하지 않았습니다."
+                        + " 작업요청서에서 직접 넣어 주세요");
+                continue;
+            }
+            Shipment s = found.get(0);
+            try {
+                assertTrackingAllowed(s);
+                List<Shipment.TrackingLine> tl = new ArrayList<>();
+                int box = 1;
+                for (String t : g.trackings) {
+                    tl.add(new Shipment.TrackingLine(box++,
+                            com.daesung.sales.logistics.entity.CourierCompany.CJ.label(), t));
+                }
+                // ‼️비우고 flush 한 뒤 채운다 — orphanRemoval 의 DELETE 가 커밋 직전에 나가서,
+                //   같은 (발송·박스번호)로 INSERT 가 먼저 가면 유니크 제약에 걸려 500 이 된다
+                //   (replaceTrackings 경로가 같은 이유로 그렇게 한다).
+                s.clearTrackings();
+                shipmentRepository.flush();
+                s.applyTrackings(tl, currentAuditor.username());
+                updated += g.rows.size();
+                for (int i = 0; i < g.rows.size(); i++) {
+                    lines.add(new TrackingUploadResponse.Line(
+                            g.rows.get(i), "UPDATED", s.getId(), g.trackings.get(i), null));
+                }
+            } catch (BusinessException e) {
+                failed += g.rows.size();
+                g.fail(lines, e.getMessage());
+            }
+        }
+        return new TrackingUploadResponse(updated, failed, lines);
+    }
+
+    /** CJ 파일에 거래일자 칸이 없어 매칭 범위를 이 일수로 좁힌다. */
+    private static final int CJ_MATCH_DAYS = 90;
+
+    /** 한 수령인의 행 묶음 — CJ 는 박스마다 한 줄을 돌려준다. */
+    private static final class CjGroup {
+        private final String receiver;
+        private final String phone;
+        private final List<Integer> rows = new ArrayList<>();
+        private final List<String> trackings = new ArrayList<>();
+
+        private CjGroup(String receiver, String phone) {
+            this.receiver = receiver;
+            this.phone = phone;
+        }
+
+        private void add(int rowNo, String tracking) {
+            rows.add(rowNo);
+            trackings.add(tracking);
+        }
+
+        private void fail(List<TrackingUploadResponse.Line> out, String reason) {
+            for (int i = 0; i < rows.size(); i++) {
+                out.add(new TrackingUploadResponse.Line(rows.get(i), "ERROR", null,
+                        trackings.get(i), reason));
+            }
+        }
+    }
+
+    /** 전화번호 비교용 — 하이픈·공백·괄호를 지우고 숫자만 남긴다. */
+    private static String digitsOnly(String v) {
+        if (v == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (char c : v.toCharArray()) {
+            if (c >= '0' && c <= '9') {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
+    /** 1행에 '운송장번호' 머리글이 있는가. 읽기 실패는 종전 경로가 같은 메시지로 처리한다. */
+    private boolean looksLikeCjForm(MultipartFile file) {
+        com.daesung.sales.common.excel.ExcelSheetReader.assertReadable(file);
+        try (Workbook wb = WorkbookFactory.create(file.getInputStream())) {
+            Row header = wb.getSheetAt(0).getRow(0);
+            if (header == null) {
+                return false;
+            }
+            for (int c = 0; c < header.getLastCellNum(); c++) {
+                String v = str(header.getCell(c));
+                if (v != null && CJ_HEADER_MARK.equals(v.trim())) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (IOException e) {
+            return false;   // 종전 경로가 같은 문구로 오류를 낸다 — 메시지를 두 벌 두지 않는다
+        }
+    }
+
+    @Transactional
+    protected TrackingUploadResponse uploadOwnFormTracking(MultipartFile file) {
         List<TrackingUploadResponse.Line> lines = new ArrayList<>();
         int updated = 0;
         int failed = 0;
