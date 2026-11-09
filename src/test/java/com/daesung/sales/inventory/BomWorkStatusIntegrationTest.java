@@ -90,6 +90,71 @@ class BomWorkStatusIntegrationTest extends IntegrationTestSupport {
                 + "&warehouseIds=" + wh + "&catCode=" + CAT));
     }
 
+    /**
+     * 취소한 세트작업은 <b>현황에서 빠진다</b>(운영 실측 2026-11-09).
+     *
+     * <p>‼️예전엔 남았다. 취소 역분개는 {@code BOM_ASSEMBLE} + <b>음수</b>라
+     * 집계 조건({@code qty > 0})에 걸리지 않아 <b>원본 조립만 세어졌고</b>,
+     * 그래서 취소한 작업이 "조립 N부"로 영원히 보였다.
+     *
+     * <p>★부호 조건은 그대로 둔다 — 이 집계는 <b>부호로 완제품과 구성품을 가른다</b>.
+     * 조건을 풀면 취소 역분개의 완제품(−)이 구성품으로 섞인다.
+     * 그래서 <b>전표번호</b>로 뺀다(원본·역분개가 같은 번호라 둘이 함께 사라진다).
+     *
+     * <p>★재고 이력에는 두 줄이 <b>그대로 남는다</b> — 장부는 보존하고 실적 집계에서만 뺀다.
+     */
+    @Test
+    @DisplayName("‼️취소한 세트작업은 현황에서 빠진다 — 재고 이력에는 남는다")
+    void 취소한_작업은_현황에서_빠진다() {
+        Long tmp = product("BWC" + SFX, "취소검증세트");
+        // 구성품 하나로 BOM 을 만든다 — 구성품이 없으면 조립이 완제품만 움직인다.
+        assertThat(put("/masters/products/" + tmp + "/bom", Map.of(
+                "components", List.of(Map.of("childProductId", partA, "ratio", 1))))
+                .path("success").asBoolean()).isTrue();
+
+        bomWork(tmp, "ASSEMBLE", 7, YEAR + "-08-01");
+        // 전표번호를 찾아 취소한다
+        String refNo = null;
+        for (JsonNode x : data(get("/stock/records?fromDate=" + YEAR + "-08-01&toDate=" + YEAR
+                + "-08-01&productIds=" + tmp))) {
+            refNo = x.path("refNo").asText();
+        }
+        assertThat(refNo).as("세트작업 전표번호(BW-)").isNotNull().startsWith("BW-");
+
+        // 취소 전 — 현황에 보인다
+        assertThat(found(tmp)).as("취소 전에는 보여야 한다").isTrue();
+
+        assertThat(post("/stock/vouchers/" + refNo + "/cancel",
+                Map.of("reason", "취소 검증")).path("success").asBoolean()).isTrue();
+
+        // ‼️취소 후 — 현황에서 사라진다
+        assertThat(found(tmp)).as("취소한 작업이 '조립 7부'로 남으면 안 된다").isFalse();
+
+        // ★재고 이력에는 두 줄(원본·역분개)이 남는다 — 장부는 지우지 않는다.
+        // ‼️역분개는 **취소한 날**로 들어간다(원본 거래일이 아니다) — 기간을 좁히면 한 줄만 잡힌다.
+        int records = 0;
+        long sum = 0;
+        for (JsonNode x : data(get("/stock/records?fromDate=2000-01-01&toDate=2099-12-31"
+                + "&productIds=" + tmp))) {
+            if (refNo.equals(x.path("refNo").asText())) {
+                records++;
+                sum += x.path("qtyDelta").asLong();
+            }
+        }
+        assertThat(records).as("재고 이력은 보존한다(원본 +7, 역분개 −7)").isEqualTo(2);
+        assertThat(sum).as("두 줄의 합은 0 — 재고는 되돌아갔다").isZero();
+    }
+
+    /** 세트작업 현황에 그 완제품 행이 있는가. */
+    private boolean found(Long productId) {
+        for (JsonNode r : status().path("rows")) {
+            if (productId.equals(r.path("productId").asLong())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @Test
     @DisplayName("★완제품만 행이 된다 — 구성품이 세트인 척 끼면 세트 수가 부풀어 오른다")
     void 완제품만_행() {

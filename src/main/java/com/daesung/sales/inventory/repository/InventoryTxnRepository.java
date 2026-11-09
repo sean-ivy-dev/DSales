@@ -270,6 +270,16 @@ public interface InventoryTxnRepository extends JpaRepository<InventoryTxn, Long
      *
      * <p>반환 Object[]: [catCode, catName, productId, code, name,
      * 조립건수, 조립수량, 해체건수, 해체수량, 최근작업일].
+     * <p>‼️<b>취소한 전표는 뺀다</b>({@code voucher_cancel}). 예전엔 취소 역분개가
+     * <b>부호 조건에 걸리지 않아</b>(조립 취소는 {@code BOM_ASSEMBLE} + 음수) 집계에서 빠졌고,
+     * 그래서 <b>취소한 세트작업이 현황에 영원히 "조립 N부"로 남았다</b>(운영 실측 2026-11-09).
+     *
+     * <p>★부호 조건을 그냥 없앨 수는 없다 — 이 쿼리는 <b>부호로 완제품과 구성품을 가른다</b>
+     * (조립은 완제품 +·구성품 −). 조건을 풀면 취소 역분개의 완제품(−)이 구성품으로 섞인다.
+     * 그래서 <b>전표번호로</b> 뺀다 — 원본과 역분개가 같은 번호라 둘이 함께 사라진다.
+     *
+     * <p>★재고 이력({@code /stock/records})에는 두 줄이 <b>그대로 남는다</b> — 장부는 보존하고
+     * '작업 실적' 집계에서만 뺀다. 취소한 작업은 실적이 아니다.
      */
     @Query(value = """
             SELECT p.cat_code, p.cat_name, p.id, p.code, p.name,
@@ -282,6 +292,7 @@ public interface InventoryTxnRepository extends JpaRepository<InventoryTxn, Long
             WHERE t.deleted_at IS NULL
               AND ((t.txn_type = 'BOM_ASSEMBLE' AND t.qty > 0)
                 OR (t.txn_type = 'BOM_DISASSEMBLE' AND t.qty < 0))
+              AND NOT EXISTS (SELECT 1 FROM voucher_cancel vc WHERE vc.ref_no = t.ref_no)
               AND (CAST(:fromDate AS DATE) IS NULL OR t.trade_date >= :fromDate)
               AND (CAST(:toDate   AS DATE) IS NULL OR t.trade_date <= :toDate)
               AND (:anyWarehouse = TRUE OR t.warehouse_id IN (:warehouseIds))
@@ -313,6 +324,7 @@ public interface InventoryTxnRepository extends JpaRepository<InventoryTxn, Long
             WHERE t.deleted_at IS NULL
               AND ((t.txn_type = 'BOM_ASSEMBLE' AND t.qty < 0)
                 OR (t.txn_type = 'BOM_DISASSEMBLE' AND t.qty > 0))
+              AND NOT EXISTS (SELECT 1 FROM voucher_cancel vc WHERE vc.ref_no = t.ref_no)
               AND (CAST(:fromDate AS DATE) IS NULL OR t.trade_date >= :fromDate)
               AND (CAST(:toDate   AS DATE) IS NULL OR t.trade_date <= :toDate)
               AND (:anyWarehouse = TRUE OR t.warehouse_id IN (:warehouseIds))
