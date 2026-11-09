@@ -298,16 +298,55 @@ public class LogisCostDetailService {
             totalAmount += o.totalAmount;
         }
 
+        /**
+         * 한 줄 만들기. <b>집계행이 어느 칸까지 채우는지는 레거시 실파일이 정답지다</b>
+         * (`물류비계산_20260901-20260930.xlsx`, F-35·F-33).
+         *
+         * <pre>
+         *   2026.09.07  더 프리미엄  1  3701  5월 20일  50002  청주 세종에듀메이트   ← 명세
+         *   소 계       더 프리미엄  1  3701  5월 20일   -       -                  ← 시행 계
+         *   누 계       더 프리미엄  1   -      -        -       -                  ← 학년 계
+         *   합 계       더 프리미엄  -   -      -        -       -                  ← 상품 계
+         *   총 계        -          -   -      -        -       -                  ← 총 계
+         * </pre>
+         *
+         * <p>‼️예전엔 집계행의 상품명·학년·시행을 <b>전부 비웠다</b>. 그러면 어느 시행의 소계인지
+         * 알 수 없어 레거시 파일과 줄을 맞춰 볼 수 없다.
+         */
         private Row toRow(String rowType, String label) {
             boolean detail = "DETAIL".equals(rowType);
-            return new Row(rowType, label,
-                    detail ? reqDate : null, detail ? reqCd : null,
-                    detail ? productCode : null, detail ? productName : null,
-                    detail ? grade : null, detail ? dtlCd : null, detail ? detailName : null,
+            // 단계가 올라갈수록 왼쪽 칸만 남는다(레거시와 같은 모양).
+            boolean keepProduct = detail || !"TOTAL".equals(rowType);
+            boolean keepGrade = detail || "DTL_SUBTOTAL".equals(rowType)
+                    || "GRADE_SUBTOTAL".equals(rowType);
+            boolean keepDtl = detail || "DTL_SUBTOTAL".equals(rowType);
+            return new Row(rowType, label, detail ? reqDate : null, dateOrLabel(rowType),
+                    detail ? reqCd : null,
+                    keepProduct ? productCode : null, keepProduct ? productName : null,
+                    keepGrade ? grade : null, keepDtl ? dtlCd : null, keepDtl ? detailName : null,
                     detail ? partnerCode : null, detail ? partnerName : null,
                     detail ? region : null, detail ? cityName : null, detail ? schoolName : null,
                     materialQty, paperQty, paperAmount, omrQty, omrAmount, etcQty, etcAmount,
                     inwon, basicAmount, tradeAmount, totalAmount);
+        }
+
+        /**
+         * 엑셀 첫 칸. 명세행은 <b>{@code 2026.09.05}</b>(레거시 점 구분자), 집계행은 레거시 라벨.
+         *
+         * <p>‼️라벨이 화면용({@code 시행 계}·{@code 학년 계}·{@code 상품 계})과 <b>다르다</b> —
+         * 레거시 파일은 {@code 소 계}·{@code 누 계}·{@code 합 계}·{@code 총 계}를 쓴다.
+         * 엑셀만 레거시 표기를 따르고 화면 라벨은 그대로 둔다(화면이 더 읽기 쉽다).
+         */
+        private String dateOrLabel(String rowType) {
+            return switch (rowType) {
+                case "DETAIL" -> (reqDate == null) ? null
+                        : reqDate.format(java.time.format.DateTimeFormatter.ofPattern("yyyy.MM.dd"));
+                case "DTL_SUBTOTAL" -> "소 계";
+                case "GRADE_SUBTOTAL" -> "누 계";
+                case "PRODUCT_SUBTOTAL" -> "합 계";
+                case "TOTAL" -> "총 계";
+                default -> null;
+            };
         }
     }
 }

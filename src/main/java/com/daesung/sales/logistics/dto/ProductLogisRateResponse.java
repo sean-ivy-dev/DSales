@@ -33,6 +33,12 @@ public record ProductLogisRateResponse(
         boolean overridden,
 
         @Schema(description = """
+                ★**변경일**(F-39). 단가를 마지막으로 고친 때다.
+                발주처 원문: "최근 변경 항목(변경일 기준 약 1주일 이내) 자동 하이라이트 — 기존 기능 유지".
+                화면이 이 값으로 노란 표시를 한다. 등록만 하고 안 고쳤으면 null.""")
+        java.time.LocalDateTime changedAt,
+
+        @Schema(description = """
                 단독 관리 상품 여부(`products.price_visible`).
                 **false면 이 단가가 안 쓰일 수 있다** — DSRE 병행 상품은 DSRE 기준이 산다.""")
         boolean priceVisible
@@ -44,7 +50,7 @@ public record ProductLogisRateResponse(
                 r.getProduct().catCodeYear(),
                 r.getPackType(), workTypeName,
                 r.getPaper(), r.getOmr(), r.getEtc(), r.getLabel(), r.getBasic(), r.getTrade(),
-                r.getBSpare(), r.isOverridden(), r.getProduct().isPriceVisible());
+                r.getBSpare(), r.isOverridden(), r.getUpdatedAt(), r.getProduct().isPriceVisible());
     }
 
     /** 등록·수정 결과 + 경고. 경고는 막지 않되 담당자가 알아야 하는 것을 담는다. */

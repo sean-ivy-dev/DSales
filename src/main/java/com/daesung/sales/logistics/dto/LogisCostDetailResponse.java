@@ -142,6 +142,17 @@ public record LogisCostDetailResponse(
             String rowType,
             @Schema(description = "소계 표시명. 명세행은 null") String label,
             @Schema(description = "접수일자(명세행)") LocalDate reqDate,
+
+            @Schema(description = """
+                    ★**엑셀 첫 칸 전용 파생값**(F-35). 명세행이면 접수일자(`2026.09.05`),
+                    집계행이면 `소 계`·`누 계`·`합 계`·`총 계`.
+
+                    ‼️레거시 실파일이 그 모양이다 — 컬럼이 **18개뿐이고 '구분'·'소계명' 칸이 없으며**,
+                    집계행은 **접수일자 자리에 라벨**을 넣는다(`물류비계산_20260901-20260930.xlsx` 6행 헤더 +
+                    165행 `['소 계','더 프리미엄',1,3701,…]`). 발주처 F-35 가 "레거시 18개 구성대로"다.
+
+                    화면은 `rowType`·`label` 을 그대로 쓰면 된다 — 이 칸은 엑셀에서만 쓴다.""")
+            String dateOrLabel,
             @Schema(description = "신청번호(grain=REQUEST일 때)") Integer reqCd,
             @Schema(description = "상품코드") String productCode,
             @Schema(description = "상품명") String productName,

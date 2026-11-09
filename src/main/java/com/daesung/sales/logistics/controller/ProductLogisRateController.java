@@ -40,6 +40,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class ProductLogisRateController {
 
     private final ProductLogisRateService service;
+    private final com.daesung.sales.common.excel.ExcelExportUtil excel;
 
     @Operation(summary = "상품별 물류단가 목록",
             description = """
@@ -59,6 +60,42 @@ public class ProductLogisRateController {
                     (레거시 `substring(catCode,2,4)`). 좌측 연도 트리와 같은 축이다.""")
             @RequestParam(required = false) Integer productYear) {
         return ApiResponse.success(service.search(packType, keyword, productYear));
+    }
+
+    @Operation(summary = "물류비용등록 엑셀 저장(F-39)",
+            description = """
+                    화면 하단 **「엑셀저장」** 버튼. 목록과 **같은 조건·같은 순서**로 내려간다.
+
+                    · 8/21 수정요청안(`물류비용등록_수정요청안_Page36_260821`) 의 4개 버튼 중
+                      "엑셀저장"이 서버에 없던 것을 채웠다(나머지 셋은 이미 있다 —
+                      "DSRE 상품 가져오기"는 `/logistics-costs/rates`, "신규등록"·"삭제"는 이 경로).
+                    · **변경일**이 함께 나간다 — 최근 변경분을 파일에서도 짚을 수 있어야 한다.""")
+    @GetMapping("/export")
+    public org.springframework.http.ResponseEntity<byte[]> export(
+            @RequestParam(required = false) Integer packType,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Integer productYear) {
+        var cols = java.util.List.of(
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("상품코드", "productCode"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("상품명", "productName"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("분류코드", "catCode"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("분류명", "catName"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("상품년도", "productYear"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("작업구분", "workTypeName"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("시험지", "paper"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("OMR", "omr"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("단행본", "etc"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("라벨", "label"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("기본작업비", "basic"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("출고비", "trade"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("여분포함", "bSpare"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("개별수정", "overridden"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("변경일", "changedAt"));
+        byte[] xlsx = excel.toXlsx("물류비용등록", cols,
+                service.search(packType, keyword, productYear),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Heading(
+                        "물류비용등록", (productYear == null) ? null : "상품년도 : " + productYear));
+        return excel.asDownload(xlsx, "물류비용등록.xlsx");
     }
 
     @Operation(summary = "좌측 상품 트리(연도 > 분류 > 상품) — 33p",

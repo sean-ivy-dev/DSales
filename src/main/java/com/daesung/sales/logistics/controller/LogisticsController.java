@@ -140,20 +140,20 @@ public class LogisticsController {
             @RequestParam(required = false, defaultValue = "false") boolean includeCancel,
             @RequestParam(required = false) LogisCostDetailResponse.Grain grain) {
         var cols = java.util.List.of(
-                new com.daesung.sales.common.excel.ExcelExportUtil.Col("구분", "rowType"),
-                new com.daesung.sales.common.excel.ExcelExportUtil.Col("소계명", "label"),
-                new com.daesung.sales.common.excel.ExcelExportUtil.Col("접수일자", "reqDate"),
-                new com.daesung.sales.common.excel.ExcelExportUtil.Col("신청번호", "reqCd"),
-                new com.daesung.sales.common.excel.ExcelExportUtil.Col("상품코드", "productCode"),
+                // ★★F-35 — **레거시 18개 구성 그대로**다(`물류비계산_20260901-20260930.xlsx` 6행 헤더).
+                //   발주처 원문: "별도 요청 컬럼이 아니면 **레거시 18개 구성대로**".
+                //   뺀 것: 구분·소계명(우리가 만든 칸) · 신청번호 · 상품코드 · 지역 · 도시명 · 학교명.
+                //   · 상품코드·지역·도시명은 레거시도 **조회는 하고 그리드에서만 숨긴다**(`물류비계산2.vb:318~320`).
+                //   · 학교명은 레거시 **상세보기 전용**이라 그리드에 없다.
+                //   · 집계행 라벨(소 계·누 계·합 계·총 계)은 **접수일자 칸**에 들어간다 → `dateOrLabel`.
+                //   ‼️**응답(JSON)에서는 빼지 않았다** — 화면이 상세보기에 쓴다. 엑셀만 18개다.
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("접수일자", "dateOrLabel"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("상품명", "productName"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("학년", "grade"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("시행코드", "dtlCd"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("시행명", "detailName"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("거래처코드", "partnerCode"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("거래처명", "partnerName"),
-                new com.daesung.sales.common.excel.ExcelExportUtil.Col("지역", "region"),
-                new com.daesung.sales.common.excel.ExcelExportUtil.Col("도시명", "cityName"),
-                new com.daesung.sales.common.excel.ExcelExportUtil.Col("학교명", "schoolName"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("자재합", "materialQty"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("시험지합", "paperQty"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("시험지금액", "paperAmount"),
@@ -165,8 +165,7 @@ public class LogisticsController {
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("기본작업비", "basicAmount"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("출고비", "tradeAmount"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("금액합계", "totalAmount"));
-        // 제목·조회기준 2행 + 집계행 색(발주처 검수 F-33). 집계행(시행계·학년계·상품계·총계)은
-        // 응답에 이미 들어 있는데 이 두 인자를 안 넘겨 본문과 같은 서식으로 나가고 있었다.
+
         byte[] xlsx = excel.toXlsx("물류작업비", cols,
                 logisCostDetailService.outboundDetail(fromDate, toDate, mode, dtlCds, includeCancel, grain).rows(),
                 com.daesung.sales.common.excel.ExcelExportUtil.Heading.period(
