@@ -22,6 +22,25 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class WebConfig implements WebMvcConfigurer {
 
     /**
+     * <b>쿼리 파라미터의 대분류를 한글로도 받는다</b>(F-31).
+     *
+     * <p>‼️{@code @JsonCreator}({@link com.daesung.sales.product.entity.MajorCategory#from})는
+     * <b>요청 본문에만</b> 적용된다. 쿼리 파라미터는 스프링이 {@code Enum.valueOf} 로 바꾸므로
+     * 한글을 보내면 400 이 된다 — 같은 enum 인데 본문은 한글이 되고 파라미터는 안 되는
+     * 어긋남이 생긴다. 그 enum 주석이 경고한 상황이 그것이다
+     * ("응답이 한글을 주는데 요청만 enum 이름을 요구하면 화면이 변환표를 따로 들어야 하고,
+     * 그 표가 언젠가 갈린다 — 거래분류·권한키에서 같은 일을 겪었다").
+     *
+     * <p>★규칙은 {@code from()} <b>하나만</b> 쓴다. 여기서 매핑표를 다시 만들지 않는다.
+     * 모르는 값은 그대로 400 이다(오타가 조용히 통과하면 안 된다).
+     */
+    @Override
+    public void addFormatters(org.springframework.format.FormatterRegistry registry) {
+        registry.addConverter(String.class, com.daesung.sales.product.entity.MajorCategory.class,
+                com.daesung.sales.product.entity.MajorCategory::from);
+    }
+
+    /**
      * 허용 오리진. <b>정확히 일치</b>하는 값만 쓴다(로컬 개발 서버 등).
      * 운영/스테이징 도메인은 배포 환경변수로 덮어쓴다 —
      * {@code DAESUNG_CORS_ALLOWED-ORIGINS=https://a.com,https://b.com}

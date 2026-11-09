@@ -6,6 +6,7 @@ import com.daesung.sales.logistics.entity.DeliveryType;
 import com.daesung.sales.logistics.entity.Shipment;
 import com.daesung.sales.logistics.repository.ShipmentRepository;
 import com.daesung.sales.common.audit.CurrentAuditor;
+import com.daesung.sales.sale.dto.ShipmentMajorAgg;
 import com.daesung.sales.sale.dto.ShipmentQtyAgg;
 import com.daesung.sales.sale.dto.ShipmentWarehouseAgg;
 import com.daesung.sales.warehouse.entity.WarehouseType;
@@ -184,7 +185,9 @@ public class WorkService {
     public List<WorkResultRow> workResults(LocalDate from, LocalDate to, String tradeClass,
                                            Long partnerId, Boolean printed, Boolean acknowledged,
                                            WarehouseType warehouseType,
-                                           List<com.daesung.sales.dsre.gateway.OrderState> statuses) {
+                                           List<com.daesung.sales.dsre.gateway.OrderState> statuses,
+                                           List<com.daesung.sales.product.entity.MajorCategory>
+                                                   majorCategories) {
         // ★역할별 기본값(발주처 확정 3-2 나): "물류에서 실제 발송하는 상품은 모두 본사물류창고이므로
         //   출고창고는 본사물류창고만 디폴트, 본사 출고담당(관리자)은 전체/본사물류/위탁 선택 가능".
         //   물류는 요청에 무엇을 넣든 본사물류창고로 강제한다 — 프론트도 필터를 관리자 전용으로 만들었고,
@@ -208,6 +211,20 @@ public class WorkService {
                         .merge(blankToEtc(a.getTradeClass()), a.getQty(), Long::sum);
             }
         }
+
+        // ★발송 단위 **대분류**(F-31). 발송의 tradeClass 문자열로는 가릴 수 없다 —
+        //   2026년 실측 2,229건 중 **833건(37%)이 '대성교재'(법인명)** 였다.
+        //   상품 → 세부구분 → 대분류로 파생한 값을 쓴다. 한 발송에 여럿이면 수량 많은 순.
+        Map<String, List<ShipmentMajorAgg>> majorByKey = new LinkedHashMap<>();
+        for (ShipmentMajorAgg a : saleRepository.shipmentMajorCategory(from, to)) {
+            for (String k : bothKeys(a.getTradeDate(), a.getPartnerId(), a.getSchoolCode(),
+                    a.getTradeClass(), a.getEntryNo())) {
+                majorByKey.computeIfAbsent(k, x -> new ArrayList<>()).add(a);
+            }
+        }
+        java.util.Set<com.daesung.sales.product.entity.MajorCategory> wantedMajors =
+                (majorCategories == null || majorCategories.isEmpty())
+                        ? null : new java.util.HashSet<>(majorCategories);
 
         // ★진행상태 필터(발주처 확정 2026-10-23 #17 "조회조건에 진행상태 포함, 여러 개 선택").
         //   ‼️**삭제는 지정할 때만 나온다.** 평소 목록에 섞이면 처리할 수 없는 건이 섞여
@@ -242,11 +259,31 @@ public class WorkService {
                 continue;
             }
 
+            // 대분류 — 수량 많은 순으로 모은다. 한 발송에 섞여 있으면 둘 다 보여야 한다
+            //   (창고 컬럼이 "여러 창고면 쉼표로 이어 붙인다"와 같은 규칙).
+            List<com.daesung.sales.product.entity.MajorCategory> majors =
+                    majorByKey.getOrDefault(k, List.of()).stream()
+                            .filter(a -> a.getMajorCategory() != null)
+                            .sorted(java.util.Comparator.comparingLong(
+                                    (ShipmentMajorAgg a) -> a.getQty() == null ? 0L : a.getQty())
+                                    .reversed())
+                            .map(ShipmentMajorAgg::getMajorCategory)
+                            .distinct().toList();
+            if (wantedMajors != null && majors.stream().noneMatch(wantedMajors::contains)) {
+                continue;
+            }
+            String majorNames = majors.stream()
+                    .map(com.daesung.sales.product.entity.MajorCategory::label)
+                    .collect(java.util.stream.Collectors.joining(", "));
+
             Map<String, Long> q = qtyByKey.getOrDefault(k, Map.of());
             long total = q.values().stream().mapToLong(Long::longValue).sum();
             String whNames = whs.stream().map(ShipmentWarehouseAgg::getWarehouseName)
                     .distinct().collect(java.util.stream.Collectors.joining(", "));
-            rows.add(new WorkResultRow(s.getId(), s.getTradeClass(), s.getTradeDate(), s.getTradeSeq(),
+            rows.add(new WorkResultRow(s.getId(),
+                    majors.isEmpty() ? null : majors.get(0),
+                    majorNames.isEmpty() ? null : majorNames,
+                    s.getTradeClass(), s.getTradeDate(), s.getTradeSeq(),
                     s.getPartner().getCode(), s.getPartner().getName(),
                     s.getSchoolCode(), s.getSchoolName(),
                     s.getPrintedAt() != null,

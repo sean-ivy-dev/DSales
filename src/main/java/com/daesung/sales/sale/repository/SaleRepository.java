@@ -6,6 +6,7 @@ import com.daesung.sales.sale.dto.BookSalesAgg;
 import com.daesung.sales.sale.dto.CategorySalesAgg;
 import com.daesung.sales.sale.dto.PartnerProductSalesAgg;
 import com.daesung.sales.sale.dto.ReturnableAgg;
+import com.daesung.sales.sale.dto.ShipmentMajorAgg;
 import com.daesung.sales.sale.dto.ShipmentQtyAgg;
 import com.daesung.sales.sale.dto.ShipmentWarehouseAgg;
 import com.daesung.sales.sale.dto.WorkOrderLineAgg;
@@ -1404,6 +1405,37 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
              group by s.salesDate, s.partner.id, coalesce(s.schoolCode, ''), coalesce(s.tradeClass, p.salesDivision, ''), coalesce(s.entryNo, '')
             """)
     List<ShipmentQtyAgg> shipmentQty(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /**
+     * 발송 단위 <b>대분류</b> 집계 — 작업결과 '분류' 컬럼·필터(F-31).
+     *
+     * <p>★묶음 키는 {@link #shipmentQty}와 <b>글자 그대로 같다</b>. 발송↔매출 매칭 규칙은
+     * 그 한 곳에서만 정하고, 여기는 거기에 {@code majorCategory} 축만 더한다 —
+     * 키를 따로 쓰면 수량과 분류가 서로 다른 발송에 붙는다.
+     *
+     * <p>★대분류는 <b>상품 → 세부구분 → 대분류</b>로 파생한다. 발송의 {@code tradeClass}
+     * 문자열은 쓸 수 없다 — 2026년 실측에서 **37%가 '대성교재'(법인명)** 였다.
+     *
+     * <p>한 발송에 대분류가 여럿이면 <b>행이 여럿</b> 나온다(수량 많은 순으로 쓴다).
+     */
+    @Query("""
+            select s.salesDate as tradeDate, s.partner.id as partnerId,
+                   coalesce(s.schoolCode, '') as schoolCode,
+                   coalesce(s.tradeClass, p.salesDivision, '') as tradeClass,
+                   coalesce(s.entryNo, '') as entryNo,
+                   d.majorCategory as majorCategory,
+                   sum(s.qty) as qty
+              from Sale s join s.product p
+                left join SalesDivision d on d.code = p.salesDivision
+             where s.canceled = false
+               and s.salesCategory <> com.daesung.sales.salestype.entity.SalesCategory.RETURN
+               and s.salesDate between :from and :to
+             group by s.salesDate, s.partner.id, coalesce(s.schoolCode, ''),
+                      coalesce(s.tradeClass, p.salesDivision, ''), coalesce(s.entryNo, ''),
+                      d.majorCategory
+            """)
+    List<ShipmentMajorAgg> shipmentMajorCategory(@Param("from") LocalDate from,
+                                                 @Param("to") LocalDate to);
 
     /**
      * 발송 단위의 도서별 상세. 작업요청서가 "무엇을 몇 개 포장할지" 지시하는 목록이다.

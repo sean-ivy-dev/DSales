@@ -13,7 +13,28 @@ import java.util.Map;
 @Schema(name = "WorkResultRow", description = "작업결과 1행(발송 건)")
 public record WorkResultRow(
         @Schema(description = "발송 건 id") Long id,
-        @Schema(description = "분류", example = "IC") String tradeClass,
+
+        @Schema(description = """
+                ★**대분류**(F-31 발주처 요청 "필터·컬럼 모두 대분류로").
+                발송에 묶인 매출의 **상품 → 세부구분 → 대분류**로 파생한다.
+                한 발송에 여럿이면 **수량이 많은 쪽**이 이 칸에 온다.
+
+                ‼️아래 `tradeClass` 를 대분류로 읽으면 안 된다 — 그 칸에는 축이 섞여 있다
+                (2026년 실측 2,229건: 기타고사 1,120 · **대성교재 833**(법인명) ·
+                교재 268 · D모의고사 7(세부구분) · 기타 1).""")
+        com.daesung.sales.product.entity.MajorCategory majorCategory,
+
+        @Schema(description = """
+                대분류 한글 표기. 한 발송에 여럿이면 **쉼표로 이어 붙인다**
+                (출고창고 컬럼과 같은 규칙). 매출이 안 붙은 발송은 null.""")
+        String majorCategoryName,
+
+        @Schema(description = """
+                **세부구분**(레거시 `sendData.tradeClass` 그대로). F-31 의
+                "가능하면 세부구분 컬럼 별도 추가"가 이 칸이다.
+                ‼️값에 축이 섞여 있어 **분류로 쓰지 말 것** — 대분류는 위 `majorCategory` 다.""",
+                example = "IC")
+        String tradeClass,
         @Schema(description = "거래일자") LocalDate tradeDate,
         @Schema(description = "거래순번") int tradeSeq,
         @Schema(description = "거래처코드") String partnerCode,

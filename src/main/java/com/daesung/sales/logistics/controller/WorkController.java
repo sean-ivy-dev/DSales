@@ -356,6 +356,15 @@ public class WorkController {
                     예) `statuses=SHIPPED,CANCELED`""")
             @RequestParam(required = false)
             List<com.daesung.sales.dsre.gateway.OrderState> statuses,
+            @Parameter(description = """
+                    ★**대분류 다중선택**(F-31). 모의고사/교재/기타고사/특강/기타.
+                    한글·코드명 둘 다 받는다. 미지정=전체.
+
+                    ‼️기존 `tradeClass` 는 **세부구분**(레거시 값)이라 대분류가 아니다 —
+                    2026년 실측에서 **37%가 '대성교재'(법인명)** 였다. 분류로 거를 때는 이 칸을 쓸 것.
+                    예) `majorCategories=교재,기타고사`""")
+            @RequestParam(required = false)
+            List<com.daesung.sales.product.entity.MajorCategory> majorCategories,
             @Parameter(description = "키워드 — 코드·명칭을 함께 훑는다(부분일치)")
             @RequestParam(required = false) String keyword,
             @org.springdoc.core.annotations.ParameterObject
@@ -374,7 +383,7 @@ public class WorkController {
         //   같은 모양을 판매채널에서 했다가 0.08초 → 45초가 된 적이 있어 여기서는 하지 않는다.
         List<WorkResultRow> all = Keywords.filter(
                 workService.workResults(fromDate, toDate, tradeClass, partnerId, printed,
-                        acknowledged, warehouseType, statuses),
+                        acknowledged, warehouseType, statuses, majorCategories),
                 keyword,
                 r -> new Object[]{r.partnerCode(), r.partnerName(), r.schoolCode(), r.schoolName(),
                         r.warehouseName()});
@@ -398,9 +407,14 @@ public class WorkController {
             @RequestParam(required = false) WarehouseType warehouseType,
             @Parameter(description = "진행상태 다중선택 — 미지정=삭제 제외 전체")
             @RequestParam(required = false)
-            List<com.daesung.sales.dsre.gateway.OrderState> statuses) {
+            List<com.daesung.sales.dsre.gateway.OrderState> statuses,
+            @Parameter(description = "대분류 다중선택(F-31). 미지정=전체")
+            @RequestParam(required = false)
+            List<com.daesung.sales.product.entity.MajorCategory> majorCategories) {
         List<Col> cols = List.of(
-                new Col("분류", "tradeClass"), new Col("거래일자", "tradeDate"),
+                // ★F-31: '분류' 는 **대분류**다. 레거시 값(세부구분)은 별도 칸으로 뺐다.
+                new Col("대분류", "majorCategoryName"), new Col("세부구분", "tradeClass"),
+                new Col("거래일자", "tradeDate"),
                 new Col("거래순번", "tradeSeq"),
                 new Col("거래처코드", "partnerCode"), new Col("거래처명", "partnerName"),
                 new Col("학교코드", "schoolCode"), new Col("학교명", "schoolName"),
@@ -413,7 +427,7 @@ public class WorkController {
                 new Col("Box", "boxCount"), new Col("발송메모", "sendMemo"), new Col("비고", "memo"));
         byte[] xlsx = excel.toXlsx("작업결과", cols,
                 workService.workResults(fromDate, toDate, tradeClass, partnerId, printed,
-                        acknowledged, warehouseType, statuses));
+                        acknowledged, warehouseType, statuses, majorCategories));
         return excel.asDownload(xlsx, "작업결과.xlsx");
     }
 
