@@ -135,6 +135,51 @@ class DeliveryTrackingIntegrationTest extends IntegrationTestSupport {
         assertThat(o.path("deliveryTypeName").asText()).isEqualTo("화물");
     }
 
+    /**
+     * 화물 건은 <b>택배 칸을 비워 내린다</b>(#095).
+     *
+     * <p>‼️실측(2026-11-09) — 운영의 화물 9건 <b>전부 택배사가 'CJ대한통운'</b>으로 나왔다.
+     * {@code CourierCompany.displayLabel} 이 빈 값에 기본값을 넣기 때문인데, 그 규칙은
+     * <b>"과거 택배 건의 빈 택배사를 CJ로 간주"</b> 하려고 만든 것이라 화물에는 틀렸다.
+     * 화물에 택배사가 찍히면 담당자는 그 건이 택배로 나간 줄로 읽는다.
+     *
+     * <p>★<b>미지정(null)은 비우지 않는다</b> — 택배일 수도 있고, 그 건에 들어 있는 값은
+     * 담당자가 직접 넣은 것이다.
+     */
+    @Test
+    @DisplayName("‼️화물 건은 택배사·송장·수령인을 **비워서** 내린다(#095)")
+    void 화물은_택배칸_비움() {
+        // 화물로 두고 택배 정보를 억지로 밀어 넣는다(과거 데이터가 그런 모양이다).
+        // ★`기본값_화물` 테스트는 이 건이 FREIGHT 인지만 본다 — 여기서 FREIGHT 를 유지하므로
+        //   순서가 어떻게 되든 그 테스트는 깨지지 않는다.
+        put("/logistics/work-orders/" + freightShipment + "/shipping", Map.of(
+                "deliveryType", "FREIGHT", "boxCount", 2,
+                "receiverName", "화물수령", "receiverPhone", "010-0000-1111"));
+
+        JsonNode o = orderById(freightShipment);
+        assertThat(o.path("deliveryType").asText()).isEqualTo("FREIGHT");
+        // ‼️Jackson NON_NULL 이라 null 은 **키가 없다** — has() 로 본다.
+        assertThat(o.has("courierName"))
+                .as("화물에 택배사가 찍히면 택배로 나간 줄로 읽는다: %s", o).isFalse();
+        // ★수령인·연락처는 **남는다** — 화물에도 담당자정보가 있는 건이 정상이고
+        //   (10/27 §8-6), 지우면 그 건을 누가 받는지 알 수 없다.
+        assertThat(o.path("receiverName").asText()).isEqualTo("화물수령");
+        assertThat(o.path("receiverPhone").asText()).isEqualTo("010-0000-1111");
+        assertThat(o.path("deliveryTypeName").asText()).isEqualTo("화물");
+        assertThat(o.path("boxCount").asInt()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("택배 건은 종전대로 — 빈 택배사는 기본값(CJ대한통운)으로 채운다")
+    void 택배는_기본값_유지() {
+        put("/logistics/work-orders/" + courierShipment + "/shipping", Map.of(
+                "deliveryType", "COURIER", "receiverName", "김택배"));
+        JsonNode o = orderById(courierShipment);
+        assertThat(o.path("courierName").asText())
+                .as("과거 택배 건의 빈 택배사는 CJ로 간주한다(10/31 §2)").isNotBlank();
+        assertThat(o.path("receiverName").asText()).isEqualTo("김택배");
+    }
+
     @Test
     @DisplayName("보내지 않은 항목은 건드리지 않는다 — 박스 수만 고쳐도 수령인이 남는다")
     void 부분수정_보존() {

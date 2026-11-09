@@ -417,6 +417,7 @@ public class WorkService {
             List<WorkOrderResponse.Line> lines = linesByKey.getOrDefault(lookupKey(s), List.of());
             long total = lines.stream().mapToLong(WorkOrderResponse.Line::qty).sum();
             DeliveryType dt = s.getDeliveryType();
+            boolean freight = dt == DeliveryType.FREIGHT;
             var st = s.progressState();
             out.add(new WorkOrderResponse(s.getId(), s.getEntryNo(),
                     st.name(), st.label(),
@@ -433,12 +434,32 @@ public class WorkService {
                     s.getReceiverName(), s.getReceiverPhone(), s.getReceiverEmail(),
                     s.getZipCode(), s.getAddress(),
                     // 택배사 표기는 displayLabel 한 곳으로 — 사이트/백오피스가 다르게 보이면 안 된다.
-                    com.daesung.sales.logistics.entity.CourierCompany.displayLabel(s.getCourierName()),
+                    // ‼️**화물 건에는 기본값을 채우지 않는다**(#095). displayLabel 은 빈 값을
+                    //   'CJ대한통운'으로 바꾸는데, 그 규칙은 "과거 **택배** 건의 빈 택배사를
+                    //   CJ로 간주"(10/31 §2)하려고 만든 것이다. 화물에 적용되어
+                    //   **운영의 화물 9건 전부 택배사가 CJ대한통운으로 보였다**(실측 2026-11-09) —
+                    //   담당자는 그 건이 택배로 나간 줄로 읽는다.
+                    // ★수령인·연락처·송장은 **그대로 둔다**. 화물에도 담당자정보가 있는 건이
+                    //   정상이고(10/27 §8-6 "담당자정보가 있어도 명시적 화물이 이긴다"),
+                    //   값을 지우면 그 건을 누가 받는지 알 수 없게 된다.
+                    freight ? blankToNull(s.getCourierName())
+                            : com.daesung.sales.logistics.entity.CourierCompany
+                                    .displayLabel(s.getCourierName()),
                     s.getTrackingNo(),
                     trackingsOf(s),
                     total, lines));
         }
         return out;
+    }
+
+    /**
+     * 빈 문자열을 null 로 바꾼다.
+     *
+     * <p>‼️수령인·연락처가 <b>null 과 빈 문자열로 섞여</b> 내려가고 있었다(실측: 택배 건에 {@code ""}).
+     * 화면이 둘을 다르게 그리면 같은 "값 없음"이 칸마다 달라 보인다.
+     */
+    private static String blankToNull(String v) {
+        return (v == null || v.isBlank()) ? null : v;
     }
 
     /** 매출구분이 비어 있는 상품은 '기타'로 묶는다 — 빈 키로 두면 화면에 이름 없는 칸이 생긴다. */
