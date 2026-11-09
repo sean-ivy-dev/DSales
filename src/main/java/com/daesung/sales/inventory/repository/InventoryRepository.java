@@ -59,6 +59,15 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
      * 창고별로 쪼개면 각 창고 최소값의 합이 되어 실제보다 작게 나온다.
      * 반환 Object[]: [materialId, qtySum].
      */
+    /**
+     * 상품 재고 합계(전 창고). <b>조립돼 있는 세트 수</b>를 보는 데 쓴다 —
+     * F-37 발주처 확정대로 "SET 재고는 세트 조립·해체로 증감"하는 그 숫자다.
+     *
+     * <p>자재 합계와 같은 이유로 창고를 가리지 않는다.
+     */
+    @Query("select coalesce(sum(i.qty), 0) from Inventory i where i.product.id = :productId")
+    int sumQtyByProductId(@Param("productId") Long productId);
+
     @Query("select m.id, coalesce(sum(i.qty), 0) from Inventory i join i.material m "
             + "where m.id in :materialIds group by m.id")
     java.util.List<Object[]> sumByMaterialIds(

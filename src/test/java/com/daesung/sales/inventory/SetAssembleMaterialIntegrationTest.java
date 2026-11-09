@@ -224,4 +224,35 @@ class SetAssembleMaterialIntegrationTest extends IntegrationTestSupport {
         // 공통 OMR은 **회차당 소요**(세트당 4 ÷ 4회차 = 1) × 10부 = 10장
         assertThat(materialQty(omr)).as("공통 OMR 회차당 1 × 10부").isEqualTo(beforeOmr - 10);
     }
+
+    @Test
+    @Order(6)
+    @DisplayName("세트 재고와 조립 가능 수량은 다른 숫자다 + 회차 단독 가능 부수(F-37 ⑤)")
+    void 세트재고와조립가능수량() {
+        JsonNode res = get("/masters/products/" + setProduct + "/set-stock");
+        assertThat(res.path("success").asBoolean()).as("세트재고: %s", res).isTrue();
+        JsonNode d = res.path("data");
+
+        // 앞선 테스트 결과: 조립 800 → 해체 100 → 1회 단독출고 10부
+        // 세트 재고 = 800 − 100 = 700 (출고는 회차 단독이라 세트를 깎지 않는다)
+        assertThat(d.path("setStock").asInt()).as("조립돼 있는 세트").isEqualTo(700);
+
+        // 조립 가능 수량 = 회차 시험지 최소값. 1회만 10장 더 빠졌으니 290, 나머지 300 → 290
+        assertThat(d.path("assemblableSets").asInt()).as("더 만들 수 있는 세트(최소값)").isEqualTo(290);
+        assertThat(d.path("setStock").asInt())
+                .as("‼️두 숫자는 다르다 — 같으면 10/22 폐기 기준으로 되돌아간 것이다")
+                .isNotEqualTo(d.path("assemblableSets").asInt());
+
+        // 회차 단독 가능 부수 — 시험지는 세트당 1 = 회차당 1이라 재고와 같다
+        JsonNode r1 = null;
+        for (JsonNode r : d.path("rounds")) {
+            if (rounds.get(0).equals(r.path("roundProductId").asLong())) {
+                r1 = r;
+            }
+        }
+        assertThat(r1).as("1회 줄: %s", d).isNotNull();
+        assertThat(r1.path("stockQty").asInt()).as("1회 시험지 재고").isEqualTo(290);
+        assertThat(r1.path("standaloneQty").asInt()).as("1회 단독 가능 부수").isEqualTo(290);
+        assertThat(r1.path("bottleneck").asBoolean()).as("1회가 병목").isTrue();
+    }
 }

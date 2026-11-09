@@ -101,16 +101,29 @@ public class MaterialBomService {
         return materialBomRepository.findBySet(setProductId);
     }
 
+    /**
+     * 회차 <b>단독</b> 가능 부수 = 재고 ÷ 회차당 소요(버림).
+     *
+     * <p>회차당 소요가 0인 자재(공통 1회형 — 쿠폰)는 회차만 사도 나가지 않으므로
+     * 단독 부수를 정하지 않는다 → 0을 돌려 "이 축으로는 제한 없음"을 뜻한다.
+     */
+    private static int standalone(int qty, long perRound) {
+        return (perRound <= 0) ? 0 : (int) Math.floorDiv(qty, perRound);
+    }
+
     private Product productOrThrow(Long id) {
         return productRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "상품이 없습니다. id=" + id));
     }
 
     /**
-     * 세트 가용재고 — <b>구성 회차별 시험지 재고의 최소값</b>.
+     * 세트 재고 현황 — <b>조립된 세트 수</b> + <b>자재로 더 만들 수 있는 수</b>.
      *
-     * <p>근거: 발주처 확정(2026-10-23) "세트 재고는 구성 회차별 시험지 재고의 최소값.
-     * 예) 1~4회 100/120/105/111 → 세트 100. 회차 단독판매도 동일 기준."
+     * <p>★★<b>의미가 정정됐다(F-37, 발주처 확정 2026-11-09).</b> 10/22 기준
+     * "세트 재고 = 구성 회차별 시험지 재고의 최소값"은 <b>폐기</b>됐다.
+     * 새 기준은 "재고는 자재 낱장이 기준 원장. <b>SET 재고는 세트 조립·해체로 증감</b>"이다.
+     * → 최소값은 <b>"앞으로 더 만들 수 있는 수"</b>이고, <b>세트 재고는 상품 재고</b>다.
+     * 계산이 틀린 게 아니라 그 값을 "세트 재고"라 부른 것이 틀렸다.
      *
      * <p>★<b>세트는 따로 쌓아 두는 물건이 아니다.</b> 회차 시험지를 모아 만드는 것이라
      * "몇 세트 나갈 수 있나"는 <b>가장 모자란 회차</b>가 정한다.
@@ -135,7 +148,8 @@ public class MaterialBomService {
         if (boms.isEmpty()) {
             // 구성이 없으면 null — 0과 다르다. 0은 "못 만든다", null 은 "구성이 안 잡혀 있다"다.
             return new com.daesung.sales.material.dto.SetStockResponse(
-                    set.getId(), set.getCode(), set.getName(), null, List.of());
+                    set.getId(), set.getCode(), set.getName(),
+                    inventoryRepository.sumQtyByProductId(set.getId()), null, List.of());
         }
 
         java.util.Map<Long, Integer> stock = new java.util.HashMap<>();
@@ -143,6 +157,13 @@ public class MaterialBomService {
                 boms.stream().map(b -> b.getMaterial().getId()).distinct().toList())) {
             stock.put((Long) r[0], ((Number) r[1]).intValue());
         }
+
+        // 공통 자재의 **회차당** 소요는 세트당÷회차수다 → 회차 수를 먼저 센다.
+        //   ‼️`boms` 는 시험지만 걸러진 목록이라 그걸로 세면 안 된다. 전체 매칭에서 센다.
+        int roundCount = (int) materialBomRepository.findBySet(setProductId).stream()
+                .filter(b -> !b.isCommon())
+                .map(b -> b.getRoundProduct().getId())
+                .distinct().count();
 
         List<com.daesung.sales.material.dto.SetStockResponse.Round> rounds = new java.util.ArrayList<>();
         Integer min = null;
@@ -157,7 +178,9 @@ public class MaterialBomService {
                     (round == null) ? "(공통)" : round.getCode(),
                     (round == null) ? "공통 자재" : round.getName(),
                     b.getMaterial().getId(), b.getMaterial().getCode(), b.getMaterial().getName(),
-                    qty, b.getQtyPerSet(), possible, false));
+                    qty, b.getQtyPerSet(), possible,
+                    // 회차 단독 가능 부수 — 회차당 소요로 나눈다(공통 반복형은 세트당÷회차수).
+                    standalone(qty, b.qtyPerRound(roundCount)), false));
         }
 
         // 병목 표시 — 어느 회차가 세트 수를 정했는지 화면이 바로 짚을 수 있게 한다.
@@ -167,11 +190,13 @@ public class MaterialBomService {
                         ? new com.daesung.sales.material.dto.SetStockResponse.Round(
                                 r.roundProductId(), r.roundProductCode(), r.roundProductName(),
                                 r.materialId(), r.materialCode(), r.materialName(),
-                                r.stockQty(), r.qtyPerSet(), r.possibleSets(), true)
+                                r.stockQty(), r.qtyPerSet(), r.possibleSets(),
+                                r.standaloneQty(), true)
                         : r)
                 .toList();
 
         return new com.daesung.sales.material.dto.SetStockResponse(
-                set.getId(), set.getCode(), set.getName(), min, marked);
+                set.getId(), set.getCode(), set.getName(),
+                inventoryRepository.sumQtyByProductId(set.getId()), min, marked);
     }
 }

@@ -80,7 +80,10 @@ class SetStockIntegrationTest extends IntegrationTestSupport {
     void 최소값이_세트수() {
         JsonNode d = data(get("/masters/products/" + setProduct + "/set-stock"));
 
-        assertThat(d.path("availableSets").asInt()).isEqualTo(100);
+        // ★이름이 바뀌었다 — F-37 로 "세트 재고"가 아니라 **조립 가능 수량**이 됐다.
+        assertThat(d.path("assemblableSets").asInt()).isEqualTo(100);
+        // 조립을 안 했으니 실제 세트 재고는 0이다. 둘은 다른 숫자다.
+        assertThat(d.path("setStock").asInt()).as("조립 전이라 세트 재고 0").isZero();
         assertThat(d.path("rounds")).hasSize(4);
 
         // 어느 회차가 막고 있는지 짚어 준다 — 담당자가 그 회차를 채우면 되기 때문이다.
@@ -104,7 +107,7 @@ class SetStockIntegrationTest extends IntegrationTestSupport {
                 .path("success").asBoolean()).isTrue();
 
         assertThat(data(get("/masters/products/" + setProduct + "/set-stock"))
-                .path("availableSets").asInt()).isEqualTo(105);
+                .path("assemblableSets").asInt()).isEqualTo(105);
     }
 
     @Test
@@ -112,7 +115,7 @@ class SetStockIntegrationTest extends IntegrationTestSupport {
     void 구성없으면_null() {
         JsonNode d = data(get("/masters/products/" + emptySet + "/set-stock"));
         // 0은 "못 만든다", null 은 "구성이 안 잡혀 있다"다. 섞으면 담당자가 할 일을 못 찾는다.
-        assertThat(d.hasNonNull("availableSets")).isFalse();
+        assertThat(d.hasNonNull("assemblableSets")).isFalse();
         assertThat(d.path("rounds")).isEmpty();
     }
 }
