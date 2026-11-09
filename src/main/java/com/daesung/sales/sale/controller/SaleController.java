@@ -1092,11 +1092,7 @@ public class SaleController {
                     모집단을 확인할 수 있게 `schoolCount`(집계에 든 학교 수)를 함께 준다.
 
                     ★학년은 **도서의 학년**이다(레거시도 `bookData.grade`). 학교 학년이 아니다.
-                    학년이 없는 도서(공통·자재)는 학년 분해에서 빠진다.
-
-                    ‼️**레거시 화면과 2·3학년 인원이 다르게 보인다.** 레거시 바깥 SELECT 가
-                    `인원_1학년 AS '인원[2학년]'` 로 **1학년 값을 2·3학년 칸에 복사**하는 오타가
-                    있다(안쪽에서는 제대로 집계한다). 우리는 각 학년 값을 쓴다.""")
+                    학년이 없는 도서(공통·자재)는 학년 분해에서 빠진다.""")
     @GetMapping("/attendance-ratio")
     public ApiResponse<com.daesung.sales.sale.dto.AttendanceRatioResponse> attendanceRatio(
             @Parameter(description = "조회 연도", example = "2026") @RequestParam int year,
