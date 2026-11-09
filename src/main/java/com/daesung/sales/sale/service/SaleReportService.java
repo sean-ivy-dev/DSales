@@ -245,6 +245,65 @@ public class SaleReportService {
 
     /** 조회 조건(거래처·세부구분·분류·도서)까지 받는 순매출(2026-10-08). */
     /**
+     * 순매출 — <b>분류별</b>(P-19, 레거시 집계 단위 라디오 「○거래처별 ○분류별」).
+     *
+     * <p>★금액 칸은 도서별·거래처별과 같다. 같은 화면의 세 보기라 칸이 달라지면 비교가 안 된다.
+     * <p>‼️콘텐츠구분·매입·이익 칸은 <b>비운다</b> — 한 분류에 자체교재와 매입교재가 섞이고
+     * 매입단가는 상품 속성이다(거래처별과 같은 이유).
+     */
+    @Transactional(readOnly = true)
+    public NetSalesResponse netSalesByCategory(LocalDate fromDate, LocalDate toDate, String contentType,
+                                               java.util.List<Long> partnerIds,
+                                               java.util.List<String> divisions,
+                                               java.util.List<String> catCodes,
+                                               java.util.List<Long> productIds) {
+        LocalDate from = (fromDate != null) ? fromDate : LocalDate.now().withDayOfYear(1);
+        LocalDate to = (toDate != null) ? toDate : LocalDate.now();
+        String filter = (contentType == null || contentType.isBlank())
+                ? null : contentType.trim().toUpperCase(Locale.ROOT);
+
+        List<NetSalesResponse.Row> rows = new ArrayList<>();
+        long tSaleQ = 0, tSaleA = 0, tSaleTax = 0, tFreeQ = 0, tFreeA = 0;
+        long tRetQ = 0, tRetA = 0, tRetTax = 0;
+        for (Object[] r : saleRepository.netSalesByCategory(
+                com.daesung.sales.common.query.MultiSelect.isAny(partnerIds),
+                com.daesung.sales.common.query.MultiSelect.orPlaceholder(partnerIds, 0L),
+                com.daesung.sales.common.query.MultiSelect.isAny(divisions),
+                com.daesung.sales.common.query.MultiSelect.orPlaceholder(divisions, "\u0000"),
+                com.daesung.sales.common.query.MultiSelect.isAny(catCodes),
+                com.daesung.sales.common.query.MultiSelect.orPlaceholder(catCodes, "\u0000"),
+                com.daesung.sales.common.query.MultiSelect.isAny(productIds),
+                com.daesung.sales.common.query.MultiSelect.orPlaceholder(productIds, 0L),
+                from, to, filter)) {
+            long saleQty = num(r[2]), saleAmt = num(r[3]), saleTax = num(r[4]);
+            long freeQty = num(r[5]), freeAmt = num(r[6]);
+            long retQty = num(r[7]), retAmt = num(r[8]), retTax = num(r[9]);
+            long netQty = saleQty - retQty, netAmt = saleAmt - retAmt, netTax = saleTax - retTax;
+
+            // 분류 행에서는 도서 칸·거래처 칸·콘텐츠구분·매입·이익을 비운다 — 섞인 값이다.
+            rows.add(new NetSalesResponse.Row(null, (String) r[0], (String) r[1], null, null,
+                    null, null, null,
+                    null, null,
+                    saleQty, saleAmt, freeQty, freeAmt, freeQty, freeAmt,
+                    retQty, returnRate(retQty, saleQty), retAmt,
+                    netQty, netAmt, netTax, netAmt + netTax,
+                    null, null, null, null, null, null, null));
+            tSaleQ += saleQty; tSaleA += saleAmt; tSaleTax += saleTax;
+            tFreeQ += freeQty; tFreeA += freeAmt;
+            tRetQ += retQty; tRetA += retAmt; tRetTax += retTax;
+        }
+        long tNetAmt = tSaleA - tRetA;
+        long tNetTax = tSaleTax - tRetTax;
+        NetSalesResponse.Row total = new NetSalesResponse.Row(null, null, "합계", null, null,
+                null, null, null, null, null,
+                tSaleQ, tSaleA, tFreeQ, tFreeA, tFreeQ, tFreeA,
+                tRetQ, returnRate(tRetQ, tSaleQ), tRetA,
+                tSaleQ - tRetQ, tNetAmt, tNetTax, tNetAmt + tNetTax,
+                null, null, null, null, null, null, null);
+        return new NetSalesResponse(from, to, filter, rows, total);
+    }
+
+    /**
      * 순매출 — <b>거래처별</b>(현장 피드백 2026-10-14 B-2, 레거시 「조회구분 ○거래처별」).
      *
      * <p>★금액 칸은 도서별과 같다. 같은 화면의 두 보기라 칸이 달라지면 비교가 안 된다.

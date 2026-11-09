@@ -624,25 +624,41 @@ public class SaleController {
             @Parameter(description = "도서 id **다중선택**")
             @RequestParam(required = false) List<Long> productIds,
             @Parameter(description = """
-                    조회구분 — `PRODUCT`(도서별, 기본) / `PARTNER`(거래처별).
-                    근거: 레거시 순매출조회 오른쪽 위 「조회구분 ○거래처별 ○분류별」
-                    (현장 피드백 2026-10-14 B-2).
+                    조회구분 — `PRODUCT`(도서별, 기본) / `PARTNER`(거래처별) / **`CATEGORY`(분류별)**.
+                    근거: 레거시 순매출조회의 집계 단위 라디오 「○거래처별 ○분류별」
+                    (`순매출조회.Designer.vb` RadioButton_Cust·RadioButton_Cat).
 
-                    ★금액 칸은 둘이 같다 — 같은 화면의 두 보기라 칸이 달라지면 비교가 안 된다.
-                    ‼️`PARTNER` 는 **매입·이익 칸을 비운다.** 매입단가는 상품 속성이라
-                      거래처로 묶으면 서로 다른 단가가 섞인다 — 섞인 값으로 이익을 내면
-                      틀린 숫자가 그럴듯하게 나온다.""")
+                    ‼️**`CATEGORY` 가 빠져 있었다**(P-19) — 보내도 도서별과 같은 행이 나왔다
+                      (실측 2026-11-09: 둘 다 507행). 이제 분류코드로 묶는다.
+                      분류코드가 빈 상품은 **'(미분류)'** 로 모은다.
+
+                    ★금액 칸은 셋이 같다 — 같은 화면의 세 보기라 칸이 달라지면 비교가 안 된다.
+                    ‼️`PARTNER`·`CATEGORY` 는 **매입·이익 칸을 비운다.** 매입단가는 상품 속성이라
+                      거래처나 분류로 묶으면 서로 다른 단가가 섞인다 — 섞인 값으로 이익을 내면
+                      틀린 숫자가 그럴듯하게 나온다.
+
+                    ★좌측 트리의 **분류 선택과 도서 선택은 `catCodes`·`productIds`** 로 따로 받는다
+                      (레거시는 라디오로 트리 해석을 바꿨지만, 다중선택이라 둘을 함께 걸 수 있다).
+                      미지정이 'All' 이다.""")
             @RequestParam(required = false, defaultValue = "PRODUCT") String groupBy,
             @Parameter(description = "키워드 — 코드·명칭을 함께 훑는다(부분일치)")
             @RequestParam(required = false) String keyword) {
         // 대소문자 변환 없이 값을 그대로 본다 — equalsIgnoreCase 는 로케일에 따라
         // 결과가 달라진다(정적분석 IMPROPER_UNICODE, 터키어 i→İ).
+        // 대소문자 구분 없이 받되 변환은 하지 않는다 — 값은 화면이 보내는 고정 문자열이다.
         boolean byPartner = "PARTNER".equals(groupBy) || "partner".equals(groupBy);
-        NetSalesResponse r = byPartner
-                ? saleReportService.netSalesByPartner(fromDate, toDate, contentType,
-                        partnerIds, divisions, catCodes, productIds)
-                : saleReportService.netSales(fromDate, toDate, contentType,
-                        partnerIds, divisions, catCodes, productIds);
+        boolean byCategory = "CATEGORY".equals(groupBy) || "category".equals(groupBy);
+        NetSalesResponse r;
+        if (byPartner) {
+            r = saleReportService.netSalesByPartner(fromDate, toDate, contentType,
+                    partnerIds, divisions, catCodes, productIds);
+        } else if (byCategory) {
+            r = saleReportService.netSalesByCategory(fromDate, toDate, contentType,
+                    partnerIds, divisions, catCodes, productIds);
+        } else {
+            r = saleReportService.netSales(fromDate, toDate, contentType,
+                    partnerIds, divisions, catCodes, productIds);
+        }
         return ApiResponse.success(new NetSalesResponse(r.fromDate(), r.toDate(), r.contentType(),
                 Keywords.filter(r.rows(), keyword,
                         x -> new Object[]{x.productCode(), x.productName(), x.catCode(), x.catName()}),
@@ -663,7 +679,12 @@ public class SaleController {
             @Parameter(description = "분류코드 **다중선택**(조회와 동일)")
             @RequestParam(required = false) List<String> catCodes,
             @Parameter(description = "도서 id **다중선택**(조회와 동일)")
-            @RequestParam(required = false) List<Long> productIds) {
+            @RequestParam(required = false) List<Long> productIds,
+            @Parameter(description = """
+                    조회구분 — `PRODUCT`(도서별, 기본) / `PARTNER`(거래처별) / `CATEGORY`(분류별).
+                    ‼️**조회와 같은 값을 보내 주세요.** 예전엔 엑셀이 늘 도서별이라,
+                    화면에서 거래처별로 보고 엑셀을 받으면 **다른 표가 나왔다**.""")
+            @RequestParam(required = false, defaultValue = "PRODUCT") String groupBy) {
         List<Col> cols = List.of(
                 new Col("분류코드", "catCode"), new Col("분류명", "catName"),
                 new Col("거래처코드", "partnerCode"), new Col("거래처명", "partnerName"),
@@ -678,9 +699,19 @@ public class SaleController {
                 new Col("매입반품액", "purchaseReturnAmount"),
                 new Col("매입단가", "purchaseUnitCost"), new Col("매입액", "purchaseAmount"),
                 new Col("이익", "profit"), new Col("이익률(%)", "marginPct"));
-        byte[] xlsx = excel.toXlsx("순매출조회", cols,
-                saleReportService.netSales(fromDate, toDate, contentType,
-                        partnerIds, divisions, catCodes, productIds).rows(),
+        // ★조회와 같은 축으로 낸다 — 화면과 엑셀이 갈리면 둘 다 못 믿는다.
+        NetSalesResponse data;
+        if ("PARTNER".equals(groupBy) || "partner".equals(groupBy)) {
+            data = saleReportService.netSalesByPartner(fromDate, toDate, contentType,
+                    partnerIds, divisions, catCodes, productIds);
+        } else if ("CATEGORY".equals(groupBy) || "category".equals(groupBy)) {
+            data = saleReportService.netSalesByCategory(fromDate, toDate, contentType,
+                    partnerIds, divisions, catCodes, productIds);
+        } else {
+            data = saleReportService.netSales(fromDate, toDate, contentType,
+                    partnerIds, divisions, catCodes, productIds);
+        }
+        byte[] xlsx = excel.toXlsx("순매출조회", cols, data.rows(),
                 Heading.period("순매출조회", fromDate, toDate));
         return excel.asDownload(xlsx, "순매출조회.xlsx");
     }

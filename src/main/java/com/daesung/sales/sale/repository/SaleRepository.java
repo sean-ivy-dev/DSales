@@ -1058,6 +1058,61 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
                                      @Param("contentType") String contentType);
 
     /**
+     * 순매출 — <b>분류별</b> 집계(P-19).
+     *
+     * <p>근거: 레거시 순매출조회의 <b>집계 단위 라디오</b>가 「○거래처별 ○분류별」이다
+     * ({@code 순매출조회.Designer.vb} {@code RadioButton_Cust}·{@code RadioButton_Cat}).
+     * 우리는 도서별·거래처별만 있어 <b>분류별이 빠져 있었다</b> —
+     * {@code groupBy=CATEGORY} 를 보내도 도서별과 같은 행이 나왔다(실측 2026-11-09: 둘 다 507행).
+     *
+     * <p>★금액 칸은 도서별·거래처별과 <b>똑같다</b>. 같은 화면의 세 보기라 칸이 달라지면
+     * 담당자가 숫자를 비교하지 못한다. 묶는 축만 바뀐다.
+     *
+     * <p>‼️콘텐츠구분과 매입·이익 칸은 <b>비운다</b> — 한 분류에 자체교재와 매입교재가 섞여 있고,
+     * 매입단가는 상품 속성이다. 섞인 단가로 이익률을 내면 틀린 숫자가 그럴듯하게 나온다
+     * (거래처별과 같은 이유다).
+     *
+     * <p>★<b>분류코드가 빈 상품은 '(미분류)' 로 묶는다.</b> 빈 키로 두면 화면에 이름 없는 줄이 생긴다.
+     *
+     * <p>반환 Object[]: [catCode, catName, saleQty, saleAmt, saleTax,
+     * freeQty, freeAmt, returnQty, returnAmt, returnTax].
+     */
+    @Query(value = """
+            SELECT COALESCE(NULLIF(p.cat_code, ''), '(미분류)') cat_code,
+                   MAX(COALESCE(NULLIF(p.cat_name, ''), '(미분류)')) cat_name,
+              COALESCE(SUM(CASE WHEN s.sales_category='SALE' THEN s.qty ELSE 0 END),0) sale_qty,
+              COALESCE(SUM(CASE WHEN s.sales_category='SALE' THEN s.supply_amount ELSE 0 END),0) sale_amt,
+              COALESCE(SUM(CASE WHEN s.sales_category='SALE' THEN s.tax ELSE 0 END),0) sale_tax,
+              COALESCE(SUM(CASE WHEN s.sales_category='FREE' THEN s.qty ELSE 0 END),0) free_qty,
+              COALESCE(SUM(CASE WHEN s.sales_category='FREE' THEN s.supply_amount ELSE 0 END),0) free_amt,
+              COALESCE(SUM(CASE WHEN s.sales_category='RETURN' THEN s.qty ELSE 0 END),0) return_qty,
+              COALESCE(SUM(CASE WHEN s.sales_category='RETURN' THEN s.supply_amount ELSE 0 END),0) return_amt,
+              COALESCE(SUM(CASE WHEN s.sales_category='RETURN' THEN s.tax ELSE 0 END),0) return_tax
+            FROM sales s
+              JOIN products p ON p.id = s.product_id
+            WHERE s.deleted_at IS NULL AND s.canceled = false
+              AND s.sales_date BETWEEN :fromDate AND :toDate
+              AND (CAST(:contentType AS CHAR) IS NULL OR p.content_type = :contentType)
+              AND (:anyPartner = TRUE OR s.partner_id IN (:partnerIds))
+              AND (:anyDivision = TRUE OR COALESCE(p.sales_division, '') IN (:divisions))
+              AND (:anyCat = TRUE OR p.cat_code IN (:catCodes))
+              AND (:anyProduct = TRUE OR s.product_id IN (:productIds))
+            GROUP BY COALESCE(NULLIF(p.cat_code, ''), '(미분류)')
+            ORDER BY cat_code
+            """, nativeQuery = true)
+    List<Object[]> netSalesByCategory(@Param("anyPartner") boolean anyPartner,
+                                      @Param("partnerIds") Collection<Long> partnerIds,
+                                      @Param("anyDivision") boolean anyDivision,
+                                      @Param("divisions") Collection<String> divisions,
+                                      @Param("anyCat") boolean anyCat,
+                                      @Param("catCodes") Collection<String> catCodes,
+                                      @Param("anyProduct") boolean anyProduct,
+                                      @Param("productIds") Collection<Long> productIds,
+                                      @Param("fromDate") LocalDate fromDate,
+                                      @Param("toDate") LocalDate toDate,
+                                      @Param("contentType") String contentType);
+
+    /**
      * 그 미결의 <b>마지막 위탁정산 매출</b>. 확정매출분 반품(Case1)에서 정가·공급률 출처로 쓴다.
      *
      * <p>담당자가 반품하며 단가를 다시 적지 않아도 되게 하려는 것이다 —
