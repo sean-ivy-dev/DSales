@@ -335,11 +335,15 @@ public class OrderService {
                     .getId();
         }
 
-        int qty = (sl.qty() != null && sl.qty() > 0) ? sl.qty() : (int) totalQty;
-        if (qty <= 0) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT,
-                    "매출 수량이 0입니다. 반별 인원이 없으면 수량을 직접 지정하세요.");
-        }
+        // ★수량 0 도 등록을 허용한다(F-17). 발주처 원문 —
+        //   "매출만 있는 상품은 수량 없이 금액만 등록함.
+        //    **수량 1 이상은 알림만 띄우고 등록은 허용**(레거시는 수량 0 + 금액 등록 가능)".
+        //   ‼️예전엔 여기서 막아 **주문 등록 창에서도 수량 0이면 등록이 안 됐다**
+        //     (전수재검사 2026-11-05 F-17). 매출등록과 같은 규칙으로 맞춘다 —
+        //     재고·작업지시를 안 만드는 처리는 매출 쪽(SaleService)이 한다.
+        //   ★0을 **명시적으로 보낸 경우**와 **안 보낸 경우**를 가른다 — 안 보냈으면 종전대로
+        //     반별 인원 합을 쓴다(같은 숫자를 두 번 치게 하지 않으려는 기존 의도).
+        int qty = (sl.qty() != null) ? sl.qty() : (int) totalQty;
 
         SalesEntryRequest.Item item = new SalesEntryRequest.Item(
                 productId, ShipmentType.NORMAL_SHIP, sl.unitPrice(), sl.supplyRate(),

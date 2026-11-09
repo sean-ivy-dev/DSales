@@ -127,8 +127,16 @@ public record SalesEntryRequest(
                     example = "0")
             @PositiveOrZero Integer discountAmount,
 
-            @Schema(description = "수량", example = "100", requiredMode = Schema.RequiredMode.REQUIRED)
-            @Positive int qty,
+            @Schema(description = """
+                    수량. ★**0도 받는다**(F-17).
+                    발주처 원문: "매출만 있는 상품은 수량 없이 금액만 등록함.
+                    **수량 1 이상은 알림만 띄우고 등록은 허용**(레거시는 수량 0 + 금액 등록 가능)".
+
+                    ‼️수량이 0이면 **재고도 작업지시도 만들지 않는다** — 뺄 물건이 없고,
+                    0부를 보내라는 지시가 물류로 가면 안 된다. 대신 응답 `warnings` 에 담는다.
+                    금액은 `supplyAmount` 로 직접 넣으면 된다(수량 0이면 계산식으로는 0원이다).""",
+                    example = "100", requiredMode = Schema.RequiredMode.REQUIRED)
+            @PositiveOrZero int qty,
 
             @Schema(description = "세액(선택). 자동산출하지 않으며 미입력 시 0. 면세 상품에는 입력 불가",
                     example = "0")

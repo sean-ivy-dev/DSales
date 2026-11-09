@@ -186,9 +186,18 @@ public class SaleService {
 
             // 재고 반영(한 트랜잭션): 출고유형 → 부호/이벤트유형. 위탁·취소는 이 API 불가.
             // 재고 미관리 상품(모의고사 등 인원기반)은 차감·이벤트 없음. shipmentType 유효성은 항상 검사.
+            // ★★수량 0 — 등록은 허용하되 **재고도 작업지시도 만들지 않는다**(F-17).
+            //   발주처 원문: "매출만 있는 상품은 수량 없이 금액만 등록함.
+            //   수량 1 이상은 **알림만 띄우고 등록은 허용**(레거시는 수량 0 + 금액 등록 가능)".
+            //   ‼️뺄 물건이 없는데 재고 이벤트를 남기면 수불부에 0짜리 줄이 쌓이고,
+            //     0부를 보내라는 작업지시가 물류로 가면 담당자가 헛걸음한다.
+            if (item.qty() == 0) {
+                stockWarningCollector.add(com.daesung.sales.inventory.dto.StockWarning.zeroQty(
+                        product.getId(), product.getCode()));
+            }
             int delta = stockDelta(item.shipmentType(), item.qty());
             int stockBalance = 0;
-            if (warehouse != null && product.isStockManaged()) {
+            if (warehouse != null && product.isStockManaged() && item.qty() != 0) {
                 TxnType txnType = (delta >= 0) ? TxnType.RETURN : TxnType.OUTBOUND;
                 stockBalance = inventoryService.applyShipment(product, warehouse, delta, txnType,
                         item.shipmentType(), req.salesDate(), salesNo, item.memo());
@@ -209,8 +218,11 @@ public class SaleService {
                             && salesDivisionRepository.findByCode(code)
                                     .map(d -> d.getMajorCategory() == com.daesung.sales.product.entity.MajorCategory.SPECIAL_LECTURE)
                                     .orElse(false));
+            // ★수량 0 도 작업지시를 만들지 않는다(F-17) — 내보낼 물건이 없는데 지시가 서면
+            //   물류 대기목록에 영원히 안 끝나는 건이 쌓인다(미출고 매출과 같은 이유).
             if (r.salesCategory() != SalesCategory.RETURN && warehouse != null
-                    && !Boolean.TRUE.equals(req.onlySales()) && !isSpecialLecture) {
+                    && !Boolean.TRUE.equals(req.onlySales()) && !isSpecialLecture
+                    && item.qty() != 0) {
                 var shipment = shipmentService.ensureFor(sale);
                 // ★비어 있을 때만 채운다 — 발주처 질의 2026-10-26 ①. 자세한 이유는
                 //   ShipmentService.applyDeliveryIfBlank/Shipment.fillDeliveryIfBlank 주석 참고.
