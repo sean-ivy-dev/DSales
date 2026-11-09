@@ -390,6 +390,10 @@ public class ReceivableController {
         List<Map<String, Object>> out = new ArrayList<>();
         for (ArStatusResponse.Row r : rows) {
             Map<String, Object> m = new LinkedHashMap<>();
+            // ‼️rowType 을 빠뜨리면 **소계행에 색이 하나도 안 칠해진다** — 공통 판정식
+            //   AGG_BY_ROW_TYPE 이 이 키를 본다. 여기는 수동 평탄화라 record 와 달리
+            //   넣지 않으면 조용히 사라진다(검증 2026-11-09에 실제로 그랬다).
+            m.put("rowType", r.rowType());
             m.put("partnerCode", r.partnerCode());
             m.put("partnerName", r.partnerName());
             m.put("bossName", r.bossName());

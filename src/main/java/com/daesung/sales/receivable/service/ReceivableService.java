@@ -668,7 +668,8 @@ public class ReceivableService {
                 continue;
             }
             String kind = isPurchaser ? PARTNER_KIND_PURCHASE : PARTNER_KIND_SALES;
-            ArStatusResponse.Row row = new ArStatusResponse.Row(pid, p.getCode(), p.getName(), p.getBossName(),
+            ArStatusResponse.Row row = new ArStatusResponse.Row("DETAIL",
+                    pid, p.getCode(), p.getName(), p.getBossName(),
                     kind, opening, s[6], s[1], s[7], s[2], s[3], s[0], purchasedQty, purchased,
                     collected, balance, s[4], s[5],
                     byCat.getOrDefault(pid, List.of()),
@@ -685,7 +686,7 @@ public class ReceivableService {
             tSaleQty += s[6]; tRetQty += s[7];
         }
         rows.sort((a, b) -> a.partnerCode().compareTo(b.partnerCode()));
-        ArStatusResponse.Row total = new ArStatusResponse.Row(null, "합계", null, null, null,
+        ArStatusResponse.Row total = new ArStatusResponse.Row("TOTAL", null, "합계", null, null, null,
                 tOpen, tSaleQty, tSale, tRetQty, tRet, tTax, tGen, tPurchaseQty, tPurchase,
                 tColl, tBal, tTeacher, tTeacherQty,
                 sumCategories(totalCatLists),
@@ -1267,7 +1268,8 @@ public class ReceivableService {
             purQty += r.purchaseQty(); pur += r.purchaseAmount(); coll += r.collected();
             bal += r.balance(); teacher += r.teacherAmount(); teacherQty += r.teacherQty();
         }
-        return new ArStatusResponse.Row(null, label, null, null, null,
+        // ★rowType 을 실어야 엑셀이 소계행에 색을 칠한다(공통 판정식 AGG_BY_ROW_TYPE).
+        return new ArStatusResponse.Row("GROUP_SUBTOTAL", null, label, null, null, null,
                 open, saleQty, sale, retQty, ret, tax, gen, purQty, pur, coll, bal, teacher, teacherQty,
                 List.of(), null, null, null, null, null, null);
     }

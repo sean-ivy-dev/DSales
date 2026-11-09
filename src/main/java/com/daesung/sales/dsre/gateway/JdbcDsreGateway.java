@@ -152,8 +152,15 @@ public class JdbcDsreGateway implements DsreGateway {
               COALESCE(SUM(CASE WHEN c.NAME IN ('단행본','책자','라벨') THEN lc.REQCNT ELSE 0 END),0) etc_qty,
               COALESCE(SUM(CASE WHEN c.NAME IN ('단행본','책자') THEN lc.REQCNT*cost.ETC
                                 WHEN c.NAME='라벨' THEN lc.REQCNT*cost.LABEL ELSE 0 END),0) etc_amt,
-              MAX(CASE WHEN cost.PACKTYPE=3 THEN FUNC_REQINWON_GET_PACKTYPE2(req.REQ_CD)
-                       ELSE FUNC_REQINWON_GET_PACKTYPE1(req.REQ_CD) END) inwon,
+              -- ‼️저장함수를 **집계 밖**에 둔다. 안에 두면 MySQL 이 그룹의 **자재 행마다**
+              --   함수를 돌린다 — 9월 기준 자재 69,782행 ÷ 신청 1,935건 = **36배 낭비**였고,
+              --   명세 조회가 20초였다(검증 2026-11-09). 그룹 키가 REQ_CD 를 포함하므로
+              --   한 그룹 = 한 신청이고, 밖으로 빼면 **같은 값**이 신청당 1회로 나온다.
+              --   PACKTYPE 은 DTL_CD 당 단일(실측: 섞인 DTL_CD 0건, cost 행도 DTL_CD 당 1행)이라
+              --   MAX(cost.PACKTYPE) 로 바꿔도 분기가 달라지지 않는다.
+              --   ★인원비 합계(OUT_LABOR_SQL)가 이미 이 모양이다 — 둘을 같은 식으로 맞춘다.
+              CASE WHEN MAX(cost.PACKTYPE)=3 THEN FUNC_REQINWON_GET_PACKTYPE2(req.REQ_CD)
+                   ELSE FUNC_REQINWON_GET_PACKTYPE1(req.REQ_CD) END inwon,
               MAX(cost.BASIC) basic, MAX(cost.TRADE) trade,
               MAX(req.APPLY_GN) apply_gn, MAX(req.STATE='C') canceled
             FROM tbl_logis_cnt lc

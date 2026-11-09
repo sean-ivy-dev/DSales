@@ -30,6 +30,15 @@ public record ArStatusResponse(
 ) {
     @Schema(name = "ArStatusRow")
     public record Row(
+            @Schema(description = """
+                    행 구분 — 명세는 `DETAIL`, 접두어 구간 소계는 `GROUP_SUBTOTAL`.
+
+                    ★<b>엑셀이 집계행에 색을 칠하는 근거</b>이고(공통 판정식 `AGG_BY_ROW_TYPE`),
+                    화면도 이 값으로 소계 줄을 굵게 그릴 수 있다.
+                    ‼️예전엔 이 칸이 없어 <b>엑셀 소계행에 색이 하나도 안 칠해졌다</b> —
+                    판정식이 `rowType` 을 보는데 이 DTO 에만 그 칸이 없었다(검증 2026-11-09).
+                    화면이 거래처명 "소 계" 로 문자열 비교해 알아내야 했던 것도 함께 없앤다.""")
+            String rowType,
             @Schema(description = "거래처 id(합계행 null)") Long partnerId,
             @Schema(description = "거래처코드") String partnerCode,
             @Schema(description = "거래처명") String partnerName,

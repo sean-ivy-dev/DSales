@@ -127,7 +127,58 @@ public class ExcelExportUtil {
         return (t == null) ? "SUBTOTAL" : String.valueOf(t);
     }
 
+    /**
+     * 집계 단계 코드 → <b>사람이 읽는 한글</b>.
+     *
+     * <p>‼️예전엔 '구분' 칸에 {@code DETAIL}·{@code CAT_SUBTOTAL} 같은 <b>내부 코드가 그대로</b>
+     * 나갔다(검증 2026-11-09). 재무팀이 받는 파일이라 영문 enum 이 보이면 안 된다.
+     *
+     * <p>★여기 한 곳에서만 바꾼다 — '구분' 칸을 쓰는 리포트가 5종(매출액명세서·월별매출액명세서·
+     * 수금원장·외상매출장·제품수불부)이고, 각자 번역하면 같은 코드가 파일마다 다른 말로 나온다.
+     * 모르는 코드는 <b>그대로 둔다</b>(새 단계가 생겼을 때 조용히 빈칸이 되면 더 나쁘다).
+     */
+    static String rowTypeLabel(String code) {
+        return switch (code) {
+            case "DETAIL" -> "명세";
+            case "GRAND_TOTAL", "TOTAL" -> "총 계";
+            case "MAJOR_SUBTOTAL" -> "대분류 계";
+            case "CAT_SUBTOTAL" -> "분류 계";
+            case "PRODUCT_SUBTOTAL" -> "상품 계";
+            case "GRADE_SUBTOTAL" -> "학년 계";
+            case "DTL_SUBTOTAL" -> "시행 계";
+            case "GROUP_SUBTOTAL" -> "소 계";
+            case "DAY_SUBTOTAL" -> "일 계";
+            case "MONTH_SUBTOTAL" -> "월 계";
+            case "SUBTOTAL" -> "소 계";
+            default -> code;
+        };
+    }
+
+    /** 숫자로만 된 문자열이면 정수로, 아니면 원래 값 그대로. 학년처럼 숫자 칸이어야 하는 값에 쓴다. */
+    private static Object asIntIfNumeric(Object v) {
+        if (!(v instanceof String str) || str.isBlank()) {
+            return v;
+        }
+        try {
+            return Integer.valueOf(str.trim());
+        } catch (NumberFormatException e) {
+            return v;
+        }
+    }
+
     private static Object resolve(Map<String, Object> row, String field) {
+        // ★'구분' 칸(rowType)은 **한글로 바꿔서** 낸다. 집계행 판정·색칠은 원본 코드를
+        //   맵에서 직접 읽으므로(AGG_BY_ROW_TYPE·aggKind) 여기 번역은 그쪽에 영향이 없다.
+        if ("rowType".equals(field)) {
+            Object v = row.get(field);
+            return (v == null) ? null : rowTypeLabel(String.valueOf(v));
+        }
+        // ★학년은 **숫자 칸**이다. 레거시 실파일(물류비계산_20260901-20260930.xlsx)의 학년·시행코드가
+        //   둘 다 int 인데 우리는 학년을 문자로 보내 왼쪽 정렬·숫자 정렬 불가였다(검증 2026-11-09).
+        //   ‼️숫자로 읽히는 값만 바꾼다 — "고3" 같은 값이 섞이면 그대로 글자로 둬야 한다.
+        if ("grade".equals(field)) {
+            return asIntIfNumeric(row.get(field));
+        }
         int open = field.indexOf('[');
         if (open < 0 || !field.endsWith("]")) {
             return row.get(field);
@@ -214,6 +265,11 @@ public class ExcelExportUtil {
         }
         if (k.contains("GRADE")) {
             return new byte[]{(byte) 0xD3, (byte) 0xD3, (byte) 0xD3};   // 학년 누계 회색
+        }
+        // ★대분류 계는 분류 계보다 **한 단계 위**다 — 같은 색이면 파일에서 두 소계가 구분되지 않는다
+        //   (검증 2026-11-09: 월별매출액명세서에서 분류 소계와 대분류 소계가 둘 다 연노랑이었다).
+        if (k.contains("MAJOR")) {
+            return new byte[]{(byte) 0xFF, (byte) 0xE4, (byte) 0xB5};   // 대분류 계 살구
         }
         return new byte[]{(byte) 0xFF, (byte) 0xFF, (byte) 0xE0};       // 그 외 소계 연노랑
     }
