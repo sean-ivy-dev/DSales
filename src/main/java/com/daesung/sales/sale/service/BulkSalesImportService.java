@@ -65,11 +65,42 @@ public class BulkSalesImportService {
         int entrySeq = 0;
         int imported = 0, skipped = 0, unmapped = 0;
 
-        for (BooklistImportRow row : dsreGateway.readPendingBooklist(from, to)) {
+        // ★행마다 DB를 치지 않는다 — 더프 쪽(DuffSalesImportService)과 같은 결함이었다.
+        //   한 행에 구분 3종(M·J·B)이 붙어 exists 가 행×3 까지 돌았다. 쿼리 4회로 줄인다.
+        List<BooklistImportRow> srcRows = dsreGateway.readPendingBooklist(from, to);
+        java.util.Set<String> custCodes = new java.util.HashSet<>();
+        java.util.Set<String> prodCodes = new java.util.HashSet<>();
+        java.util.Set<String> allKeys = new java.util.HashSet<>();
+        java.util.Set<Integer> allReqCds = new java.util.HashSet<>();
+        for (BooklistImportRow r : srcRows) {
+            if (r.custCode() != null) {
+                custCodes.add(r.custCode());
+            }
+            prodCodes.add(r.lstCd() + r.dtlCd());
+            allReqCds.add(r.reqCd());
+            for (String gn : List.of("M", "J", "B")) {
+                allKeys.add(r.reqCd() + ":" + r.lstCd() + ":" + r.dtlCd() + ":" + gn);
+            }
+        }
+        java.util.Map<String, Partner> partnerByCode = new java.util.HashMap<>();
+        if (!custCodes.isEmpty()) {
+            partnerRepository.findByCodeIn(custCodes).forEach(p -> partnerByCode.put(p.getCode(), p));
+        }
+        java.util.Map<String, Product> productByCode = new java.util.HashMap<>();
+        if (!prodCodes.isEmpty()) {
+            productRepository.findByCodeIn(prodCodes).forEach(p -> productByCode.put(p.getCode(), p));
+        }
+        // 가변 Set — 저장한 줄을 더해 같은 호출 안의 중복을 막는다(예전엔 저장 직후 flush 가 그 일을 했다).
+        java.util.Set<String> takenKeys = new java.util.HashSet<>(
+                allKeys.isEmpty() ? List.of() : saleRepository.findBulkImportKeysIn(allKeys));
+        java.util.Set<Integer> takenReqCds = new java.util.HashSet<>(
+                allReqCds.isEmpty() ? List.<Integer>of() : saleRepository.findReqCdsWithSalesIn(allReqCds));
+
+        for (BooklistImportRow row : srcRows) {
             // 거래처(machul_cd)·도서(lst+dtl) → 우리 마스터 매핑
-            Partner partner = partnerRepository.findByCode(row.custCode()).orElse(null);
+            Partner partner = (row.custCode() == null) ? null : partnerByCode.get(row.custCode());
             String productCode = row.lstCd() + row.dtlCd();
-            Product product = productRepository.findByCode(productCode).orElse(null);
+            Product product = productByCode.get(productCode);
 
             boolean rowWritten = false;
             for (Kind k : List.of(
@@ -89,12 +120,21 @@ public class BulkSalesImportService {
                 }
                 // ★주문 등록 화면에서 매출까지 함께 세운 신청은 소스키가 없어 아래 검사를 통과한다.
                 //   신청번호로 한 번 더 막는다(프론트 확인 질문 2026-10-01).
-                if (saleRepository.existsByReqCdAndCanceledFalse(row.reqCd())) {
+                //
+                // ‼️**잠복 결함(2026-11-09 확인, 지금은 동작을 바꾸지 않음)**: 이 검사가
+                //   **같은 행의 뒤 구분까지 막는다.** 한 신청에 M(매출)·J(증정)·B(무상)가 함께
+                //   있으면 M 이 등록된 직후 신청번호가 잡혀 **J·B 가 SKIPPED** 된다
+                //   (`Sale` 은 IDENTITY 라 save 가 곧 INSERT 이고, 예전 코드도 그 뒤 exists 가
+                //   auto-flush 로 방금 넣은 행을 봤다 — 즉 **묶음 조회로 바꿔서 생긴 일이 아니다**).
+                //   소스키 검사만으로 중복은 이미 막히므로 이 검사는 **신청번호가 다른 경로로
+                //   이미 매출이 된 경우**에만 걸려야 한다. 고치면 등록되는 줄 수가 달라지므로
+                //   발주처 확인 후 별건으로 처리한다.
+                if (takenReqCds.contains(row.reqCd())) {
                     skipped++;
                     lines.add(line(sourceKey, k, row, k.qty(), supply, "SKIPPED", null));
                     continue;
                 }
-                if (saleRepository.existsByBulkImportKey(sourceKey)) {
+                if (takenKeys.contains(sourceKey)) {
                     skipped++;
                     lines.add(line(sourceKey, k, row, k.qty(), supply, "SKIPPED", null));
                     rowWritten = true; // 이미 등록된 적 있음 → write-back은 시도
@@ -113,6 +153,9 @@ public class BulkSalesImportService {
                 sale.linkOrder(row.reqCd());   // 주문 목록이 "무슨 매출이 됐나"를 역참조한다
                 sale.applyEntry(entryNo, ++entrySeq);
                 saleRepository.save(sale);
+                // 같은 호출 안의 중복 방지(위 '가변 Set' 주석 참고).
+                takenKeys.add(sourceKey);
+                takenReqCds.add(row.reqCd());
                 imported++;
                 rowWritten = true;
                 lines.add(line(sourceKey, k, row, k.qty(), supply, "IMPORTED", salesNo));

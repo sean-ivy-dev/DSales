@@ -410,6 +410,22 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
     boolean existsByReqCdAndCanceledFalse(Integer reqCd);
 
     /**
+     * 위 두 검사를 <b>묶음으로</b>. 행마다 exists 를 부르던 자리를 대신한다 —
+     * 미리보기(dryRun)에서도 그 두 검사가 매 행 돌아, 2,549행에 1만 번 왕복했다
+     * (2026-11-09 실측 67.8초 → 게이트웨이 504).
+     *
+     * <p>‼️조건을 단건 메서드와 <b>똑같이</b> 둔다. 소스키는 논리삭제분도 포함하고
+     * (UNIQUE 가 {@code (bulk_import_key, del_key)} 라 지운 뒤 재등록이 가능한 구조다),
+     * 신청번호는 {@code canceled = false} 만 본다. 한쪽만 바꾸면 묶음과 단건이 다른 답을 낸다.
+     */
+    @Query("select s.bulkImportKey from Sale s where s.bulkImportKey in :keys")
+    java.util.List<String> findBulkImportKeysIn(@Param("keys") java.util.Collection<String> keys);
+
+    /** 위와 같은 목적 — 이미 매출이 선 신청번호를 묶음으로. */
+    @Query("select s.reqCd from Sale s where s.reqCd in :reqCds and s.canceled = false")
+    java.util.List<Integer> findReqCdsWithSalesIn(@Param("reqCds") java.util.Collection<Integer> reqCds);
+
+    /**
      * 월별 실적(순매출액 = 매출−반품). 취소 제외. 상품 필터(null=전체). 대시보드 목표대비용.
      * 반환 Object[]: [month(1~12), netAmount].
      */

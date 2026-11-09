@@ -142,7 +142,48 @@ public class DuffSalesImportService {
         int imported = 0, skipped = 0, unmapped = 0, zeroInwon = 0, zeroAmount = 0;
         long totalSum = 0;
 
-        for (DuffSalesRow row : dsreGateway.readDuffSales(from, to, onlyComplete, m)) {
+        // ★★행마다 DB를 치지 않는다 — 먼저 **한 번에** 읽어 둔다.
+        //
+        //   ‼️예전엔 행마다 ①거래처 ②상품 ③소스키 ④신청번호를 각각 조회했다.
+        //     2,549행이면 **1만 번 왕복**이고, 그중 ③④는 미리보기(dryRun)에서도 돌았다
+        //     (dryRun 분기가 그 뒤에 있다). 2026-11-09 운영 실측 —
+        //     1일 173행 5.2초 / 7일 1,109행 30.4초 / 31일 2,549행 **67.8초** → 게이트웨이 504.
+        //     행당 26ms 로 정확히 선형이었고, DSRE 쿼리 자체는 복제본 단독 실행 0.67초,
+        //     저장함수 1,000행 0.11초로 **무죄**였다. 병목은 전부 이쪽이었다.
+        //   → 쿼리 4회로 줄인다. 판정 결과는 그대로다(조건을 단건 메서드와 같게 맞췄다).
+        List<DuffSalesRow> srcRows = dsreGateway.readDuffSales(from, to, onlyComplete, m);
+
+        java.util.Set<String> partnerCodes = new java.util.HashSet<>();
+        java.util.Set<String> productCodes = new java.util.HashSet<>();
+        java.util.Set<String> sourceKeys = new java.util.HashSet<>();
+        java.util.Set<Integer> reqCds = new java.util.HashSet<>();
+        for (DuffSalesRow r : srcRows) {
+            if (r.machulCode() != null) {
+                partnerCodes.add(r.machulCode());
+            }
+            if (r.dtlCode() != null) {
+                productCodes.add(r.dtlCode());
+            }
+            sourceKeys.add(sourceKeyOf(m, r));
+            reqCds.add(r.reqCd());
+        }
+        java.util.Map<String, Partner> partnerByCode = new java.util.HashMap<>();
+        if (!partnerCodes.isEmpty()) {
+            partnerRepository.findByCodeIn(partnerCodes)
+                    .forEach(p -> partnerByCode.put(p.getCode(), p));
+        }
+        java.util.Map<String, Product> productByCode = new java.util.HashMap<>();
+        if (!productCodes.isEmpty()) {
+            productRepository.findByCodeIn(productCodes)
+                    .forEach(p -> productByCode.put(p.getCode(), p));
+        }
+        // ★가변 Set 이어야 한다 — 저장한 줄을 여기에 더해 같은 호출 안의 중복을 막는다(아래 참고).
+        java.util.Set<String> takenKeys = new java.util.HashSet<>(
+                sourceKeys.isEmpty() ? List.of() : saleRepository.findBulkImportKeysIn(sourceKeys));
+        java.util.Set<Integer> takenReqCds = new java.util.HashSet<>(
+                reqCds.isEmpty() ? List.<Integer>of() : saleRepository.findReqCdsWithSalesIn(reqCds));
+
+        for (DuffSalesRow row : srcRows) {
             if (!m.accepts(row.procType(), row.chargeType())) {
                 continue;   // 이 모드에서는 안 보이는 행(레거시 ifCondition)
             }
@@ -151,8 +192,7 @@ public class DuffSalesImportService {
 
             // 소스키에 모드를 넣는 이유: 같은 신청을 '처리'로 한 번, '비처리'로 한 번
             // 청구하는 계약(청구구분 T)이 실재한다. 모드를 빼면 두 번째가 중복으로 막힌다.
-            String sourceKey = "DUFF:" + m.name() + ":" + row.reqCd() + ":" + row.custCode()
-                    + ":" + row.schoolCode() + ":" + row.dtlCode();
+            String sourceKey = sourceKeyOf(m, row);
 
             // ★체크한 줄만 — 비우면 전체(예전 동작). 미리보기와 **같은 기간·모드**여야 키가 맞는다.
             if (picked != null && !picked.contains(sourceKey)) {
@@ -165,11 +205,12 @@ public class DuffSalesImportService {
                 charge = new Charge(fix.inwon(), "MANUAL");
             }
 
-            Partner partner = partnerRepository.findByCode(row.machulCode()).orElse(null);
+            Partner partner = (row.machulCode() == null) ? null
+                    : partnerByCode.get(row.machulCode());
             // 담당자가 고른 상품이 있으면 **그걸 쓴다**. 과목코드 매칭은 그다음이다 —
             // DSRE 과목(시행일×영역)과 우리 도서는 1:1이 아니라 자동 매칭이 늘 비는 쪽이다.
             Product product = (chosen != null) ? chosen
-                    : productRepository.findByCode(row.dtlCode()).orElse(null);
+                    : (row.dtlCode() == null ? null : productByCode.get(row.dtlCode()));
 
             // 정가·공급률은 DSRE 값이 우선이고, 없을 때만 도서 마스터로 채운다.
             // ★조용히 0원 매출을 만들지 않기 위해서다 — DSRE의 tbl_product_amt·tbl_school_ref가
@@ -233,7 +274,7 @@ public class DuffSalesImportService {
                 lines.add(line(shown, charge, unit, total, "ZERO_AMOUNT", null, null, sourceKey));
                 continue;
             }
-            if (saleRepository.existsByBulkImportKey(sourceKey)) {
+            if (takenKeys.contains(sourceKey)) {
                 skipped++;
                 lines.add(line(shown, charge, unit, total, "SKIPPED", null, null, sourceKey));
                 continue;
@@ -241,7 +282,7 @@ public class DuffSalesImportService {
             // ★주문 등록 화면에서 매출까지 함께 세운 신청은 소스키가 없어 위 검사를 통과한다.
             //   그대로 두면 같은 신청이 두 번 매출이 된다(프론트 확인 질문 2026-10-01).
             //   두 경로가 공유하는 값은 신청번호뿐이라 그것으로 막는다.
-            if (saleRepository.existsByReqCdAndCanceledFalse(row.reqCd())) {
+            if (takenReqCds.contains(row.reqCd())) {
                 skipped++;
                 lines.add(line(shown, charge, unit, total, "SKIPPED",
                         "이미 매출이 등록된 신청입니다(주문 등록에서 함께 세운 건 포함).", null, sourceKey));
@@ -282,6 +323,12 @@ public class DuffSalesImportService {
             sale.applyDiscount(discount);
             sale.applyEntry(entryNo, ++entrySeq);
             saleRepository.save(sale);
+            // ‼️**같은 호출 안의 중복**도 막아야 한다. 예전엔 행마다 exists 를 쳐서
+            //   저장 직후 조회가 자동 flush 로 방금 넣은 행을 보았다. 묶음 조회로 바꾸면
+            //   그 효과가 사라지므로, 여기서 직접 넣어 준다 —
+            //   안 하면 한 기간에 같은 소스키·신청번호가 두 줄 들어온 경우 **둘 다 등록된다**.
+            takenKeys.add(sourceKey);
+            takenReqCds.add(row.reqCd());
 
             imported++;
             totalSum += total;
@@ -318,6 +365,18 @@ public class DuffSalesImportService {
     }
 
     /** 도서 마스터 공급률(없으면 0). DSRE에 공급률이 없을 때만 쓰는 폴백. */
+    /**
+     * 멱등 소스키. <b>한 곳에만 둔다</b> — 묶음 조회(루프 전)와 줄 판정(루프 안)이
+     * 같은 값을 써야 한다. 두 군데서 조립하면 한쪽만 고쳐져 멱등이 조용히 깨진다.
+     *
+     * <p>모드를 넣는 이유: 같은 신청을 '처리'로 한 번, '비처리'로 한 번 청구하는
+     * 계약(청구구분 T)이 실재한다. 모드를 빼면 두 번째가 중복으로 막힌다.
+     */
+    private static String sourceKeyOf(DuffChargeMode mode, DuffSalesRow row) {
+        return "DUFF:" + mode.name() + ":" + row.reqCd() + ":" + row.custCode()
+                + ":" + row.schoolCode() + ":" + row.dtlCode();
+    }
+
     private static int rateOf(Product product) {
         return (product == null || product.getSupplyRate() == null) ? 0 : product.getSupplyRate();
     }

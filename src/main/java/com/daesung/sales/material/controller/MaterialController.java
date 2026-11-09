@@ -88,6 +88,23 @@ public class MaterialController {
 
     // ── 세트 ↔ 자재 매칭 ────────────────────────────────────────────────────────
 
+    @Operation(summary = "자재 매칭 전체 조회(세트 가로지름)",
+            description = """
+                    **전 세트**의 자재 매칭을 한 줄씩 낸다. 세트 하나씩 보는
+                    `GET /masters/products/{setProductId}/materials` 로는 "자재가 어디에 몇 개
+                    걸려 있나"를 볼 수 없어 신설했다(상품이 14,811개라 순회가 불가능하다).
+
+                    · `commonOnly=true` → **공통(회차 미지정)** 매칭만.
+                      F-37 에서 발주처가 "지금 「공통(회차 0)」으로 연결된 건을 새 구조로
+                      어떻게 옮길지" 회신을 요구한 그 대상이다.
+                    · 정렬: 세트코드 → 회차(공통 먼저) → 자재코드.""")
+    @GetMapping("/material-boms")
+    public ApiResponse<java.util.List<com.daesung.sales.material.dto.MaterialBomFlatRow>> allBoms(
+            @Parameter(description = "공통(회차 미지정) 매칭만 보기. 기본 false=전체")
+            @RequestParam(required = false, defaultValue = "false") boolean commonOnly) {
+        return ApiResponse.success(materialBomService.listAll(commonOnly));
+    }
+
     @Operation(summary = "세트 자재 매칭 조회(33p 구성회차별 매칭 결과)",
             description = "공통(회차 미지정) 먼저, 그다음 회차순.")
     @GetMapping("/products/{setProductId}/materials")

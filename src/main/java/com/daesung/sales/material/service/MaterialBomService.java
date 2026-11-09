@@ -37,6 +37,21 @@ public class MaterialBomService {
     }
 
     /**
+     * 전 세트의 자재 매칭을 한 번에. {@code commonOnly=true} 면 공통(회차 미지정)만.
+     *
+     * <p>세트 하나씩 보는 {@link #list}만으로는 "자재가 어디에 몇 개 걸려 있나"를 볼 수 없어
+     * 신설했다(상품 14,811개를 순회할 수는 없다). F-37 회신(공통 매칭을 새 구조로 어떻게
+     * 옮길지)의 대상 목록을 뽑는 데 쓰고, 33p 화면에서도 쓸 수 있다.
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<com.daesung.sales.material.dto.MaterialBomFlatRow> listAll(
+            boolean commonOnly) {
+        return materialBomRepository.findAllMatches(commonOnly).stream()
+                .map(com.daesung.sales.material.dto.MaterialBomFlatRow::of)
+                .toList();
+    }
+
+    /**
      * 매칭 추가. 같은 (세트, 회차, 자재)가 이미 있으면 <b>수량을 갱신</b>한다(upsert).
      *
      * <p>‼️공통 매칭(회차 null)은 DB UNIQUE가 막지 못한다 — MySQL은 NULL을 서로 다른

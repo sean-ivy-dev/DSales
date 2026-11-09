@@ -12,6 +12,13 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     Optional<Product> findByCode(String code);
 
     /**
+     * 코드 묶음으로 한 번에. 행마다 {@link #findByCode}를 부르던 자리를 대신한다 —
+     * 매출일괄등록 미리보기가 2,549행 × 왕복으로 <b>67.8초</b>가 걸려 게이트웨이가 끊었다
+     * (2026-11-09 실측. DSRE 쿼리는 0.67초로 무죄였다).
+     */
+    java.util.List<Product> findByCodeIn(java.util.Collection<String> codes);
+
+    /**
      * 분류코드 + 도서코드로 찾는다(매출 엑셀 업로드용).
      *
      * <p>★발주처 표준양식이 두 칸을 따로 받는다 —
