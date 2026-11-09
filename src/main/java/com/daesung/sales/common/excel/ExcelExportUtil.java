@@ -121,6 +121,12 @@ public class ExcelExportUtil {
      * <p>월별 크로스탭(1월[수량] … 12월[수량])처럼 값이 리스트로 오는 리포트가 있는데,
      * 평면 키 조회만 하면 그 칸이 통째로 빈다(실제로 응시현황에서 빈 채로 나왔다).
      */
+    /** 집계 단계 문자열 — {@code rowType} 을 쓴다(없으면 범용 소계). */
+    private static String aggKind(Map<String, Object> row) {
+        Object t = row.get("rowType");
+        return (t == null) ? "SUBTOTAL" : String.valueOf(t);
+    }
+
     private static Object resolve(Map<String, Object> row, String field) {
         int open = field.indexOf('[');
         if (open < 0 || !field.endsWith("]")) {
@@ -167,13 +173,49 @@ public class ExcelExportUtil {
         List<String> headers = cols.stream().map(Col::header).toList();
         List<BodyRow> body = maps.stream()
                 .map(m -> new BodyRow(cols.stream().map(c -> resolve(m, c.field())).toList(),
-                        aggregate != null && aggregate.test(m)))
+                        (aggregate != null && aggregate.test(m)) ? aggKind(m) : null))
                 .toList();
         return write(sheetName, headers, body, heading);
     }
 
-    /** 본문 한 줄 + 그 줄이 집계행인지. 집계행은 색·굵은 글씨로 구분한다(§7-6). */
-    private record BodyRow(List<Object> values, boolean aggregate) {
+    /**
+     * 본문 한 줄 + <b>집계 단계</b>. 단계마다 색이 다르다(F-33 레거시 색 코드).
+     *
+     * @param aggKind 집계 종류 문자열({@code rowType} 또는 소계 라벨). 상세행은 null
+     */
+    private record BodyRow(List<Object> values, String aggKind) {
+        boolean aggregate() {
+            return aggKind != null;
+        }
+    }
+
+    /**
+     * 집계 단계 → 배경색. <b>레거시 물류비계산 실파일에서 뽑은 값</b>이다
+     * (F-33 피드백에 색 코드가 그대로 적혀 있었다).
+     *
+     * <pre>
+     *   소계(시행별)  FFFFE0 연노랑
+     *   누계(학년별)  D3D3D3 회색
+     *   합계(상품별)  90EE90 연두
+     *   총계          FFB6C1 분홍
+     * </pre>
+     *
+     * <p>‼️모르는 단계는 <b>소계색</b>으로 둔다 — 리포트마다 {@code rowType} 이름이 달라
+     * (매출액명세서 {@code MAJOR_SUBTOTAL}·{@code CAT_SUBTOTAL} 등) 전부 표에 적을 수 없다.
+     * 색이 없는 것보다 "집계행이구나"가 보이는 쪽이 낫고, 4단계가 뚜렷한 리포트는 4색이 된다.
+     */
+    private static byte[] aggFill(String kind) {
+        String k = (kind == null) ? "" : kind.toUpperCase(java.util.Locale.ROOT);
+        if (k.contains("TOTAL") && !k.contains("SUBTOTAL")) {
+            return new byte[]{(byte) 0xFF, (byte) 0xB6, (byte) 0xC1};   // 총계 분홍
+        }
+        if (k.contains("PRODUCT")) {
+            return new byte[]{(byte) 0x90, (byte) 0xEE, (byte) 0x90};   // 상품 합계 연두
+        }
+        if (k.contains("GRADE")) {
+            return new byte[]{(byte) 0xD3, (byte) 0xD3, (byte) 0xD3};   // 학년 누계 회색
+        }
+        return new byte[]{(byte) 0xFF, (byte) 0xFF, (byte) 0xE0};       // 그 외 소계 연노랑
     }
 
     /**
@@ -191,7 +233,7 @@ public class ExcelExportUtil {
         List<String> headers = cols.stream().map(Col::header).toList();
         List<BodyRow> body = (subtotal == null)
                 ? maps.stream().map(m -> new BodyRow(
-                        cols.stream().map(c -> resolve(m, c.field())).toList(), false)).toList()
+                        cols.stream().map(c -> resolve(m, c.field())).toList(), null)).toList()
                 : withSubtotals(cols, maps, subtotal);
         return write(sheetName, headers, body, heading);
     }
@@ -212,7 +254,7 @@ public class ExcelExportUtil {
         for (Map<String, Object> m : maps) {
             Object g = m.get(spec.groupBy());
             if (open && !java.util.Objects.equals(g, curGroup)) {
-                out.add(new BodyRow(totalRow(cols, spec, curLabel + " 소 계", groupSum), true));
+                out.add(new BodyRow(totalRow(cols, spec, curLabel + " 소 계", groupSum), "SUBTOTAL"));
                 groupSum.clear();
                 open = false;
             }
@@ -221,7 +263,7 @@ public class ExcelExportUtil {
                 curLabel = String.valueOf(m.getOrDefault(spec.labelKey(), ""));
                 open = true;
             }
-            out.add(new BodyRow(cols.stream().map(c -> resolve(m, c.field())).toList(), false));
+            out.add(new BodyRow(cols.stream().map(c -> resolve(m, c.field())).toList(), null));
             for (String k : spec.sumKeys()) {
                 java.math.BigDecimal v = decimalOf(m.get(k));
                 groupSum.merge(k, v, java.math.BigDecimal::add);
@@ -229,10 +271,10 @@ public class ExcelExportUtil {
             }
         }
         if (open) {
-            out.add(new BodyRow(totalRow(cols, spec, curLabel + " 소 계", groupSum), true));
+            out.add(new BodyRow(totalRow(cols, spec, curLabel + " 소 계", groupSum), "SUBTOTAL"));
         }
         // 본문이 비어도 총계는 낸다 — 빈 파일과 "0으로 집계됐다"는 다른 말이다.
-        out.add(new BodyRow(totalRow(cols, spec, "총 계", grandSum), true));
+        out.add(new BodyRow(totalRow(cols, spec, "총 계", grandSum), "TOTAL"));
         return out;
     }
 
@@ -272,7 +314,7 @@ public class ExcelExportUtil {
         }
         List<String> cols = new ArrayList<>(columns);
         return write(sheetName, cols, maps.stream()
-                .map(m -> new BodyRow(cols.stream().map(m::get).toList(), false))
+                .map(m -> new BodyRow(cols.stream().map(m::get).toList(), null))
                 .toList(), null);
     }
 
@@ -292,20 +334,27 @@ public class ExcelExportUtil {
             Sheet sheet = wb.createSheet((sheetName == null || sheetName.isBlank()) ? "Sheet1" : sheetName);
 
             // ★표에 검은색 테두리를 두른다(§7-6 "표에는 검은색 테두리를 그려 칸을 구분한다").
+            //
+            // ★★글꼴은 **맑은 고딕 9pt** — 레거시 실파일이 그 글꼴이고 F-33 이 그렇게 지적했다.
+            //   지정하지 않으면 엑셀 기본(Calibri 11)이 되어 레거시와 줄 수·폭이 달라진다.
+            Font bold = font(wb, true, null);
+            Font plain = font(wb, false, null);
+            // 집계행은 **파란 굵은 글씨**(레거시 그대로).
+            Font blueBold = font(wb, true, org.apache.poi.ss.usermodel.IndexedColors.BLUE.getIndex());
+
             CellStyle headerStyle = bordered(wb);
-            Font bold = wb.createFont();
-            bold.setBold(true);
             headerStyle.setFont(bold);
-            headerStyle.setFillForegroundColor(org.apache.poi.ss.usermodel.IndexedColors.GREY_25_PERCENT.getIndex());
-            headerStyle.setFillPattern(org.apache.poi.ss.usermodel.FillPatternType.SOLID_FOREGROUND);
+            headerStyle.setAlignment(org.apache.poi.ss.usermodel.HorizontalAlignment.CENTER);
+            headerStyle.setVerticalAlignment(org.apache.poi.ss.usermodel.VerticalAlignment.CENTER);
+            // 머리글 D3D3D3 — 예전엔 IndexedColors.GREY_25(C0C0C0)라 레거시와 달랐다.
+            fill(headerStyle, new byte[]{(byte) 0xD3, (byte) 0xD3, (byte) 0xD3});
 
             CellStyle dataStyle = bordered(wb);
+            dataStyle.setFont(plain);
 
-            // ★집계행(일 계·누 계·월 계·학교(원) 계·소 계·총 계)은 색으로 구분한다(§7-6).
-            CellStyle aggStyle = bordered(wb);
-            aggStyle.setFont(bold);
-            aggStyle.setFillForegroundColor(org.apache.poi.ss.usermodel.IndexedColors.GREY_40_PERCENT.getIndex());
-            aggStyle.setFillPattern(org.apache.poi.ss.usermodel.FillPatternType.SOLID_FOREGROUND);
+            // ★집계행은 **단계마다 다른 색**이다(F-33 레거시 색 코드). 예전엔 전 단계가 한 색이라
+            //   소계·누계·합계·총계가 구분되지 않았다 — 같은 회색이면 어디가 끝인지 안 보인다.
+            java.util.Map<String, CellStyle> aggStyles = new java.util.HashMap<>();
 
             // ‼️제목·조회기준 2행은 **맨 마지막에** 쓴다. 먼저 쓰면 그 긴 문구가 A열에 들어가
             //   autoSizeColumn 이 A열을 그 길이에 맞춰 버린다(실측: 날짜 칸이 26.5자로 부풀었다).
@@ -322,7 +371,15 @@ public class ExcelExportUtil {
             int rowIdx = headerRow + 1;
             for (BodyRow r : rows) {
                 Row row = sheet.createRow(rowIdx++);
-                CellStyle style = r.aggregate() ? aggStyle : dataStyle;
+                CellStyle style = dataStyle;
+                if (r.aggregate()) {
+                    style = aggStyles.computeIfAbsent(r.aggKind(), k -> {
+                        CellStyle a = bordered(wb);
+                        a.setFont(blueBold);
+                        fill(a, aggFill(k));
+                        return a;
+                    });
+                }
                 for (int c = 0; c < headers.size(); c++) {
                     Cell cell = row.createCell(c);
                     setCell(cell, c < r.values().size() ? r.values().get(c) : null);
@@ -344,13 +401,27 @@ public class ExcelExportUtil {
                 Font titleFont = wb.createFont();
                 titleFont.setBold(true);
                 titleFont.setFontHeightInPoints((short) 14);
+                titleFont.setFontName("맑은 고딕");
                 titleStyle.setFont(titleFont);
 
                 Cell t = sheet.createRow(0).createCell(0);
                 t.setCellValue(heading.title());
                 t.setCellStyle(titleStyle);
                 if (heading.criteria() != null && !heading.criteria().isBlank()) {
-                    sheet.createRow(1).createCell(0).setCellValue(heading.criteria());
+                    Cell c = sheet.createRow(1).createCell(0);
+                    c.setCellValue(heading.criteria());
+                    c.setCellStyle(titleStyle);
+                }
+                // ★제목·조회기준을 표 너비만큼 **병합**한다(레거시 A1:R1~A5:R5).
+                //   병합하지 않으면 긴 문구가 오른쪽 칸을 덮어 인쇄 시 잘린다.
+                if (headers.size() > 1) {
+                    int last = headers.size() - 1;
+                    sheet.addMergedRegion(
+                            new org.apache.poi.ss.util.CellRangeAddress(0, 0, 0, last));
+                    if (heading.criteria() != null && !heading.criteria().isBlank()) {
+                        sheet.addMergedRegion(
+                                new org.apache.poi.ss.util.CellRangeAddress(1, 1, 0, last));
+                    }
                 }
             }
 
@@ -360,6 +431,30 @@ public class ExcelExportUtil {
         } catch (Exception e) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR, "엑셀 생성 실패: " + e.getMessage());
         }
+    }
+
+    /**
+     * 글꼴 — <b>맑은 고딕 9pt</b>(레거시 실파일 기준, F-33).
+     *
+     * @param color 글자색 인덱스. null 이면 기본(검정)
+     */
+    private static Font font(Workbook wb, boolean bold, Short color) {
+        Font f = wb.createFont();
+        f.setFontName("맑은 고딕");
+        f.setFontHeightInPoints((short) 9);
+        f.setBold(bold);
+        if (color != null) {
+            f.setColor(color);
+        }
+        return f;
+    }
+
+    /** 배경색을 RGB 로 입힌다. 인덱스 색은 레거시 코드값을 그대로 못 쓴다. */
+    private static void fill(CellStyle style, byte[] rgb) {
+        if (style instanceof org.apache.poi.xssf.usermodel.XSSFCellStyle x) {
+            x.setFillForegroundColor(new org.apache.poi.xssf.usermodel.XSSFColor(rgb, null));
+        }
+        style.setFillPattern(org.apache.poi.ss.usermodel.FillPatternType.SOLID_FOREGROUND);
     }
 
     /** 네 변에 얇은 검은 테두리를 두른 기본 스타일(§7-6). */
