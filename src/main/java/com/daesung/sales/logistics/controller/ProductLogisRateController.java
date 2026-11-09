@@ -53,8 +53,34 @@ public class ProductLogisRateController {
             @Parameter(description = "작업구분(PACKTYPE). 미지정=전체") @RequestParam(required = false)
             Integer packType,
             @Parameter(description = "키워드 — 상품코드·상품명을 함께 훑는다(부분일치)")
+            @RequestParam(required = false) String keyword,
+            @Parameter(description = """
+                    상품 연도(미지정=전체). **분류코드 2~5번째**에서 뽑은 값이다
+                    (레거시 `substring(catCode,2,4)`). 좌측 연도 트리와 같은 축이다.""")
+            @RequestParam(required = false) Integer productYear) {
+        return ApiResponse.success(service.search(packType, keyword, productYear));
+    }
+
+    @Operation(summary = "좌측 상품 트리(연도 > 분류 > 상품) — 33p",
+            description = """
+                    물류비용등록 좌측 트리 데이터. 정본이 "트리뷰 상품 선택에 **연도 구분** 추가"를
+                    요구하는데 서버가 이 데이터를 준 적이 없었다(F-38).
+
+                    · 연도 축은 **분류코드 2~5번째**다(레거시 `substring(catCode,2,4) desc`).
+                      ‼️상품 마스터의 `상품년도` 필드는 **운영 14,811개 중 3개만 채워져 있어** 쓰지 않는다 —
+                      그 필드로 묶으면 전 상품이 '미지정' 한 묶음이 된다. 분류코드에서는 100% 뽑힌다.
+                    · **3단**인 이유: 상품이 14,811개다(연도 21 → 분류 889 → 상품).
+                    · `withRateOnly=true` → 단가가 등록된 상품만. 기본은 전체다 —
+                      트리에서 골라 **새로 등록**하는 화면이라 미등록 상품이 보여야 한다.
+                    · 사용 중지(`useYn=false`) 상품은 제외한다.
+                    · 정렬: 연도 내림차순 → 분류코드 → 상품코드.""")
+    @GetMapping("/tree")
+    public ApiResponse<java.util.List<com.daesung.sales.logistics.dto.ProductTreeNode>> tree(
+            @Parameter(description = "단가 등록분만 보기. 기본 false=전체")
+            @RequestParam(required = false, defaultValue = "false") boolean withRateOnly,
+            @Parameter(description = "키워드 — 상품코드·상품명·분류코드·분류명(부분일치)")
             @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(service.search(packType, keyword));
+        return ApiResponse.success(service.tree(withRateOnly, keyword));
     }
 
     @Operation(summary = "물류단가 신규등록",

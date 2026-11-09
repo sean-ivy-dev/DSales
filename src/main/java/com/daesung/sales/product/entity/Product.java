@@ -266,4 +266,37 @@ public class Product extends BaseEntity {
     private static String str(Object v) {
         return (v == null) ? null : String.valueOf(v);
     }
+
+    /**
+     * <b>상품 연도 — 분류코드에서 뽑는다.</b> 트리·필터의 연도 축이 이것이다.
+     *
+     * <p>★근거는 레거시다. {@code 조회.vb:367}·{@code UC_TabPages_IC.vb:2701} 등 여러 화면이
+     * {@code order by substring(catCode,2,4) desc} 로 <b>분류코드 2번째부터 4자리</b>를
+     * 연도로 쓴다. 분류코드 형식({@link com.daesung.sales.product.dto.CatCode})도
+     * "2~5번째 = 연도"로 못 박혀 있다.
+     *
+     * <p>‼️{@link #productYear} 필드를 쓰지 않는 이유: 운영 14,811개 중 <b>3개만 채워져 있다</b>
+     * (2026-11-09 실측). 그 필드로 트리를 만들면 전 상품이 '미지정' 한 묶음이 된다.
+     * 반면 분류코드에서는 <b>100% 뽑힌다</b>(2007~2027, 21개 연도).
+     * 담당자가 {@code productYear} 를 채우기 시작하면 그 값을 우선하도록 바꿀 수 있다.
+     *
+     * @return 연도(예: 2026). 분류코드가 형식에 안 맞으면 {@code null}
+     */
+    public Integer catCodeYear() {
+        return yearOfCatCode(catCode);
+    }
+
+    /** {@link #catCodeYear()}의 문자열 버전 — 상품 객체 없이 분류코드만 있을 때. */
+    public static Integer yearOfCatCode(String catCode) {
+        if (catCode == null || catCode.length() < 5) {
+            return null;
+        }
+        String y = catCode.substring(1, 5);
+        for (int i = 0; i < 4; i++) {
+            if (!Character.isDigit(y.charAt(i))) {
+                return null;
+            }
+        }
+        return Integer.valueOf(y);
+    }
 }

@@ -44,15 +44,85 @@ public class ProductLogisRateService {
 
     /** 목록. 작업구분·키워드(상품코드·상품명) 필터. */
     @Transactional(readOnly = true)
-    public List<ProductLogisRateResponse> search(Integer packType, String keyword) {
+    public List<ProductLogisRateResponse> search(Integer packType, String keyword,
+                                                 Integer productYear) {
         String kw = Keywords.norm(keyword);
         List<ProductLogisRate> rows = rateRepository.search(packType, (kw == null) ? null : "%" + kw + "%");
         Map<Integer, String> names = workTypeNames();
         List<ProductLogisRateResponse> out = new ArrayList<>(rows.size());
         for (ProductLogisRate r : rows) {
+            // ★연도는 분류코드에서 파생되는 값이라 SQL로 걸러내지 않고 여기서 본다.
+            //   컬럼이 아니므로 인덱스를 탈 수도 없고, 이 목록은 단가 등록분뿐이라 양이 작다.
+            if (productYear != null && !productYear.equals(r.getProduct().catCodeYear())) {
+                continue;
+            }
             out.add(ProductLogisRateResponse.from(r, names.get(r.getPackType())));
         }
         return out;
+    }
+
+    /**
+     * 좌측 상품 트리 — <b>연도 &gt; 분류 &gt; 상품</b> 3단(F-38).
+     *
+     * <p>정본 33p가 "좌측 트리뷰 상품 선택에 연도 구분 추가"를 요구하는데 서버가 트리 데이터를
+     * 준 적이 없었다. 연도 축은 {@link Product#catCodeYear()} — 레거시와 같은 규칙이다.
+     *
+     * <p>★3단으로 나누는 이유: 상품이 14,811개다. 연도 21 → 분류 889 → 상품으로 접어야
+     * 화면에서 쓸 수 있다(연도당 분류 70~90개).
+     *
+     * <p>{@code withRateOnly=true} 면 <b>단가가 등록된 상품만</b>. 기본은 전체다 —
+     * 트리에서 상품을 골라 단가를 <b>새로 등록</b>하는 화면이라 미등록 상품이 보여야 한다.
+     */
+    @Transactional(readOnly = true)
+    public List<com.daesung.sales.logistics.dto.ProductTreeNode> tree(boolean withRateOnly,
+                                                                      String keyword) {
+        String kw = Keywords.norm(keyword);
+        java.util.Set<Long> rated = withRateOnly
+                ? rateRepository.findAll().stream()
+                        .map(r -> r.getProduct().getId()).collect(java.util.stream.Collectors.toSet())
+                : java.util.Set.of();
+        List<Product> products = productRepository.findAll().stream()
+                .filter(Product::isUseYn)
+                .filter(p -> !withRateOnly || rated.contains(p.getId()))
+                .filter(p -> kw == null
+                        || contains(p.getCode(), kw) || contains(p.getName(), kw)
+                        || contains(p.getCatCode(), kw) || contains(p.getCatName(), kw))
+                .toList();
+
+        // 연도 내림차순(최근 먼저) → 분류코드 → 상품코드. 레거시 정렬과 같다.
+        java.util.Map<Integer, java.util.Map<String, List<Product>>> grouped =
+                new java.util.TreeMap<>(java.util.Comparator.nullsLast(
+                        java.util.Comparator.reverseOrder()));
+        for (Product p : products) {
+            grouped.computeIfAbsent(p.catCodeYear(), y -> new java.util.TreeMap<>())
+                    .computeIfAbsent(nz(p.getCatCode()), c -> new ArrayList<>())
+                    .add(p);
+        }
+
+        List<com.daesung.sales.logistics.dto.ProductTreeNode> out = new ArrayList<>();
+        grouped.forEach((year, byCat) -> {
+            List<com.daesung.sales.logistics.dto.ProductTreeNode.CatNode> cats = new ArrayList<>();
+            byCat.forEach((catCode, list) -> {
+                list.sort(java.util.Comparator.comparing(Product::getCode,
+                        java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())));
+                cats.add(new com.daesung.sales.logistics.dto.ProductTreeNode.CatNode(
+                        catCode, list.get(0).getCatName(),
+                        list.stream().map(p -> new com.daesung.sales.logistics.dto.ProductTreeNode.Leaf(
+                                p.getId(), p.getCode(), p.getName(),
+                                withRateOnly || rated.contains(p.getId()))).toList()));
+            });
+            int cnt = cats.stream().mapToInt(c -> c.products().size()).sum();
+            out.add(new com.daesung.sales.logistics.dto.ProductTreeNode(year, cnt, cats));
+        });
+        return out;
+    }
+
+    private static boolean contains(String v, String kw) {
+        return v != null && v.toLowerCase(java.util.Locale.ROOT).contains(kw.toLowerCase(java.util.Locale.ROOT));
+    }
+
+    private static String nz(String v) {
+        return (v == null) ? "" : v;
     }
 
     /**

@@ -12,6 +12,11 @@ public record ProductLogisRateResponse(
         @Schema(description = "상품코드") String productCode,
         @Schema(description = "상품명") String productName,
         @Schema(description = "분류코드") String catCode,
+        @Schema(description = "분류명") String catName,
+        @Schema(description = """
+                상품 연도 — **분류코드 2~5번째에서 뽑는다**(레거시 `substring(catCode,2,4)`).
+                좌측 연도 트리·연도 필터의 축이다. 분류코드가 형식에 안 맞으면 null.""")
+        Integer productYear,
         @Schema(description = "작업구분(PACKTYPE)") int packType,
         @Schema(description = "작업구분명") String workTypeName,
         @Schema(description = "시험지 단가") int paper,
@@ -35,7 +40,8 @@ public record ProductLogisRateResponse(
     public static ProductLogisRateResponse from(ProductLogisRate r, String workTypeName) {
         return new ProductLogisRateResponse(r.getId(),
                 r.getProduct().getId(), r.getProduct().getCode(), r.getProduct().getName(),
-                r.getProduct().getCatCode(),
+                r.getProduct().getCatCode(), r.getProduct().getCatName(),
+                r.getProduct().catCodeYear(),
                 r.getPackType(), workTypeName,
                 r.getPaper(), r.getOmr(), r.getEtc(), r.getLabel(), r.getBasic(), r.getTrade(),
                 r.getBSpare(), r.isOverridden(), r.getProduct().isPriceVisible());

@@ -60,6 +60,8 @@ public class InventoryService {
     private final WarehouseRepository warehouseRepository;
     private final PartnerRepository partnerRepository;
     private final BomItemRepository bomItemRepository;
+    /** 자재 매칭 — 조립·해체가 깎는 축(F-37). 매칭이 있으면 자재, 없으면 상품 구성. */
+    private final com.daesung.sales.material.repository.MaterialBomRepository materialBomRepository;
     private final com.daesung.sales.inventory.config.InventoryProperties inventoryProperties;
     private final StockWarningCollector stockWarningCollector;
     private final com.daesung.sales.inventory.repository.VoucherCancelRepository voucherCancelRepository;
@@ -194,10 +196,88 @@ public class InventoryService {
      */
     public int applyShipment(Product product, Warehouse warehouse, int delta, TxnType txnType,
                              ShipmentType shipmentType, LocalDate tradeDate, String refNo, String memo) {
+        // ★★회차 단독 출고는 **그 회차 자재**를 깎는다(F-37 ⑤, 발주처 확정 2026-11-09).
+        //   원문: "SET 출고 → SET 재고 차감, **회차 단독 출고 → 해당 회차 자재 차감**."
+        //   회차 도서는 쌓아 두는 물건이 아니라 자재에서 산출되는 것이라, 상품 재고를 깎으면
+        //   실물(자재 낱장)은 그대로인데 장부만 줄어든다.
+        //
+        //   ‼️여기 한 곳에 두는 이유: 출고 경로가 매출등록·엑셀업로드·일괄등록·반품으로 여럿인데
+        //   전부 이 메서드를 지난다. 경로마다 넣으면 한 곳을 빠뜨린다.
+        //   ‼️**상품 처리는 그대로 두고 자재를 더 깎는다**(둘 다 한다).
+        //     처음엔 상품 쪽을 건너뛰게 만들었는데 기존 테스트 6건이 깨졌다 —
+        //     수불부 자재 상세·물류작업비가 **회차 단독 출고량을 상품 txn**
+        //     (`consumedQtyByProduct`)으로 세기 때문에 상품 이벤트가 사라지면 그 칸이 0이 된다.
+        //     발주처 ⑤도 "물류 작업비·수불부 소요량은 **기존 기준(출고수량 × 소요수량) 유지**"다.
+        //     발주처가 요구한 것은 "자재가 차감되는 것"이고, 상품 재고를 깎지 말라고 한 적은 없다
+        //     ("회차 단독 재고는 자재 낱장 잔여에서 **산출해 표시**"는 표시 방법에 대한 말이다).
+        //   ⚠️알려진 부작용: 회차 상품은 입고가 없으니 그 재고가 음수로 쌓인다. 화면은 자재
+        //     잔여를 보므로 쓰이지 않는 숫자이고, 필요하면 '수불부노출'을 끄면 집계에서 빠진다.
+        applyRoundMaterials(product, warehouse, delta, txnType, tradeDate, refNo, memo);
         int balance = applyDelta(product, warehouse, delta);
         inventoryTxnRepository.save(
                 InventoryTxn.shipment(product, warehouse, delta, txnType, shipmentType, tradeDate, refNo, memo));
         return balance;
+    }
+
+    /**
+     * 출고 상품이 <b>다른 세트의 회차</b>면 그 회차 자재를 증감한다.
+     *
+     * <p>회차당 소요는 {@link com.daesung.sales.material.entity.MaterialBom#qtyPerRound(int)}가
+     * 정한다 — <b>규칙을 다시 짜지 않는다</b>(수불부·물류작업비가 쓰는 그 규칙이다).
+     * <pre>
+     *   회차 전용(시험지·해설지) → 세트당수량 그대로
+     *   공통 반복형(OMR)         → 세트당수량 ÷ 회차수   (세트당 6, 6회 → 회차 1부당 1)
+     *   공통 1회형(쿠폰)         → 0 — 세트를 사야 붙는다
+     * </pre>
+     *
+     * <p>★<b>상품 재고와 함께 쓴다</b>(대체가 아니다). 상품 이벤트를 없애면 수불부 자재
+     * 상세·물류작업비의 '회차 단독' 칸이 0이 된다 — 그쪽은 상품 txn 으로 센다.
+     *
+     * @return 움직인 자재 수(회차 도서가 아니면 0)
+     */
+    private int applyRoundMaterials(Product product, Warehouse warehouse, int delta,
+                                        TxnType txnType, LocalDate tradeDate,
+                                        String refNo, String memo) {
+        List<com.daesung.sales.material.entity.MaterialBom> asRound =
+                materialBomRepository.findByRoundProductId(product.getId());
+        if (asRound.isEmpty()) {
+            return 0;   // 회차 도서가 아니다 — 자재를 깎을 일이 없다
+        }
+        // 소속 세트별로 처리한다. 같은 회차 도서가 여러 세트에 들어가 있을 수 있다.
+        java.util.Set<Long> setIds = new java.util.LinkedHashSet<>();
+        asRound.forEach(b -> setIds.add(b.getSetProduct().getId()));
+
+        int moved = 0;
+        for (Long setId : setIds) {
+            List<com.daesung.sales.material.entity.MaterialBom> all =
+                    materialBomRepository.findBySet(setId);
+            int roundCount = (int) all.stream()
+                    .filter(b -> !b.isCommon())
+                    .map(b -> b.getRoundProduct().getId())
+                    .distinct().count();
+            for (com.daesung.sales.material.entity.MaterialBom b : all) {
+                // 이 회차 전용 자재 + 공통 자재만. 다른 회차 전용 자재는 건드리지 않는다.
+                boolean mine = b.isCommon()
+                        || product.getId().equals(b.getRoundProduct().getId());
+                if (!mine) {
+                    continue;
+                }
+                long per = b.qtyPerRound(roundCount);
+                if (per == 0) {
+                    continue;   // 1회형 공통(쿠폰) — 회차만 사면 나가지 않는다
+                }
+                int d = (int) (delta * per);
+                applyMaterialDelta(b.getMaterial(), warehouse, d);
+                moved++;
+                inventoryTxnRepository.save(
+                        com.daesung.sales.inventory.entity.InventoryTxn.materialTxn(
+                                b.getMaterial(), warehouse, txnType, d, tradeDate, refNo,
+                                "회차 단독 " + (b.isCommon() ? "(공통) " : "")
+                                        + "소요 " + per + "개/부"
+                                        + ((memo == null || memo.isBlank()) ? "" : " / " + memo)));
+            }
+        }
+        return moved;
     }
 
     /**
@@ -369,9 +449,26 @@ public class InventoryService {
         Product parent = productRepository.findById(req.parentProductId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
                         "완제품 상품이 없습니다. id=" + req.parentProductId()));
-        List<BomItem> boms = bomItemRepository.findByParentId(parent.getId());
-        if (boms.isEmpty()) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "BOM 구성이 없습니다: " + parent.getCode());
+        // ★★어느 축을 깎을지 — **자재 매칭이 있으면 자재**다(F-37 발주처 확정 2026-11-09).
+        //
+        //   원문: "재고는 **자재 낱장이 기준 원장**. SET 재고는 세트 조립·해체로 증감.
+        //         회차 단독 재고는 해당 회차 자재 낱장 잔여에서 산출해 표시."
+        //
+        //   예전에는 `bom_items`(상품↔상품)만 깎았다 — 세트+N / 구성 **회차 상품**−(비율×N).
+        //   그러면 자재 낱장은 조립해도 줄지 않아 실물과 어긋난다.
+        //   ‼️전환이 안전한 이유: 운영 조립·해체 이력이 **0건**이었다(2026-11-09 실측).
+        //     바뀔 과거 숫자가 없다. 출고가 시작된 뒤에는 이렇게 못 바꾼다.
+        //
+        //   자재 매칭이 없는 세트는 **기존 상품 축 그대로** 둔다. 둘 중 하나만 고르는 것이
+        //   아니라 "자재 매칭이 곧 자재 축 선언"이다 — 매칭을 넣는 순간 그 세트가 넘어간다.
+        List<com.daesung.sales.material.entity.MaterialBom> matBoms =
+                materialBomRepository.findBySet(parent.getId());
+        List<BomItem> boms = matBoms.isEmpty()
+                ? bomItemRepository.findByParentId(parent.getId()) : List.of();
+        if (matBoms.isEmpty() && boms.isEmpty()) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "BOM 구성이 없습니다: " + parent.getCode()
+                            + " (상품 구성도 자재 매칭도 없습니다)");
         }
 
         boolean assemble = req.direction() == BomDirection.ASSEMBLE;
@@ -392,18 +489,44 @@ public class InventoryService {
         inventoryTxnRepository.save(parentTxn);
         // 완제품 행: 비율·자재구분은 구성품에만 있는 값이라 비운다.
         BomWorkResponse.Line parentLine = new BomWorkResponse.Line(
-                parent.getId(), parent.getCode(), parent.getName(),
+                parent.getId(), null, parent.getCode(), parent.getName(),
                 null, null, parentDelta, parentBal);
 
-        // 구성품: 조립 −(비율×수량), 해체 +(비율×수량)
+        // 구성: 조립 −(소요×수량), 해체 +(소요×수량)
         List<BomWorkResponse.Line> compLines = new ArrayList<>();
+
+        // ① 자재 축 — 세트당 소요수량 × 작업수량.
+        //   ‼️공통 자재도 같은 식이다. '세트당' 소요라 회차 수가 이미 반영돼 있다
+        //   (국어 OMR 소요 6 = 6회분) — 발주처 32장 "SET 800 조립 시 OMR 4,800장"과 같은 값.
+        //   perRound 는 **회차 단독 출고**에서 쓰는 구분이지 조립 계산에는 들어가지 않는다.
+        for (com.daesung.sales.material.entity.MaterialBom mb : matBoms) {
+            com.daesung.sales.material.entity.Material material = mb.getMaterial();
+            int delta = (assemble ? -1 : 1) * mb.getQtyPerSet() * req.workQty();
+            int bal = applyMaterialDelta(material, warehouse, delta);
+            // ★같은 전표번호(BW-)로 묶는다 — 되돌리기가 refNo 로 찾고,
+            //   조립 시점 소요량도 이 행들로 되짚는다(발주처 요구 "그 시점 소요량을 이력에 남길 것").
+            //   메모에 소요수량을 적어 둔다: 뒤에 매칭이 바뀌어도 당시 값이 남는다.
+            inventoryTxnRepository.save(com.daesung.sales.inventory.entity.InventoryTxn.materialTxn(
+                    material, warehouse, txnType, delta, req.processedDate(), bomNo,
+                    "세트당 " + mb.getQtyPerSet() + "개"
+                            + (mb.isCommon() ? " (공통)" : " (" + mb.getRoundProduct().getName() + ")")
+                            + ((req.memo() == null || req.memo().isBlank()) ? "" : " / " + req.memo())));
+            compLines.add(new BomWorkResponse.Line(null, material.getId(),
+                    material.getCode(), material.getName(),
+                    mb.getQtyPerSet(),
+                    (material.getMaterialType() == null) ? null : material.getMaterialType().name(),
+                    delta, bal));
+        }
+
+        // ② 상품 축(자재 매칭이 없는 세트) — 기존 동작 그대로.
         for (BomItem b : boms) {
             Product child = b.getChild();
             int compDelta = (assemble ? -1 : 1) * b.getRatio() * req.workQty();
             int compBal = applyDelta(child, warehouse, compDelta);
             inventoryTxnRepository.save(InventoryTxn.bom(
                     child, warehouse, compDelta, txnType, req.processedDate(), bomNo, req.memo()));
-            compLines.add(new BomWorkResponse.Line(child.getId(), child.getCode(), child.getName(),
+            compLines.add(new BomWorkResponse.Line(child.getId(), null,
+                    child.getCode(), child.getName(),
                     b.getRatio(),
                     (b.getMaterialType() == null) ? null : b.getMaterialType().name(),
                     compDelta, compBal));
