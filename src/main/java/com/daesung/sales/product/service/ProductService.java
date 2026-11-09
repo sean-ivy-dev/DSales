@@ -73,9 +73,24 @@ public class ProductService {
                                                  java.time.LocalDateTime updatedSince,
                                                  boolean includeUnused,
                                                  Pageable pageable) {
+        return findAll(keyword, ledgerVisible, priceVisible, updatedSince, includeUnused, null, pageable);
+    }
+
+    /**
+     * 위와 같되 <b>사용여부를 직접 지정</b>한다({@code useYn=false} = 사용 중지만).
+     *
+     * <p>프론트 요청 2026-11-09 — 목록 조건이 "빼고 보기 / 함께 보기 / <b>사용 중지만</b>" 3가지다.
+     * ‼️화면에서 걸러낼 수 없다(페이징이라 총 건수·페이지 수가 틀어진다).
+     */
+    public PageResponse<ProductResponse> findAll(String keyword, Boolean ledgerVisible,
+                                                 Boolean priceVisible,
+                                                 java.time.LocalDateTime updatedSince,
+                                                 boolean includeUnused,
+                                                 Boolean useYn,
+                                                 Pageable pageable) {
         String kw = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
         Page<Product> page = productRepository.search(
-                kw, ledgerVisible, priceVisible, includeUnused, updatedSince, pageable);
+                kw, ledgerVisible, priceVisible, includeUnused, useYn, updatedSince, pageable);
         // 세부구분 마스터는 몇 줄짜리라 한 번에 읽어 맵으로 쓴다 — 상품마다 조회하면 목록 한 장에 수백 번이 된다.
         Map<String, SalesDivision> divisions = divisionsByCode();
         return PageResponse.of(page.map(p -> ProductResponse.from(p, divisions.get(p.getSalesDivision()))));

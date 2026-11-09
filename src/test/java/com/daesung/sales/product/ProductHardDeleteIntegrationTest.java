@@ -132,6 +132,36 @@ class ProductHardDeleteIntegrationTest extends IntegrationTestSupport {
         assertThat(found("/masters/products?includeUnused=true&keyword=HDD" + SFX, id)).isTrue();
     }
 
+    /**
+     * 목록 조건 <b>3가지</b> — 빼고 보기 / 함께 보기 / <b>사용 중지만</b>(프론트 요청 2026-11-09).
+     *
+     * <p>‼️「사용 중지만」은 <b>화면에서 걸러낼 수 없다</b> — 페이징이라 페이지마다 사용중지
+     * 비율이 달라 총 건수·페이지 수가 틀어진다. 그래서 서버 조건이어야 한다.
+     */
+    @Test
+    @DisplayName("‼️`useYn=false` 는 **사용 중지만** 낸다 — 쓰는 도서가 섞이면 안 된다")
+    void 사용중지만_보기() {
+        Long live = book("HDE" + SFX);                 // 쓰는 도서
+        Long stopped = book("HDF" + SFX);              // 사용 중지할 도서
+        assertThat(del("/masters/products/" + stopped).path("success").asBoolean()).isTrue();
+
+        // 사용 중지만 — 중지한 것만 나오고 쓰는 것은 빠진다
+        assertThat(found("/masters/products?useYn=false&keyword=" + SFX, stopped)).isTrue();
+        assertThat(found("/masters/products?useYn=false&keyword=" + SFX, live)).isFalse();
+
+        // 사용중만 — 반대
+        assertThat(found("/masters/products?useYn=true&keyword=" + SFX, live)).isTrue();
+        assertThat(found("/masters/products?useYn=true&keyword=" + SFX, stopped)).isFalse();
+
+        // 함께 보기 — 둘 다
+        assertThat(found("/masters/products?includeUnused=true&keyword=" + SFX, live)).isTrue();
+        assertThat(found("/masters/products?includeUnused=true&keyword=" + SFX, stopped)).isTrue();
+
+        // ‼️useYn 이 includeUnused 를 이긴다 — 둘을 같이 보내도 "사용 중지만"이다
+        assertThat(found("/masters/products?includeUnused=true&useYn=false&keyword=" + SFX, live))
+                .as("useYn 이 더 구체적인 조건이라 이겨야 한다").isFalse();
+    }
+
     private boolean found(String path, Long id) {
         JsonNode res = get(path);
         for (JsonNode n : res.path("data").path("content")) {

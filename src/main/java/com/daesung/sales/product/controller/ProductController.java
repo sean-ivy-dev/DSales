@@ -77,9 +77,23 @@ public class ProductController {
                     + "근거: 발주처 검수 F-36 — 삭제 API가 use_yn=false 논리삭제인데 목록이 그걸 "
                     + "안 걸러서 \"삭제했는데 그대로 보인다\"가 됐다. 지난 도서를 봐야 할 때만 켠다.")
             @RequestParam(defaultValue = "false") boolean includeUnused,
+            @Parameter(description = """
+                    사용여부를 **직접 지정**한다 — 화면의 "사용 중지 도서" 조건 3가지 중
+                    **「사용 중지만」** 을 위한 칸이다(프론트 요청 2026-11-09).
+
+                    | 보내는 값 | 결과 |
+                    |---|---|
+                    | 미지정 | `includeUnused` 규칙 그대로 — 빼고 보기(기본) / 함께 보기 |
+                    | `useYn=true` | 사용중만 |
+                    | **`useYn=false`** | **사용 중지만** |
+
+                    ‼️`useYn` 을 주면 `includeUnused` 는 무시된다(더 구체적인 조건이 이긴다).
+                    ★이 조건을 **화면에서 걸러낼 수 없다** — 페이징이라 페이지마다 사용중지 비율이
+                    달라 총 건수와 페이지 수가 틀어진다. 그래서 서버 조건으로 둔다.""")
+            @RequestParam(required = false) Boolean useYn,
             @ParameterObject PageRequestDto pageReq) {
         var page = productService.findAll(
-                keyword, ledgerVisible, priceVisible, updatedSince, includeUnused,
+                keyword, ledgerVisible, priceVisible, updatedSince, includeUnused, useYn,
                 pageReq.toPageable());
         // ‼️대소문자를 접지 않고 **정확히** 비교한다. 접으면 정적분석(IMPROPER_UNICODE)에 걸리고,
         //   로케일을 명시해도 마찬가지다 — 규칙이 '대소문자 변환 후 분기' 자체를 본다.

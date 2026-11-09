@@ -124,6 +124,17 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * 삭제 API({@code DELETE /masters/products/{id}})가 {@code use_yn=false} 논리삭제인데
      * 이 쿼리에 {@code useYn} 조건이 없어 <b>지운 도서가 목록에 계속 보였다</b>.
      * 거래처의 {@code includeExpired} 와 같은 방식 — 지난 것을 봐야 할 때만 켠다.
+     *
+     * <p>★{@code useYn} — <b>「사용 중지만」 보기</b>를 위한 3번째 상태다(프론트 요청 2026-11-09:
+     * 목록 조건이 "빼고 보기 / 함께 보기 / <b>사용 중지만</b>" 3가지다).
+     * ‼️<b>화면에서 걸러낼 수 없다</b> — 페이징이라 페이지마다 사용중지 비율이 달라
+     * 총 건수와 페이지 수가 틀어진다. 그래서 조건을 서버에 둔다.
+     * <pre>
+     *   미지정                → {@code includeUnused} 규칙 그대로(기존 동작)
+     *   useYn=true           → 사용중만
+     *   useYn=false          → **사용 중지만**
+     * </pre>
+     * {@code useYn} 을 주면 {@code includeUnused} 는 무시된다 — 더 구체적인 조건이 이긴다.
      */
     @org.springframework.data.jpa.repository.Query("""
             select p from Product p
@@ -133,7 +144,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
                     or lower(coalesce(p.catCode, '')) like lower(concat('%', :keyword, '%')))
                and (:ledgerVisible is null or p.ledgerVisible = :ledgerVisible)
                and (:priceVisible is null or p.priceVisible = :priceVisible)
-               and (:includeUnused = true or p.useYn = true)
+               and (:useYn is not null or :includeUnused = true or p.useYn = true)
+               and (:useYn is null or p.useYn = :useYn)
                and (:updatedSince is null
                     or coalesce(p.updatedAt, p.createdAt) >= :updatedSince)
             """)
@@ -142,6 +154,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             @org.springframework.data.repository.query.Param("ledgerVisible") Boolean ledgerVisible,
             @org.springframework.data.repository.query.Param("priceVisible") Boolean priceVisible,
             @org.springframework.data.repository.query.Param("includeUnused") boolean includeUnused,
+            @org.springframework.data.repository.query.Param("useYn") Boolean useYn,
             @org.springframework.data.repository.query.Param("updatedSince") java.time.LocalDateTime updatedSince,
             org.springframework.data.domain.Pageable pageable);
 
