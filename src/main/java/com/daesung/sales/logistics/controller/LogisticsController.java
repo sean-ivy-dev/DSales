@@ -77,6 +77,26 @@ public class LogisticsController {
         return ApiResponse.success(dsreGateway.calcOutboundPeriod(from, to, mode, includeCancel));
     }
 
+    @Operation(summary = "좌측 '시행 선택' 트리(연도 > 상품 > 시행) — 27p",
+            description = """
+                    물류 작업비 계산 좌측 트리 데이터. 정본이 "트리뷰 상품 선택에 **연도 구분** 추가
+                    (29장 레거시: 2026년/2025년… 트리)"를 요구하는데, 필터(`dtlCds`)만 있고
+                    **트리 데이터를 주는 경로가 없었다**(F-32).
+
+                    · 연도 축은 DSRE2 상품 년도(`tbl_product_info.YEAR`)다. 복제본 실측 **2019~2026**,
+                      상품 212 · 시행 2,576건.
+                    · ‼️`GET /orders/exams` 로는 못 쓴다 — 그쪽은 **주문 등록용**이라
+                      `판매종료일 >= 오늘` 로 **끝난 시행을 버린다**. 여기는 과거 연도를 보는 화면이라
+                      판매종료 무관으로 전부 낸다(조건을 공유하면 2019~2025년이 통째로 사라진다).
+                    · 잎의 `dtlCd` 를 그대로 `/logistics-costs/outbound/detail` 의 `dtlCds` 에 넘기면 된다.
+                    · 정렬: 연도 내림차순 → 상품코드 → 학년 → 시행코드.""")
+    @GetMapping("/exam-tree")
+    public ApiResponse<java.util.List<com.daesung.sales.dsre.gateway.ExamTreeNode>> examTree(
+            @Parameter(description = "그 연도만. 미지정=전 연도", example = "2026")
+            @RequestParam(required = false) Integer year) {
+        return ApiResponse.success(dsreGateway.examTree(year));
+    }
+
     @Operation(summary = "출고 물류비 명세(28p 그리드)",
             description = """
                     화면에 뿌릴 **행 목록 + 소계**. 총계만 주던 `/outbound/period`와 짝이다.

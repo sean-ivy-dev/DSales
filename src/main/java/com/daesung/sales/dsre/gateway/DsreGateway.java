@@ -174,6 +174,17 @@ public interface DsreGateway {
     java.util.List<ExamRow> listExams(String keyword);
 
     /**
+     * 물류 작업비 좌측 '시행 선택' 트리 — <b>연도 &gt; 상품 &gt; 시행</b>(F-32).
+     *
+     * <p>‼️{@link #listExams}와 <b>조건이 다르다</b>. 그쪽은 주문 등록용이라
+     * {@code SALE_DT >= 오늘}로 끝난 시행을 버리는데, 여기는 과거 연도를 봐야 해서
+     * <b>판매종료 무관</b>으로 전부 낸다. 같은 쿼리를 재사용하면 2019~2025년이 통째로 사라진다.
+     *
+     * @param year 그 연도만. null이면 전 연도
+     */
+    java.util.List<ExamTreeNode> examTree(Integer year);
+
+    /**
      * 시행의 과목 목록(과목신청용). {@code DISP_GN='Y'}만 —
      * 레거시 신청 화면과 같은 조건이다({@code Application_SQL.xml}).
      */

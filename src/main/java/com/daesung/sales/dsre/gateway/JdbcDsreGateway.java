@@ -1037,6 +1037,57 @@ public class JdbcDsreGateway implements DsreGateway {
              LIMIT 500
             """;
 
+    /**
+     * 시행 트리(F-32). ‼️{@link #SQL_EXAMS}와 달리 <b>판매종료일을 보지 않는다</b> —
+     * 물류 작업비는 과거 연도를 보는 화면이라 끝난 시행이 전부 필요하다.
+     * 조건을 공유하면 2019~2025년이 통째로 사라진다.
+     *
+     * <p>‼️SQL 을 조립하지 않는다(게이트규칙) — 연도 필터는 <b>바인딩 하나</b>로 처리하고
+     * {@code NULL} 이면 전 연도가 되게 썼다. 상수를 붙이는 방식도 쓰지 않는다.
+     */
+    private static final String SQL_EXAM_TREE = """
+            SELECT p.YEAR AS YR, d.PROD_CD, p.PROD_NM,
+                   d.DTL_CD, d.DTL_NM, d.GRADE, d.PROC_YN, d.SALE_DT
+              FROM tbl_product_dtl d
+              JOIN tbl_product_info p ON p.PROD_CD = d.PROD_CD
+             WHERE d.USE_YN = 'Y'
+               AND (? IS NULL OR p.YEAR = ?)
+             ORDER BY p.YEAR DESC, d.PROD_CD, d.GRADE, d.DTL_CD
+            """;
+
+    @Override
+    public List<ExamTreeNode> examTree(Integer year) {
+        // 연도 → 상품 → 시행. SQL 정렬을 그대로 받아 순서대로 묶는다(재정렬 없음).
+        java.util.Map<Integer, java.util.Map<String, Object[]>> byYear = new java.util.LinkedHashMap<>();
+        java.util.Map<Integer, java.util.Map<String, List<ExamTreeNode.Leaf>>> leaves =
+                new java.util.LinkedHashMap<>();
+
+        dsreJdbcTemplate.query(SQL_EXAM_TREE, rs -> {
+            int yr = rs.getInt("YR");
+            String prodCd = rs.getString("PROD_CD");
+            byYear.computeIfAbsent(yr, k -> new java.util.LinkedHashMap<>())
+                    .putIfAbsent(prodCd, new Object[]{prodCd, rs.getString("PROD_NM")});
+            leaves.computeIfAbsent(yr, k -> new java.util.LinkedHashMap<>())
+                    .computeIfAbsent(prodCd, k -> new java.util.ArrayList<>())
+                    .add(new ExamTreeNode.Leaf(rs.getInt("DTL_CD"), rs.getString("DTL_NM"),
+                            rs.getString("GRADE"), rs.getString("PROC_YN"), rs.getString("SALE_DT")));
+        }, year, year);
+
+        List<ExamTreeNode> out = new java.util.ArrayList<>();
+        byYear.forEach((yr, prods) -> {
+            List<ExamTreeNode.ProductNode> ps = new java.util.ArrayList<>();
+            int cnt = 0;
+            for (var e : prods.entrySet()) {
+                List<ExamTreeNode.Leaf> ex = leaves.get(yr).get(e.getKey());
+                cnt += ex.size();
+                ps.add(new ExamTreeNode.ProductNode(
+                        (String) e.getValue()[0], (String) e.getValue()[1], ex));
+            }
+            out.add(new ExamTreeNode(yr, cnt, ps));
+        });
+        return out;
+    }
+
     private static final String SQL_EXAMS_KEYWORD = """
             SELECT d.DTL_CD, d.DTL_NM, d.PROD_CD, p.PROD_NM, d.GRADE, d.PROC_YN,
                    d.SALE_DT, d.EASY_GN
