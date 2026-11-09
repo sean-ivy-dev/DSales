@@ -130,6 +130,18 @@ public class School extends BaseEntity {
      * <p>★<b>학급당 평균 인원은 저장하지 않는다</b> — {@code 재학생 ÷ 학급수} 로 나온다
      * (레거시 {@code clsNRatio} 2,391건 전부 그 식과 일치). 저장하면 둘이 어긋난다.
      */
+    /**
+     * 관리대상 여부(레거시 {@code schAllData.manageYN}). {@code 'N'} 은 응시현황 집계에서 뺀다.
+     *
+     * <p>‼️레거시 응시현황이 {@code WHERE manageYN IS NULL OR manageYN='Y'} 로 거른다.
+     * 이 칸을 이관하지 않아 <b>관리대상 아닌 학교 433곳(인원 21.9만)이 섞여</b>
+     * 지역비율이 레거시보다 20% 컸다(129.2만 ↔ 108.0만, 실측 2026-11-09).
+     *
+     * <p>★기본 {@code 'Y'} — 레거시가 판단한 적 없는 학교(DSRE 동기화·수기 등록)는 <b>빼지 않는다</b>.
+     */
+    @Column(name = "manage_yn", nullable = false, length = 1)
+    private String manageYn = "Y";
+
     @Column(name = "cls1_class_cnt")
     private Integer cls1ClassCnt;
 
@@ -147,6 +159,13 @@ public class School extends BaseEntity {
 
     @Column(name = "cls3_student_cnt")
     private Integer cls3StudentCnt;
+
+    /** 관리대상 여부를 고친다. null 은 "안 고친다" — Y/N 만 받는다(DTO 가 검증). */
+    public void updateManageYn(String manageYn) {
+        if (manageYn != null && !manageYn.isBlank()) {
+            this.manageYn = manageYn;
+        }
+    }
 
     /**
      * 학년별 학급수·재학생 수를 고친다(학교관리 화면·엑셀 업로드).

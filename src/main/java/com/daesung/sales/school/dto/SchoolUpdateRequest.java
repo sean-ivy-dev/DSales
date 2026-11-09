@@ -34,6 +34,12 @@ public record SchoolUpdateRequest(
         @jakarta.validation.constraints.PositiveOrZero Integer cls2ClassCnt,
         @jakarta.validation.constraints.PositiveOrZero Integer cls2StudentCnt,
         @jakarta.validation.constraints.PositiveOrZero Integer cls3ClassCnt,
-        @jakarta.validation.constraints.PositiveOrZero Integer cls3StudentCnt
+        @jakarta.validation.constraints.PositiveOrZero Integer cls3StudentCnt,
+
+        @Schema(description = """
+                관리대상 여부 `Y`/`N`. 미지정이면 그대로 둔다.
+                ‼️`N` 이면 **응시현황 집계에서 빠진다**(레거시가 거르는 조건).""",
+                example = "Y", allowableValues = {"Y", "N"})
+        @jakarta.validation.constraints.Pattern(regexp = "[YN]") String manageYn
 ) {
 }

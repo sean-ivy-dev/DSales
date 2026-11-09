@@ -171,6 +171,51 @@ class AttendanceRatioIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
+    @DisplayName("‼️관리대상이 아닌 학교(manageYn=N)는 **집계에서 뺀다** — 레거시가 거르는 조건이다")
+    void 관리대상아닌학교_제외() {
+        String off = "AN" + (System.nanoTime() % 100000L);
+        Map<String, Object> s = new HashMap<>();
+        s.put("schoolCode", off);
+        s.put("custCode", CUST);
+        s.put("city", "비율시");
+        s.put("schoolName", "관리대상아닌고등학교");
+        s.put("clientCategory", "특약점" + SFX);
+        s.put("cls3ClassCnt", 10);
+        s.put("cls3StudentCnt", 999);      // 섞이면 인원이 1,199 가 된다
+        s.put("manageYn", "N");            // ★레거시가 거르는 칸
+        JsonNode created = post("/masters/schools", s);
+        assertThat(created.path("success").asBoolean()).as("등록: %s", created).isTrue();
+        assertThat(created.path("data").path("manageYn").asText()).isEqualTo("N");
+
+        JsonNode r = myRow();
+        assertThat(r.path("studentCnt3").asLong())
+                .as("manageYn=N 학교가 섞이면 안 된다(999 가 더해지면 1,199): %s", r).isEqualTo(200L);
+        assertThat(r.path("schoolCount").asInt()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("‼️같은 학교코드가 거래처별로 여러 행이어도 **한 번만** 센다")
+    void 학교코드_중복은_한번만() {
+        // 같은 학교코드를 **다른 거래처**로 한 번 더 등록한다(schools 는 거래처×학교다).
+        Map<String, Object> s = new HashMap<>();
+        s.put("schoolCode", schoolCode);                 // 같은 학교
+        s.put("custCode", CUST + "9");                   // 다른 거래처
+        s.put("custName", "비율검증 특약점2");
+        s.put("city", "비율시");
+        s.put("schoolName", "비율고등학교");
+        s.put("clientCategory", "특약점" + SFX);
+        s.put("cls3ClassCnt", 8);
+        s.put("cls3StudentCnt", 200);
+        assertThat(post("/masters/schools", s).path("success").asBoolean())
+                .as("거래처×학교 조합이 다르면 등록된다").isTrue();
+
+        JsonNode r = myRow();
+        assertThat(r.path("studentCnt3").asLong())
+                .as("두 번 세면 400 이 된다 — 재학생은 학교의 속성이다: %s", r).isEqualTo(200L);
+        assertThat(r.path("ratio3").asDouble()).isEqualTo(25.0);
+    }
+
+    @Test
     @DisplayName("재학생 자료가 없는 학교는 **집계에 들지 않는다** — 분모가 커지면 비율이 작아진다")
     void 자료없는학교는_제외() {
         String bare = "AZ" + (System.nanoTime() % 100000L);

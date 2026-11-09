@@ -355,7 +355,15 @@ public class AttendanceService {
         }
 
         Map<String, RatioAcc> byRegion = new LinkedHashMap<>();
+        // ‼️**학교코드가 거래처별로 여러 행인 경우가 있다**(실측 96곳 — `schools` 는 거래처×학교다).
+        //   재학생 수는 **학교의 속성**이라 그대로 더하면 그 학교 인원이 두 번 세어져
+        //   보급률이 작아진다. 레거시 `schData` 는 학교당 1행이어서 이 문제가 없었다.
+        //   → 학교코드당 첫 행만 쓴다(쿼리가 schoolCode, custCode 로 정렬돼 결정적이다).
+        java.util.Set<String> seenSchools = new java.util.HashSet<>();
         for (SchoolStudentAgg sc : schools) {
+            if (!seenSchools.add(sc.getSchoolCode())) {
+                continue;
+            }
             String key = regionGroup(sc.getCustCode(), sc.getCity());
             RatioAcc acc = byRegion.computeIfAbsent(key, k -> new RatioAcc(k, sc.getCity()));
             acc.addStudents(nz(sc.getCls1StudentCnt()), nz(sc.getCls2StudentCnt()),

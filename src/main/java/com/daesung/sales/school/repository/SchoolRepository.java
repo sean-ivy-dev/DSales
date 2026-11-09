@@ -95,6 +95,18 @@ public interface SchoolRepository extends JpaRepository<School, Long> {
      * 자료 없음과 0명은 다르다.
      *
      * <p>{@code schoolType} 미지정이면 전체다(레거시 「학원」 체크박스에 대응).
+     *
+     * <p>‼️<b>{@code manageYn = 'Y'} 가 레거시가 거르는 조건</b>이다
+     * ({@code 응시현황.vb}: {@code WHERE manageYN IS NULL OR manageYN='Y'}).
+     * 이게 없으면 관리대상 아닌 학교 <b>433곳·인원 21.9만</b>이 섞여, 분모만 커져
+     * 보급률이 작아진다(실측 2026-11-09: 인원 129.2만 ↔ 레거시 108.0만).
+     *
+     * <p>★<b>정렬을 고정한다</b> — 같은 학교코드가 거래처별로 여러 행인 경우가 있어
+     * (실측 96곳) 서비스가 <b>첫 행만</b> 쓴다. 정렬이 흔들리면 그 학교의 지역구분이
+     * 조회마다 달라진다.
+     *
+     * <p>⚠️HQL 은 {@code --} 주석을 못 읽는다 — 쿼리 안에 설명을 넣으면
+     * {@code Bad HQL grammar} 로 <b>앱이 기동하지 못한다</b>(실제로 그랬다).
      */
     @Query("""
             select s.schoolCode as schoolCode, s.custCode as custCode, s.city as city,
@@ -102,10 +114,12 @@ public interface SchoolRepository extends JpaRepository<School, Long> {
                    s.cls3StudentCnt as cls3StudentCnt
               from School s
              where s.active = true
+               and s.manageYn = 'Y'
                and (s.cls1StudentCnt is not null or s.cls2StudentCnt is not null
                     or s.cls3StudentCnt is not null)
                and (:schoolType is null or s.schoolType = :schoolType)
                and (:clientCategory is null or s.clientCategory = :clientCategory)
+             order by s.schoolCode, s.custCode
             """)
     List<com.daesung.sales.sale.dto.SchoolStudentAgg> studentCounts(
             @Param("schoolType") SchoolType schoolType,

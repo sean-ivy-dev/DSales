@@ -50,6 +50,13 @@ public record SchoolCreateRequest(
         @jakarta.validation.constraints.PositiveOrZero Integer cls2ClassCnt,
         @jakarta.validation.constraints.PositiveOrZero Integer cls2StudentCnt,
         @jakarta.validation.constraints.PositiveOrZero Integer cls3ClassCnt,
-        @jakarta.validation.constraints.PositiveOrZero Integer cls3StudentCnt
+        @jakarta.validation.constraints.PositiveOrZero Integer cls3StudentCnt,
+
+        @Schema(description = """
+                관리대상 여부 `Y`/`N`(기본 `Y`). 레거시 `schAllData.manageYN` 이다.
+                ‼️`N` 이면 **응시현황 집계에서 빠진다** — 레거시가 거르는 조건이 이것이다
+                (`manageYN IS NULL OR manageYN='Y'`). 목록·매출에서는 그대로 보인다.""",
+                example = "Y", allowableValues = {"Y", "N"})
+        @jakarta.validation.constraints.Pattern(regexp = "[YN]") String manageYn
 ) {
 }

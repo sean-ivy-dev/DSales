@@ -33,7 +33,11 @@ public record SchoolResponse(
         Integer cls2ClassCnt,
         Integer cls2StudentCnt,
         Integer cls3ClassCnt,
-        Integer cls3StudentCnt
+        Integer cls3StudentCnt,
+
+        @io.swagger.v3.oas.annotations.media.Schema(description = """
+                관리대상 여부 `Y`/`N`. `N` 이면 **응시현황 집계에서 빠진다**(레거시가 거르는 조건).""")
+        String manageYn
 ) {
     public static SchoolResponse from(School s) {
         return new SchoolResponse(s.getId(), s.getSchoolCode(), s.getCustCode(), s.getCustName(),
@@ -41,6 +45,7 @@ public record SchoolResponse(
                 s.getClientCategory(), s.getSalesChannel(), s.getMemo(), s.getSource(), s.isActive(),
                 s.getCls1ClassCnt(), s.getCls1StudentCnt(),
                 s.getCls2ClassCnt(), s.getCls2StudentCnt(),
-                s.getCls3ClassCnt(), s.getCls3StudentCnt());
+                s.getCls3ClassCnt(), s.getCls3StudentCnt(),
+                s.getManageYn());
     }
 }

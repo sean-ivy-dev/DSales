@@ -158,6 +158,7 @@ public class SchoolService {
         school.updateStudentCounts(req.cls1ClassCnt(), req.cls1StudentCnt(),
                 req.cls2ClassCnt(), req.cls2StudentCnt(),
                 req.cls3ClassCnt(), req.cls3StudentCnt());
+        school.updateManageYn(req.manageYn());
         return SchoolResponse.from(schoolRepository.save(school));
     }
 
@@ -182,6 +183,7 @@ public class SchoolService {
         school.updateStudentCounts(req.cls1ClassCnt(), req.cls1StudentCnt(),
                 req.cls2ClassCnt(), req.cls2StudentCnt(),
                 req.cls3ClassCnt(), req.cls3StudentCnt());
+        school.updateManageYn(req.manageYn());
         return SchoolResponse.from(school);
     }
 
