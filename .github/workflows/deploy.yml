@@ -19,6 +19,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      # ★Gradle 의존성·빌드 캐시. 없으면 매 배포마다 의존성 전부를 새로 받는다.
+      #   (캐시는 main 에서만 저장되고 다른 브랜치는 읽기만 한다 — 액션 기본값)
+      - uses: gradle/actions/setup-gradle@v4
       - name: 테스트
         run: chmod +x gradlew && ./gradlew test
 
@@ -35,12 +38,30 @@ jobs:
           path: build/reports/spotbugs/
           if-no-files-found: ignore
 
+      # ★jar 는 여기서 한 번만 만든다. 예전엔 Docker 빌드 안에서 캐시 없이
+      #   의존성 다운로드+컴파일을 처음부터 다시 했다(같은 일을 두 번).
+      - name: 실행 jar 빌드
+        run: ./gradlew bootJar && cp build/libs/*-SNAPSHOT.jar build/libs/app.jar
+
+      - name: 실행 jar 전달
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-jar
+          path: build/libs/app.jar
+          retention-days: 1
+
   # 2) 이미지 빌드 → ECR push → EC2 배포
   build-deploy:
     needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: 실행 jar 받기(test 잡에서 빌드한 것)
+        uses: actions/download-artifact@v4
+        with:
+          name: app-jar
+          path: build/libs
 
       - name: AWS 자격증명
         uses: aws-actions/configure-aws-credentials@v4

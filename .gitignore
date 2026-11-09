@@ -86,3 +86,6 @@ build/reports/
 /scratchpad/
 /매출 피드백 1002/
 message*.txt
+
+# 로컬 검증용 JWT (절대 커밋 금지)
+tok.txt

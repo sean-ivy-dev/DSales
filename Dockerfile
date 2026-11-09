@@ -1,12 +1,7 @@
-# --- build stage ---
-FROM eclipse-temurin:21-jdk AS build
-WORKDIR /app
-COPY gradlew settings.gradle build.gradle ./
-COPY gradle ./gradle
-COPY src ./src
-RUN chmod +x gradlew && ./gradlew bootJar --no-daemon
-
-# --- run stage ---
+# ★jar 는 이미지 밖(CI test 잡)에서 빌드해 넣는다 — 이미지 안에서 다시 컴파일하지 않는다.
+#   예전 멀티스테이지(이미지 안 gradlew bootJar)는 캐시가 없어 배포마다 의존성 다운로드+컴파일을
+#   처음부터 반복했다. ‼️로컬에서 이미지를 만들 땐 먼저:
+#     ./gradlew bootJar && cp build/libs/*-SNAPSHOT.jar build/libs/app.jar
 FROM eclipse-temurin:21-jre
 
 # ★타임존을 한국으로 고정한다.
@@ -30,7 +25,7 @@ RUN keytool -importcert -noprompt -alias sectigo-public-server-auth-ca-ov-r36 \
         -file /tmp/mail-ca.pem -cacerts -storepass changeit \
     && rm /tmp/mail-ca.pem
 
-COPY --from=build /app/build/libs/*.jar app.jar
+COPY build/libs/app.jar app.jar
 EXPOSE 8080
 # ‼️TZ 환경변수만으로는 OS의 tz 파일 유무에 기댄다. JVM 옵션으로 한 번 더 못박아
 #   어느 베이스 이미지에서든 같은 날짜가 나오게 한다(LocalDate.now() 가 장부 날짜가 된다).

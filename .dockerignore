@@ -1,6 +1,8 @@
 .git
 .gradle
 build
+# 실행 jar 하나만 이미지 빌드 컨텍스트에 들인다(Dockerfile COPY build/libs/app.jar)
+!build/libs/app.jar
 .idea
 .claude
 reference
