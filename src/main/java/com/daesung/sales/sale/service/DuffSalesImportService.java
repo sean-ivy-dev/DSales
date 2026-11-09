@@ -75,12 +75,28 @@ public class DuffSalesImportService {
     /** 청구인원 판정 결과 — 몇 명을, 무슨 근거로. */
     record Charge(int inwon, String basis) {}
 
-    /** 기존 쿼리파라미터 경로(미리보기 등). 선택·수정 없이 기간 전체를 돈다. */
+    /**
+     * 기존 쿼리파라미터 경로(미리보기 등). 줄 선택·값 수정 없이 기간 전체를 돈다.
+     *
+     * <p>★{@code productId} 는 <b>미리보기에도 받아야 한다.</b> 등록(본문 경로)은 담당자가 고른
+     * 도서를 줄 전부에 적용하는데, 미리보기에 그 칸이 없으면 <b>무엇을 골라도 목록이 늘
+     * "상품이 마스터에 없습니다"로 보인다</b> — DSRE 과목코드와 우리 도서코드는 체계가 달라
+     * 자동 매칭이 원래 비는 쪽이다. 그래서 고르기 전과 고른 뒤를 구분할 수 없었고,
+     * 실제로 "일괄등록이 전건 실패한다"는 오진이 나왔다(2026-11-09).
+     */
     @Transactional
     public DuffImportResponse importSales(LocalDate fromDate, LocalDate toDate,
                                           DuffChargeMode mode, boolean onlyComplete, boolean dryRun) {
+        return importSales(fromDate, toDate, mode, onlyComplete, null, dryRun);
+    }
+
+    /** 위와 같되 담당자가 고른 도서를 함께 받는다(미리보기에서 결과를 미리 보려면 필요하다). */
+    @Transactional
+    public DuffImportResponse importSales(LocalDate fromDate, LocalDate toDate,
+                                          DuffChargeMode mode, boolean onlyComplete,
+                                          Long productId, boolean dryRun) {
         return importSales(new com.daesung.sales.sale.dto.DuffImportRequest(
-                fromDate, toDate, mode, onlyComplete, null, null, null, null, null), dryRun);
+                fromDate, toDate, mode, onlyComplete, null, productId, null, null, null), dryRun);
     }
 
     /**

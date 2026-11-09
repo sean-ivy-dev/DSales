@@ -76,7 +76,11 @@ public class BulkSalesImportService {
             if (r.custCode() != null) {
                 custCodes.add(r.custCode());
             }
-            prodCodes.add(r.lstCd() + r.dtlCd());
+            // ‼️DSRE 의 (분류코드, 도서코드) 를 **그대로 이어 붙이면 우리 상품코드가 아니다.**
+            //   이관이 출처 접두어를 붙였다(`2_convert.py`: code = "{DL|DT}-{catCode}-{bookCode}").
+            //   예전엔 "H2017C"+"03" 으로 찾아 **매칭이 0건**이었고, 전건 UNMAPPED 였다
+            //   (운영덤프 실측 2026-11-09: 26조합 중 접두어를 붙이면 22가 붙는다).
+            prodCodes.addAll(candidateCodes(r.lstCd(), r.dtlCd()));
             allReqCds.add(r.reqCd());
             for (String gn : List.of("M", "J", "B")) {
                 allKeys.add(r.reqCd() + ":" + r.lstCd() + ":" + r.dtlCd() + ":" + gn);
@@ -99,8 +103,7 @@ public class BulkSalesImportService {
         for (BooklistImportRow row : srcRows) {
             // 거래처(machul_cd)·도서(lst+dtl) → 우리 마스터 매핑
             Partner partner = (row.custCode() == null) ? null : partnerByCode.get(row.custCode());
-            String productCode = row.lstCd() + row.dtlCd();
-            Product product = productByCode.get(productCode);
+            Product product = findProduct(productByCode, row.lstCd(), row.dtlCd());
 
             boolean rowWritten = false;
             for (Kind k : List.of(
@@ -179,5 +182,41 @@ public class BulkSalesImportService {
                                                 int qty, long supply, String result, String salesNo) {
         return new BulkImportResponse.Line(key, kind.shipmentType().name(), kind.category().name(),
                 row.custName(), row.bookName(), qty, supply, result, salesNo);
+    }
+
+    /**
+     * DSRE (분류코드, 도서코드) → 우리 상품코드 후보. 이관이 붙인 <b>출처 접두어</b>를 복원한다.
+     *
+     * <p>근거: 이관 스크립트 {@code 2_convert.py} — {@code code = "{DL|DT}-{catCode}-{bookCode}"}.
+     * 레거시 교재 일괄등록({@code 매출일괄등록_교재.vb:277})은 접두어가 없던 시절이라
+     * {@code where catCode=? and bookCode=?} 로 바로 찾았다. 우리는 한 DB 에 두 법인을 합쳤고
+     * 그때 접두어가 붙었으므로, 같은 값을 찾으려면 접두어를 다시 씌워야 한다.
+     */
+    static List<String> candidateCodes(String lstCd, String dtlCd) {   // 테스트가 규칙을 못박는다
+        if (lstCd == null || dtlCd == null) {
+            return List.of();
+        }
+        return List.of("DL-" + lstCd + "-" + dtlCd, "DT-" + lstCd + "-" + dtlCd);
+    }
+
+    /**
+     * 후보 중 실재하는 상품. <b>연구소(DL-)를 먼저 본다.</b>
+     *
+     * <p>‼️같은 (분류, 도서코드) 가 <b>양쪽 법인에 다 있는 경우가 실재한다</b>
+     * (운영덤프 26조합 중 8). 특약점 도서신청에는 법인 구분이 없어 어느 쪽인지 알 길이 없고,
+     * 연구소가 이 시스템의 주 법인이라 그쪽을 먼저 잡는다.
+     *
+     * <p>★<b>법인 분리(F-01) 때 이 자리를 고쳐야 한다</b> — 창 전환으로 법인을 고르면
+     * 그 법인 접두어만 보면 되고, 추측이 사라진다. 지금은 분리 전이라 둘 다 본다.
+     */
+    private static Product findProduct(java.util.Map<String, Product> byCode,
+                                       String lstCd, String dtlCd) {
+        for (String c : candidateCodes(lstCd, dtlCd)) {
+            Product p = byCode.get(c);
+            if (p != null) {
+                return p;
+            }
+        }
+        return null;
     }
 }

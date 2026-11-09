@@ -46,7 +46,13 @@ public class DuffSalesController {
                     DSRE2 신청내역을 조회만 — 매출 생성 없음. 정본 14p 항목(처리순번·신청일자·매출코드·
                     거래처·학교·학년·처리구분·청구구분·신청/처리/비처리 인원·단가·총금액)을 그대로 낸다.
                     청구인원은 우선순위 **등록(청구구분 R) → 조회모드 → 처리구분 N이면 비처리 → 처리**로 정해지며,
-                    어느 근거로 골랐는지 chargeBasis에 실린다.""")
+                    어느 근거로 골랐는지 chargeBasis에 실린다.
+
+                    ★**`productId` 를 같이 보내면 그 도서로 미리 계산해 보여 준다**(등록과 같은 규칙).
+                    비우면 DSRE 과목코드로 도서를 찾는데, **과목코드와 도서코드는 체계가 달라
+                    대개 전부 `UNMAPPED_PRODUCT` 로 나온다** — 그게 고장이 아니라
+                    "아직 도서를 고르지 않은 상태"다(레거시도 담당자가 콤보에서 고른다).
+                    ‼️등록할 때와 **같은 `productId` 를 넣어** 미리보기해야 금액·인원이 실제와 같다.""")
     @GetMapping("/preview")
     public ApiResponse<DuffImportResponse> preview(
             @Parameter(description = "신청일 시작(yyyy-MM-dd)") @RequestParam(required = false)
@@ -55,9 +61,13 @@ public class DuffSalesController {
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
             @Parameter(description = MODE_DESC) @RequestParam(required = false) DuffChargeMode mode,
             @Parameter(description = COMPLETE_DESC)
-            @RequestParam(required = false, defaultValue = "false") boolean onlyComplete) {
-        return ApiResponse.success(
-                duffSalesImportService.importSales(fromDate, toDate, mode, onlyComplete, true));
+            @RequestParam(required = false, defaultValue = "false") boolean onlyComplete,
+            @Parameter(description = """
+                    담당자가 고른 도서 id — **목록 전체에 적용해** 미리 계산한다.
+                    등록(`POST /sales/duff/import`)의 `productId` 와 같은 값이다.""")
+            @RequestParam(required = false) Long productId) {
+        return ApiResponse.success(duffSalesImportService
+                .importSales(fromDate, toDate, mode, onlyComplete, productId, true));
     }
 
     @Operation(summary = "매출일괄등록(더프) 실행 — 레거시 방식(고르고 고쳐서 등록)",
