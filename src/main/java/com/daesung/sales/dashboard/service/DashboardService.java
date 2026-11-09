@@ -32,6 +32,8 @@ public class DashboardService {
     private final SaleRepository saleRepository;
     private final DashboardSnapshotRepository snapshotRepository;
     private final com.daesung.sales.inventory.repository.InventoryRepository inventoryRepository;
+    /** 상품별 목표에 상품코드·명을 붙이려고 쓴다(F-25). 묶어 읽어 N+1 을 막는다. */
+    private final com.daesung.sales.product.repository.ProductRepository productRepository;
 
     /** 매출목표 등록/수정(같은 연·월·대상·종류면 금액 갱신). */
     @Transactional
@@ -50,10 +52,44 @@ public class DashboardService {
     }
 
     /** 연도의 목표 목록(관리 화면). */
+    /**
+     * 매출목표 한 줄 삭제.
+     *
+     * <p>‼️금액 0으로 덮는 것과 다르다 — 0은 "목표가 0"이고 삭제는 "목표를 안 넣음"이다.
+     * 대시보드가 그 둘을 다르게 보여주므로(0은 미달, 미입력은 빈칸) 지우는 길이 있어야 한다.
+     */
+    @Transactional
+    public void deleteTarget(Long id) {
+        if (!targetRepository.existsById(id)) {
+            throw new com.daesung.sales.common.exception.BusinessException(
+                    com.daesung.sales.common.exception.ErrorCode.NOT_FOUND,
+                    "매출목표가 없습니다. id=" + id);
+        }
+        targetRepository.deleteById(id);
+    }
+
     @Transactional(readOnly = true)
     public List<TargetResponse> listTargets(int year) {
-        return targetRepository.findByFiscalYearOrderByScopeAscScopeKeyAscMonthAsc(year).stream()
-                .map(TargetResponse::from).toList();
+        List<com.daesung.sales.dashboard.entity.SalesTarget> targets =
+                targetRepository.findByFiscalYearOrderByScopeAscScopeKeyAscMonthAsc(year);
+        // ★상품은 **한 번에** 읽는다(F-25). 줄마다 조회하면 목록 한 장에 수십 번이 된다.
+        //   ‼️예전엔 상품 id 만 내려가서, 화면이 "어느 상품의 목표인지" 보이려면
+        //     상품마다 따로 조회해야 했다.
+        java.util.Set<Long> pids = targets.stream()
+                .map(com.daesung.sales.dashboard.entity.SalesTarget::getProductId)
+                .filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.toSet());
+        java.util.Map<Long, com.daesung.sales.product.entity.Product> byId = pids.isEmpty()
+                ? java.util.Map.of()
+                : productRepository.findAllById(pids).stream()
+                        .collect(java.util.stream.Collectors.toMap(
+                                com.daesung.sales.product.entity.Product::getId, x -> x));
+        return targets.stream().map(t -> {
+            var p = (t.getProductId() == null) ? null : byId.get(t.getProductId());
+            return TargetResponse.from(t,
+                    (p == null) ? null : p.getCode(),
+                    (p == null) ? null : p.getName());
+        }).toList();
     }
 
     /**
@@ -135,7 +171,11 @@ public class DashboardService {
 
         DashboardResponse.YearSummary summary = new DashboardResponse.YearSummary(
                 yearTarget, tActual, pct(tActual, yearTarget), yearPrev, growth(tActual, yearPrev));
-        return new DashboardResponse(year, cmpYear, sc, key, pid, computedAt(year, sc), months, summary);
+        // 상품별 조회면 상품코드·명을 함께 준다 — 화면 제목이 '(전사)' 로 남지 않게(F-25).
+        var tp = (pid == null) ? null : productRepository.findById(pid).orElse(null);
+        return new DashboardResponse(year, cmpYear, sc, key, pid,
+                (tp == null) ? null : tp.getCode(), (tp == null) ? null : tp.getName(),
+                computedAt(year, sc), months, summary);
     }
 
     /**

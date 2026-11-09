@@ -13,7 +13,9 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -119,6 +121,23 @@ public class DashboardController {
     public ApiResponse<java.util.List<TargetResponse>> targets(
             @Parameter(description = "연도", example = "2026") @RequestParam int year) {
         return ApiResponse.success(dashboardService.listTargets(year));
+    }
+
+    @Operation(summary = "매출목표 삭제",
+            description = """
+                    잘못 넣은 목표 한 줄을 지운다.
+
+                    ‼️**지우는 길이 없었다.** 금액을 0으로 덮을 수는 있지만 목록에 **0짜리 줄이 남아**,
+                    담당자는 "목표가 0인 달"과 "목표를 안 넣은 달"을 구분할 수 없다
+                    (대시보드가 그 둘을 다르게 보여준다 — 0은 미달, 미입력은 빈칸).
+
+                    등록과 **같은 권한**이다(ADMIN·FINANCE).""")
+    @PreAuthorize("hasAnyRole('ADMIN','FINANCE')")
+    @DeleteMapping("/targets/{id}")
+    public ApiResponse<Void> deleteTarget(
+            @Parameter(description = "매출목표 id(목록 응답의 id)") @PathVariable Long id) {
+        dashboardService.deleteTarget(id);
+        return ApiResponse.success(null);
     }
 
     @Operation(summary = "할 일 목록",
