@@ -76,6 +76,18 @@ public class InventoryTxn extends com.daesung.sales.common.entity.SoftDeletableE
     @Column(name = "unit_cost")
     private Long unitCost;
 
+    /**
+     * 매입률 %(매입입고 전용, F-13). <b>매입단가 = 정가 × 매입률/100</b>.
+     *
+     * <p>근거: 레거시 `salesData` 입고행 33,221건의 `supRate` — 같은 행에서
+     * {@code 정가 × 매입률/100 × 수량 = 금액} 이 검산된다.
+     *
+     * <p>‼️<b>입고 건별</b>이다. 도서 마스터에는 그 칸이 없고, 같은 도서가 같은 해에도
+     * 매입률 3종을 갖는 경우가 있다. 그 시점 값이 여기 남아야 단가를 고쳐도 과거가 안 움직인다.
+     */
+    @Column(name = "purchase_rate")
+    private Integer purchaseRate;
+
     /** 입고구분(INBOUND 이벤트만). PURCHASE=매입입고→16p 순매출조회 매입액으로 집계. 그 외 이벤트는 null. */
     @Enumerated(EnumType.STRING)
     @Column(name = "inbound_type", length = 20)
@@ -111,6 +123,12 @@ public class InventoryTxn extends com.daesung.sales.common.entity.SoftDeletableE
         InventoryTxn t = inbound(product, warehouse, qty, unitCost, inboundType, tradeDate, partner, memo);
         t.refNo = refNo;
         return t;
+    }
+
+    /** 매입률을 붙인다(매입입고 전용, F-13). 호출부가 검증한 뒤 넘긴다. */
+    public InventoryTxn withPurchaseRate(Integer purchaseRate) {
+        this.purchaseRate = purchaseRate;
+        return this;
     }
 
     /**

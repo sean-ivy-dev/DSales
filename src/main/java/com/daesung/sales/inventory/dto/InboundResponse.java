@@ -42,7 +42,16 @@ public record InboundResponse(
             int inboundQty,
 
             @Schema(description = "입고 후 현재 잔량", example = "1000")
-            int currentQty
+            int currentQty,
+
+            @Schema(description = "매입률 %(F-13). 매입입고·매입반품에만 값이 있다", example = "55")
+            Integer purchaseRate,
+
+            @Schema(description = """
+                    확정된 입고단가(원). 직접 넣었으면 그 값, 비우고 매입률만 줬으면
+                    **정가 × 매입률/100** 으로 서버가 만든 값이다 — 화면이 되돌려 보여줄 수 있게 돌려준다.""",
+                    example = "6600")
+            Long unitCost
     ) {
     }
 }

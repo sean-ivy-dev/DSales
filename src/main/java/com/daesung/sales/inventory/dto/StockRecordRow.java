@@ -46,6 +46,11 @@ public record StockRecordRow(
         String supplierName,
         @Schema(description = "입고단가(원가). 매입입고에만 값이 있다 — 16p 순매출의 매입액이 여기서 나온다")
         Long unitCost,
+        @Schema(description = """
+                매입률 %(F-13). 매입입고·매입반품에만 값이 있다.
+                ★단가를 매입률로 만든 건이면 **그 시점 률이 여기 남는다** — 나중에 정가를 고쳐도
+                과거 매입단가가 따라 움직이지 않아야 하므로 률과 단가를 함께 저장한다.""")
+        Integer purchaseRate,
         @Schema(description = "전표번호(입고/이고/세트작업 묶음 키)") String refNo,
         @Schema(description = "비고") String memo
 ) {

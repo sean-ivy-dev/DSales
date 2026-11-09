@@ -107,8 +107,11 @@ public class InventoryService {
                             "상품이 없습니다. id=" + item.productId()));
 
             int delta = sign * item.qty();
+            Integer purchaseRate = checkPurchaseRate(req.inboundType(), item.purchaseRate(), product);
+            Long unitCost = unitCostOf(item.unitCost(), purchaseRate, product);
             InventoryTxn txn = InventoryTxn.inbound(product, warehouse, delta,
-                    item.unitCost(), req.inboundType(), req.processedDate(), supplier, item.memo(), inboundNo);
+                    unitCost, req.inboundType(), req.processedDate(), supplier, item.memo(), inboundNo)
+                    .withPurchaseRate(purchaseRate);
             txn.applyLogisCostTarget(Boolean.TRUE.equals(req.logisCostTarget()));   // 물류작업비 대상(8p)
             inventoryTxnRepository.save(txn);
             int currentQty = applyDelta(product, warehouse, delta);
@@ -116,11 +119,57 @@ public class InventoryService {
             // 응답 수량은 **입력한 그대로**(양수) 돌려준다 — 화면이 되돌려 보여주는 값이라
             // 여기서 음수로 바뀌면 담당자는 자기가 친 숫자와 다른 것을 본다.
             lines.add(new InboundResponse.Line(
-                    product.getId(), product.getCode(), item.qty(), currentQty));
+                    product.getId(), product.getCode(), item.qty(), currentQty,
+                    purchaseRate, unitCost));
         }
         InboundType type = (req.inboundType() != null) ? req.inboundType() : InboundType.NORMAL;
         return new InboundResponse(inboundNo, warehouse.getId(), warehouse.getName(), type, lines,
                 stockWarningCollector.drain());
+    }
+
+    /**
+     * 매입률 검증(F-13). 매입 축(매입입고·매입반품)에서만 받는다.
+     *
+     * <p>‼️<b>매입 축이 아닌데 들어오면 거부</b>한다. 조용히 버리면 담당자는 매입률을 넣었다고
+     * 믿는데 기록에는 없다 — 면세 상품에 세액을 넣을 때와 같은 규칙이다.
+     *
+     * <p>★정가가 없으면 단가를 못 만든다. 그때도 거부한다(0원 단가가 조용히 남으면
+     * 16p 순매출의 매입액이 0으로 깔린다).
+     */
+    private Integer checkPurchaseRate(InboundType inboundType, Integer purchaseRate, Product product) {
+        if (purchaseRate == null) {
+            return null;
+        }
+        boolean purchaseAxis = inboundType == InboundType.PURCHASE
+                || inboundType == InboundType.PURCHASE_RETURN;
+        if (!purchaseAxis) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "매입률은 매입입고·매입반품에만 넣을 수 있습니다. 입고구분을 매입으로 바꾸거나 매입률을 비우세요.");
+        }
+        if (product.getPrice() == null || product.getPrice() <= 0) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "정가가 없는 상품은 매입률로 단가를 계산할 수 없습니다. 도서 정가를 먼저 넣거나 입고단가를 직접 넣으세요."
+                            + " 상품코드=" + product.getCode());
+        }
+        return purchaseRate;
+    }
+
+    /**
+     * 입고단가 결정(F-13). <b>직접 넣은 값이 이긴다</b>; 비었고 매입률이 있으면
+     * {@code 정가 × 매입률 / 100} 으로 만든다.
+     *
+     * <p>★이 식은 레거시 그대로다 — `salesData` 입고행에서
+     * {@code 정가 × supRate/100 × 수량 = 금액} 이 검산된다(33,221건).
+     * <b>버림</b>으로 둔다(금액 단일소스 {@code Amounts} 와 같은 규칙).
+     */
+    private Long unitCostOf(Long unitCost, Integer purchaseRate, Product product) {
+        if (unitCost != null) {
+            return unitCost;
+        }
+        if (purchaseRate == null) {
+            return null;
+        }
+        return (long) product.getPrice() * purchaseRate / 100L;
     }
 
     /** 단순 이고(창고 이동). 출발창고 −qty(음수재고 방지), 도착창고 +qty. 매출 미발생. */
@@ -731,7 +780,7 @@ public class InventoryService {
                         (t.getPartner() == null) ? null : t.getPartner().getId(),
                         (t.getPartner() == null) ? null : t.getPartner().getCode(),
                         (t.getPartner() == null) ? null : t.getPartner().getName(),
-                        t.getUnitCost(), t.getRefNo(), t.getMemo()))
+                        t.getUnitCost(), t.getPurchaseRate(), t.getRefNo(), t.getMemo()))
                 .toList();
     }
 
