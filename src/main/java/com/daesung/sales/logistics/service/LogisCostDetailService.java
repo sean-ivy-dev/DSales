@@ -284,7 +284,22 @@ public class LogisCostDetailService {
             }
         }
 
+        /**
+         * 소계 누적. <b>식별 칸(상품·학년·시행)도 함께 받아 둔다</b> —
+         * 레거시 집계행이 그 칸들을 채우기 때문이다(F-35·F-33).
+         *
+         * <p>‼️예전엔 금액만 더했다. 그래서 {@code toRow} 에서 "단계별로 남긴다"를 고쳐도
+         * 애초에 값이 비어 있어 <b>소계가 전부 공란</b>으로 나갔다(운영 엑셀 실측으로 잡았다).
+         * 첫 병합 때만 채운다 — 한 소계 안의 값은 모두 같다.
+         */
         private void merge(Acc o) {
+            if (productCode == null) {
+                productCode = o.productCode;
+                productName = o.productName;
+                grade = o.grade;
+                dtlCd = o.dtlCd;
+                detailName = o.detailName;
+            }
             materialQty += o.materialQty;
             paperQty += o.paperQty;
             paperAmount += o.paperAmount;
