@@ -22,6 +22,18 @@ public record SchoolUpdateRequest(
                 (`GET /masters/schools/sales-channels`).""",
                 example = "자체몰")
         @Size(max = 20) String salesChannel,
-        @Schema(description = "메모") String memo
+        @Schema(description = "메모") String memo,
+
+        @Schema(description = """
+                학년별 **학급수 / 재학생 수**(F-22·F-23). 응시현황 '인원'·보급률의 원천이다.
+                ‼️**보내지 않은 칸은 그대로 둔다**(null = 안 고침). 0 을 보내면 0 이 된다 —
+                "자료 없음"과 "0명"은 다르고, 0 이 깔리면 보급률이 빈 칸이 되어 구분되지 않는다.""",
+                example = "5")
+        @jakarta.validation.constraints.PositiveOrZero Integer cls1ClassCnt,
+        @jakarta.validation.constraints.PositiveOrZero Integer cls1StudentCnt,
+        @jakarta.validation.constraints.PositiveOrZero Integer cls2ClassCnt,
+        @jakarta.validation.constraints.PositiveOrZero Integer cls2StudentCnt,
+        @jakarta.validation.constraints.PositiveOrZero Integer cls3ClassCnt,
+        @jakarta.validation.constraints.PositiveOrZero Integer cls3StudentCnt
 ) {
 }

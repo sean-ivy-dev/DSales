@@ -3,7 +3,10 @@ package com.daesung.sales.sale.service;
 import com.daesung.sales.sale.dto.AttendanceAgg;
 import com.daesung.sales.sale.dto.AttendancePeriodAgg;
 import com.daesung.sales.sale.dto.AttendancePeriodResponse;
+import com.daesung.sales.sale.dto.AttendanceRatioAgg;
+import com.daesung.sales.sale.dto.AttendanceRatioResponse;
 import com.daesung.sales.sale.dto.AttendanceResponse;
+import com.daesung.sales.sale.dto.SchoolStudentAgg;
 import com.daesung.sales.sale.repository.SaleRepository;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -28,6 +31,8 @@ public class AttendanceService {
     private static final int MONTHS = 12;
 
     private final SaleRepository saleRepository;
+    /** 지역비율의 '인원'(재학생 수) 원천 — 매출이 아니라 학교 마스터에서 온다(F-22). */
+    private final com.daesung.sales.school.repository.SchoolRepository schoolRepository;
 
     public AttendanceResponse yearly(int year, String grade, String productType) {
         return yearly(year, grade, productType, null);
@@ -315,6 +320,149 @@ public class AttendanceService {
      * 거래처코드가 숫자 5자리라는 전제의 규칙이라, 형식이 다르면 '특약점외'로 떨어진다
      * (실데이터는 '00001'~'90001' 형식이다).
      */
+    /**
+     * 응시현황 <b>지역비율(보급률)</b> — 레거시 '지역비율' 라디오(F-22·F-23).
+     *
+     * <p>식은 레거시 그대로다({@code 응시현황.vb:495~590}):
+     * <pre>
+     *   인원 = SUM(clsNSCnt)            ← 학교 재학생 수 (매출 수량이 아니다)
+     *   매출 = SUM(bookCntN)            ← 판매 **부수** (금액 줄은 주석으로 막혀 있다)
+     *   비율 = 매출 ÷ 인원 × 100        ← 보급률 %, 인원 0이면 빈 칸
+     * </pre>
+     *
+     * <p>★<b>레거시의 버그는 옮기지 않는다.</b> 레거시 SELECT 는
+     * {@code 인원_1학년 AS '인원[2학년]'}·{@code 인원_1학년 AS '인원[3학년]'} 로
+     * <b>1학년 값을 2·3학년 칸에 넣는다</b>(:500~502). 같은 쿼리 안쪽은 2·3학년을 제대로
+     * 집계하는데 바깥 SELECT 에서만 잘못 복사한 것이라 명백한 오타다 —
+     * 우리는 각 학년 값을 쓴다. ‼️레거시 화면과 2·3학년 인원이 다르게 보이는 것은 이 때문이다.
+     *
+     * <p>★인원은 <b>재학생 자료가 있는 학교만</b> 센다. 자료 없는 학교를 0명으로 세우면
+     * 분모만 커져 보급률이 작아진다 — 자료 없음과 0명은 다르다.
+     */
+    public AttendanceRatioResponse regionRatio(int year,
+                                               com.daesung.sales.school.entity.SchoolType schoolType,
+                                               String clientCategory) {
+        List<SchoolStudentAgg> schools = schoolRepository.studentCounts(schoolType, clientCategory);
+        Map<String, long[]> bookBySchool = new java.util.HashMap<>();
+        for (AttendanceRatioAgg a : saleRepository.ratioBookCounts(
+                LocalDate.of(year, 1, 1), LocalDate.of(year, 12, 31))) {
+            int idx = gradeIndex(a.getGrade());
+            if (idx < 0) {
+                continue;   // 학년이 없는 도서(공통·자재)는 학년 분해에서 빠진다 — 레거시도 같다
+            }
+            bookBySchool.computeIfAbsent(a.getSchoolCode(), k -> new long[3])[idx] +=
+                    (a.getQty() == null) ? 0L : a.getQty();
+        }
+
+        Map<String, RatioAcc> byRegion = new LinkedHashMap<>();
+        for (SchoolStudentAgg sc : schools) {
+            String key = regionGroup(sc.getCustCode(), sc.getCity());
+            RatioAcc acc = byRegion.computeIfAbsent(key, k -> new RatioAcc(k, sc.getCity()));
+            acc.addStudents(nz(sc.getCls1StudentCnt()), nz(sc.getCls2StudentCnt()),
+                    nz(sc.getCls3StudentCnt()));
+            long[] books = bookBySchool.get(sc.getSchoolCode());
+            if (books != null) {
+                acc.addBooks(books[0], books[1], books[2]);
+            }
+        }
+
+        List<RatioAcc> sorted = new ArrayList<>(byRegion.values());
+        sorted.sort((a, b) -> a.regionGroup.compareTo(b.regionGroup));
+        List<AttendanceRatioResponse.Row> rows = new ArrayList<>();
+        RatioAcc total = new RatioAcc(null, null);
+        for (RatioAcc a : sorted) {
+            rows.add(a.toRow("REGION"));
+            total.merge(a);
+        }
+        rows.add(total.toRow("TOTAL"));
+        return new AttendanceRatioResponse(year, rows);
+    }
+
+    /** 도서 학년 → 0·1·2. '1'·'2'·'3' 이 아니면 −1(학년 분해 제외). */
+    private static int gradeIndex(String grade) {
+        if (grade == null) {
+            return -1;
+        }
+        return switch (grade.trim()) {
+            case "1" -> 0;
+            case "2" -> 1;
+            case "3" -> 2;
+            default -> -1;
+        };
+    }
+
+    private static long nz(Integer v) {
+        return (v == null) ? 0L : v;
+    }
+
+    /** 지역 한 묶음의 인원·부수 누적. */
+    private static final class RatioAcc {
+        private final String regionGroup;
+        private String city;
+        private final long[] students = new long[3];
+        private final long[] books = new long[3];
+        private int schoolCount;
+
+        private RatioAcc(String regionGroup, String city) {
+            this.regionGroup = regionGroup;
+            this.city = city;
+        }
+
+        private void addStudents(long s1, long s2, long s3) {
+            students[0] += s1;
+            students[1] += s2;
+            students[2] += s3;
+            schoolCount++;
+        }
+
+        private void addBooks(long b1, long b2, long b3) {
+            books[0] += b1;
+            books[1] += b2;
+            books[2] += b3;
+        }
+
+        private void merge(RatioAcc o) {
+            for (int i = 0; i < 3; i++) {
+                students[i] += o.students[i];
+                books[i] += o.books[i];
+            }
+            schoolCount += o.schoolCount;
+        }
+
+        /**
+         * 지역 표시는 레거시 규칙 그대로 —
+         * 합계행은 '합계', {@code 특약점외} 는 '기타', 그 밖은 그 지역의 도시명.
+         */
+        private String label(String rowType) {
+            if ("TOTAL".equals(rowType)) {
+                return "합계";
+            }
+            if ("특약점외".equals(regionGroup)) {
+                return "기타";
+            }
+            return city;
+        }
+
+        private AttendanceRatioResponse.Row toRow(String rowType) {
+            long st = students[0] + students[1] + students[2];
+            long bk = books[0] + books[1] + books[2];
+            return new AttendanceRatioResponse.Row(rowType, label(rowType), regionGroup,
+                    students[0], students[1], students[2], st,
+                    books[0], books[1], books[2], bk,
+                    ratio(books[0], students[0]), ratio(books[1], students[1]),
+                    ratio(books[2], students[2]), ratio(bk, st),
+                    schoolCount);
+        }
+
+        /** 보급률 % — 소수 2자리. ‼️인원 0이면 <b>null</b>(레거시도 빈 칸으로 둔다). */
+        private static Double ratio(long books, long students) {
+            if (students == 0) {
+                return null;
+            }
+            return Math.round((double) books / students * 10_000.0) / 100.0;
+        }
+    }
+
     private static String regionGroup(String custCode, String city) {
         String c = (custCode == null) ? "" : custCode;
         String cityPart = (city == null) ? "" : city;

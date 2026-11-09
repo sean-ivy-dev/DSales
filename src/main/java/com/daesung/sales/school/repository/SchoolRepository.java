@@ -85,4 +85,29 @@ public interface SchoolRepository extends JpaRepository<School, Long> {
 
     Page<School> findBySchoolCodeContainingIgnoreCaseOrSchoolNameContainingIgnoreCase(
             String schoolCode, String schoolName, Pageable pageable);
+
+    /**
+     * 응시현황 '지역비율'의 <b>인원</b> 원자료 — 학교별 거래처·도시·학년 재학생 수(F-22).
+     *
+     * <p>★<b>재학생 수가 있는 학교만</b> 낸다. 레거시는 {@code schAllData} 에 있는 학교만
+     * 집계하는데(그 표가 재학생 자료 자체다), 우리는 한 표에 섞여 있어 조건으로 가른다.
+     * 자료가 없는 학교를 0명으로 세우면 <b>보급률 분모가 커져 비율이 작아진다</b> —
+     * 자료 없음과 0명은 다르다.
+     *
+     * <p>{@code schoolType} 미지정이면 전체다(레거시 「학원」 체크박스에 대응).
+     */
+    @Query("""
+            select s.schoolCode as schoolCode, s.custCode as custCode, s.city as city,
+                   s.cls1StudentCnt as cls1StudentCnt, s.cls2StudentCnt as cls2StudentCnt,
+                   s.cls3StudentCnt as cls3StudentCnt
+              from School s
+             where s.active = true
+               and (s.cls1StudentCnt is not null or s.cls2StudentCnt is not null
+                    or s.cls3StudentCnt is not null)
+               and (:schoolType is null or s.schoolType = :schoolType)
+               and (:clientCategory is null or s.clientCategory = :clientCategory)
+            """)
+    List<com.daesung.sales.sale.dto.SchoolStudentAgg> studentCounts(
+            @Param("schoolType") SchoolType schoolType,
+            @Param("clientCategory") String clientCategory);
 }

@@ -153,6 +153,11 @@ public class SchoolService {
         school.applySearchFields(req.cityCode(), req.partnerLoc(),
                 req.mockPartnerCode(), req.mockPartnerName(),
                 req.icPartnerCode(), req.icPartnerName());
+        // 학년별 학급수·재학생 수(F-22). 안 보내면 비워 둔다 —
+        // 응시현황이 "자료 있는 학교만" 세므로 0 으로 깔면 보급률이 틀어진다.
+        school.updateStudentCounts(req.cls1ClassCnt(), req.cls1StudentCnt(),
+                req.cls2ClassCnt(), req.cls2StudentCnt(),
+                req.cls3ClassCnt(), req.cls3StudentCnt());
         return SchoolResponse.from(schoolRepository.save(school));
     }
 
@@ -171,6 +176,12 @@ public class SchoolService {
         school.update(req.custCode(), req.custName(), req.city(), req.region(), req.schoolName(),
                 req.isSchool() == null || req.isSchool(), req.schoolType(), req.clientCategory(),
                 req.salesChannel(), req.memo());
+        // 학년별 학급수·재학생 수(F-22·F-23). 안 보낸 칸은 그대로 둔다 —
+        // 학교 수정은 다른 칸을 비워 보내는 경우가 많아, 여기서 null 을 0 으로 깔면
+        // 응시현황 보급률이 조용히 빈 칸이 된다.
+        school.updateStudentCounts(req.cls1ClassCnt(), req.cls1StudentCnt(),
+                req.cls2ClassCnt(), req.cls2StudentCnt(),
+                req.cls3ClassCnt(), req.cls3StudentCnt());
         return SchoolResponse.from(school);
     }
 

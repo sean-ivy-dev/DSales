@@ -120,6 +120,63 @@ public class School extends BaseEntity {
     @Column(nullable = false, length = 10)
     private SchoolSource source = SchoolSource.MANUAL;
 
+    /**
+     * 학년별 <b>학급수·재학생 수</b>(F-22·F-23). 응시현황의 <b>'인원'이 이 값</b>이다 —
+     * 매출 수량이 아니다(레거시 {@code 응시현황.vb:526} 이 {@code cls1SCnt}~{@code cls3SCnt} 를 합한다).
+     *
+     * <p>★<b>연도 축이 없다.</b> 레거시 {@code schAllData} 에 연도 칸이 없고 그 값을 그대로
+     * 집계한다 = 한 벌만 두고 덮어쓰는 구조다. 해마다 바뀌는 값이지만 레거시와 같은 숫자가 먼저다.
+     *
+     * <p>★<b>학급당 평균 인원은 저장하지 않는다</b> — {@code 재학생 ÷ 학급수} 로 나온다
+     * (레거시 {@code clsNRatio} 2,391건 전부 그 식과 일치). 저장하면 둘이 어긋난다.
+     */
+    @Column(name = "cls1_class_cnt")
+    private Integer cls1ClassCnt;
+
+    @Column(name = "cls1_student_cnt")
+    private Integer cls1StudentCnt;
+
+    @Column(name = "cls2_class_cnt")
+    private Integer cls2ClassCnt;
+
+    @Column(name = "cls2_student_cnt")
+    private Integer cls2StudentCnt;
+
+    @Column(name = "cls3_class_cnt")
+    private Integer cls3ClassCnt;
+
+    @Column(name = "cls3_student_cnt")
+    private Integer cls3StudentCnt;
+
+    /**
+     * 학년별 학급수·재학생 수를 고친다(학교관리 화면·엑셀 업로드).
+     *
+     * <p>‼️<b>null 은 "안 고친다"</b>는 뜻이다. 0 을 보내면 0 으로 바뀐다 —
+     * "값이 없다"와 "0명"은 다르고, 0 으로 깔리면 응시현황 비율이 빈 칸이 되어
+     * 자료가 없는 것과 구분되지 않는다.
+     */
+    public void updateStudentCounts(Integer c1, Integer s1, Integer c2, Integer s2,
+                                    Integer c3, Integer s3) {
+        if (c1 != null) {
+            this.cls1ClassCnt = c1;
+        }
+        if (s1 != null) {
+            this.cls1StudentCnt = s1;
+        }
+        if (c2 != null) {
+            this.cls2ClassCnt = c2;
+        }
+        if (s2 != null) {
+            this.cls2StudentCnt = s2;
+        }
+        if (c3 != null) {
+            this.cls3ClassCnt = c3;
+        }
+        if (s3 != null) {
+            this.cls3StudentCnt = s3;
+        }
+    }
+
     /** 사용여부. DSRE2에서 사라진 행은 삭제하지 않고 false(미사용)로 둔다 — 과거 매출 이력 보존. */
     @Column(nullable = false)
     private boolean active = true;

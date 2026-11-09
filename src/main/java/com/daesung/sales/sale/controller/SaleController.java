@@ -1076,6 +1076,68 @@ public class SaleController {
         return excel.asDownload(xlsx, "응시현황_연도별.xlsx");
     }
 
+    @Operation(summary = "응시현황 — 지역비율(보급률) 조회",
+            description = """
+                    레거시 응시현황 **'지역비율'** 라디오(F-22·F-23). 지역별로
+                    **인원 · 매출 · 비율**을 1·2·3학년·계로 낸다.
+
+                    ‼️**세 칸의 뜻이 이름과 다르다**(레거시 SQL 로 확정) —
+                    · **인원 = 학교의 재학생 수**(학교관리의 학년별 재학생 칸). **매출 수량이 아니다.**
+                    · **매출 = 판매 부수**(`sum(qty)`). **금액이 아니다** —
+                      레거시에서 금액(`totalAmt`) 줄은 **주석으로 막혀** 있다.
+                    · **비율 = 부수 ÷ 재학생 × 100 = 보급률(%)**. 재학생이 0이면 **null**(빈 칸).
+
+                    ★**재학생 자료가 있는 학교만** 집계한다. 자료 없는 학교를 0명으로 세우면
+                    분모만 커져 비율이 작아진다 — 자료 없음과 0명은 다르다.
+                    모집단을 확인할 수 있게 `schoolCount`(집계에 든 학교 수)를 함께 준다.
+
+                    ★학년은 **도서의 학년**이다(레거시도 `bookData.grade`). 학교 학년이 아니다.
+                    학년이 없는 도서(공통·자재)는 학년 분해에서 빠진다.
+
+                    ‼️**레거시 화면과 2·3학년 인원이 다르게 보인다.** 레거시 바깥 SELECT 가
+                    `인원_1학년 AS '인원[2학년]'` 로 **1학년 값을 2·3학년 칸에 복사**하는 오타가
+                    있다(안쪽에서는 제대로 집계한다). 우리는 각 학년 값을 쓴다.""")
+    @GetMapping("/attendance-ratio")
+    public ApiResponse<com.daesung.sales.sale.dto.AttendanceRatioResponse> attendanceRatio(
+            @Parameter(description = "조회 연도", example = "2026") @RequestParam int year,
+            @Parameter(description = "학교/학원 구분(SCHOOL/HAKWON). 미지정=전체")
+            @RequestParam(required = false) com.daesung.sales.school.entity.SchoolType schoolType,
+            @Parameter(description = "거래처구분(특약점·기타학원 등). 미지정=전체", example = "특약점")
+            @RequestParam(required = false) String clientCategory) {
+        return ApiResponse.success(
+                attendanceService.regionRatio(year, schoolType, clientCategory));
+    }
+
+    @Operation(summary = "응시현황 — 지역비율 엑셀 다운로드",
+            description = "조회와 같은 표. 레거시 컬럼 순서(지역 · 인원 4 · 매출 4 · 비율 4) 그대로.")
+    @GetMapping("/attendance-ratio/export")
+    public org.springframework.http.ResponseEntity<byte[]> attendanceRatioExport(
+            @RequestParam int year,
+            @RequestParam(required = false) com.daesung.sales.school.entity.SchoolType schoolType,
+            @RequestParam(required = false) String clientCategory) {
+        List<com.daesung.sales.common.excel.ExcelExportUtil.Col> cols = List.of(
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("지역", "region"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("인원[1학년]", "studentCnt1"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("인원[2학년]", "studentCnt2"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("인원[3학년]", "studentCnt3"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("인원[계]", "studentCntTotal"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("매출[1학년]", "bookCnt1"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("매출[2학년]", "bookCnt2"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("매출[3학년]", "bookCnt3"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("매출[계]", "bookCntTotal"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("비율[1학년]", "ratio1"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("비율[2학년]", "ratio2"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("비율[3학년]", "ratio3"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("비율[계]", "ratioTotal"),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Col("학교수", "schoolCount"));
+        byte[] xlsx = excel.toXlsx("응시현황(지역비율)", cols,
+                attendanceService.regionRatio(year, schoolType, clientCategory).rows(),
+                new com.daesung.sales.common.excel.ExcelExportUtil.Heading(
+                        "응시현황(지역비율)", "조회기준 : " + year + "년"),
+                com.daesung.sales.common.excel.ExcelExportUtil.AGG_BY_ROW_TYPE);
+        return excel.asDownload(xlsx, "응시현황_지역비율.xlsx");
+    }
+
     @Operation(summary = "회차별작업현황 엑셀 다운로드",
             description = "분류·도서·회차별 포장유형(개별1/개별2/반별) 물량.")
     @GetMapping("/round-work-status/export")

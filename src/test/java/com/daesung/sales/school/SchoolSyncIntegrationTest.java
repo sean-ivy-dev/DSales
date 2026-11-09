@@ -79,7 +79,10 @@ class SchoolSyncIntegrationTest extends IntegrationTestSupport {
         School s = find("S001", "10001");
         schoolService.update(s.getId(), new com.daesung.sales.school.dto.SchoolUpdateRequest(
                 "S001", "대성지사", "서울", "서울관할", "대성고", true,
-                SchoolType.HAKWON, "특약점", "자체몰", "담당자 메모"));
+                SchoolType.HAKWON, "특약점", "자체몰", "담당자 메모",
+                // 학년별 학급수·재학생 수(F-22) — 이 테스트는 그 축을 보지 않으므로 비운다.
+                // ‼️null 은 "안 고친다"는 뜻이라 동기화 보존 검증에 영향이 없다.
+                null, null, null, null, null, null));
 
         // 두 번째 동기화 — DSRE 쪽 학교명·도시가 바뀐 상태로 다시 들어옴
         SchoolSyncResult result = schoolService.merge(List.of(row("S001", "10001", "대성고등학교", "성남")));

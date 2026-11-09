@@ -1668,4 +1668,27 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
     @Query("select distinct s.entryNo, s.channel from Sale s "
             + "where s.entryNo in :entryNos and s.channel is not null")
     List<Object[]> channelsByEntryNo(@Param("entryNos") Collection<String> entryNos);
+
+    /**
+     * 응시현황 '지역비율'의 <b>부수</b> 원자료 — 학교 × 도서학년 판매 부수(F-22).
+     *
+     * <p>‼️<b>금액이 아니라 부수다.</b> 레거시 {@code 응시현황.vb:531} 이 {@code SUM(bookCnt)} 를
+     * 쓰고 금액({@code totalAmt}) 줄은 주석으로 막혀 있다 — 화면 제목이 '매출'이라 금액으로
+     * 읽히지만 부수다. 금액으로 바꾸면 보급률이 전혀 다른 숫자가 된다.
+     *
+     * <p>★학년은 <b>도서의 학년</b>이다(레거시도 {@code bookData.grade}). 학교 학년이 아니다.
+     *
+     * <p>★취소·삭제분은 뺀다. 레거시는 취소 행이 음수로 남아 합에서 상계되는데, 우리는
+     * {@code canceled} 로 표시하므로 조건으로 뺀다(같은 결과다).
+     */
+    @Query("""
+            select s.schoolCode as schoolCode, s.product.grade as grade, sum(s.qty) as qty
+              from Sale s
+             where s.canceled = false and s.deletedAt is null
+               and s.salesDate between :from and :to
+               and s.schoolCode is not null and s.schoolCode <> ''
+             group by s.schoolCode, s.product.grade
+            """)
+    List<com.daesung.sales.sale.dto.AttendanceRatioAgg> ratioBookCounts(
+            @Param("from") LocalDate from, @Param("to") LocalDate to);
 }

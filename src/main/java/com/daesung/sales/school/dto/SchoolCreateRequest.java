@@ -38,6 +38,18 @@ public record SchoolCreateRequest(
         String mockPartnerName,
         @Schema(description = "모의고사 담당 특약점코드") String mockPartnerCode,
         @Schema(description = "IC 담당 특약점명. 모의고사와 같은 이유로 따로 든다") String icPartnerName,
-        @Schema(description = "IC 담당 특약점코드") String icPartnerCode
+        @Schema(description = "IC 담당 특약점코드") String icPartnerCode,
+
+        // ── 응시현황(F-22·F-23) 축 — 학년별 학급수·재학생 수 ──
+        @Schema(description = """
+                학년별 **학급수 / 재학생 수**. 응시현황의 '인원'·보급률이 이 값에서 나온다
+                (매출 수량이 아니다). 비워 두면 그 학교는 **응시현황 집계에서 빠진다** —
+                0 으로 깔면 분모만 커져 보급률이 작아지므로 일부러 null 로 둔다.""", example = "5")
+        @jakarta.validation.constraints.PositiveOrZero Integer cls1ClassCnt,
+        @jakarta.validation.constraints.PositiveOrZero Integer cls1StudentCnt,
+        @jakarta.validation.constraints.PositiveOrZero Integer cls2ClassCnt,
+        @jakarta.validation.constraints.PositiveOrZero Integer cls2StudentCnt,
+        @jakarta.validation.constraints.PositiveOrZero Integer cls3ClassCnt,
+        @jakarta.validation.constraints.PositiveOrZero Integer cls3StudentCnt
 ) {
 }
