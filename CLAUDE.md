@@ -338,10 +338,17 @@ python3 <script> --sheet <ID> --tab <탭명>   # scratchpad의 read_*.py 참고.
   더프 UNMAPPED 사유 분리(거래처/상품) · 주문조회 SQL 페이징 · 다중선택(custCodes·dtlCds) /
   회수 물류비 명세 · 외상매출장 신고대상 · 이월 없음 경고 · 거래명세서 학교 단위 발행 /
   빈 파일 업로드 500→400 · dsre-pool 유휴연결 경고.
-  ⏸**남은 백엔드 4건(전부 상대 대기)**: B-3 자재 단위 입고(정본 8p·29p는 도서 단위, 레거시 자재 개념 0,
-  **DSRE2에 `tbl_materials_info`·`tbl_materials_dtl`·`FM_LOGI_MatInOut` 이 이미 있음** → 만들면 자재 재고가 두 곳)
-  · 계산서신고 쓰기(저장 항목 미정, 프론트가 9/23 안건으로 올림) · 수익신고 가로 크로스탭(재무팀 사용여부)
-  · 통합매출조회 24항목(목록 미수령. **우리 `SaleResponse`는 42필드**).
+  ⏸(구) 남은 백엔드 4건 — **✅3건은 그 뒤 구현 완료(2026-11-10 코드 전수 확인). 다시 '잔여'로 올리지 말 것**:
+  ① B-3 자재 단위 입고 → **`POST /stock/materials/inbound` · `/materials/transfer` · `/materials/io`
+     · `/materials/records` · `/materials/export` · `/ledger/materials` 로 구현됨**(병행상품 차단 포함)
+  ② 계산서신고 쓰기 → **`PUT`/`DELETE /closing/tax-invoices/adjustments`**(발주처 1차회신 #24 수기보정 저장)
+  ③ 수익신고 가로 크로스탭 → **`/closing/revenue-report` 가 이미 거래처×월 크로스탭**
+  ④ 통합매출조회 24항목 → **목록 미수령(우리가 할 일 아님)**. 우리 `SaleResponse`는 42필드.
+  ‼️**2026-11-10에 이 블록을 읽고 "잔여 17건"이라고 잘못 보고했다.** 기능을 만들면 이 줄도 같은 커밋에서 고칠 것(§10 경고와 같은 사고).
+  ★**2026-11-10 코드 실측 기준 기능 잔여 = 「법인 축」 하나뿐이다**(`corp` 컬럼 V1~V123에 0건).
+    엔드포인트 404개 · `TODO`/`FIXME` 2개(하나는 공급자 2벌=발주처 11/09 범위 제외,
+    하나는 `SalesUploadService:149` "학교명 미구현" 주석인데 **조회가 `schoolNamesOf()` 로 마스터 조인해 채운다 = 결함 아님**).
+    그 외는 전부 상대 대기(32.4만원 4건 삭제·취소 보정·0원 행·DT- Web게시·담보 79건·F-37).
   ✅**정정(2026-10-08 실측): BOM 축 둘은 충돌하지 않는다 — "자재 입고 전에 정리" 경고는 틀렸다.**
   `bom_items`(상품↔상품, 재고=`inventory.product_id`) / `material_bom`(세트→회차→자재, 재고=`inventory.material_id`)는
   **다른 재고 축**이고 V78이 `product_id XOR material_id` CHECK로 이미 갈라 놨다. 합칠 것이 없다.
