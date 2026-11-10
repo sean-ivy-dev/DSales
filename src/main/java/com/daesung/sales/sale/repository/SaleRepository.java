@@ -1582,7 +1582,10 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
              where s.canceled = false
                and year(s.salesDate) = :year
                and (:grade is null or b.grade = :grade)
-               and (:productType is null or b.productType = :productType)
+               and (:productType is null
+                    or (:productType = '(미분류)'
+                        and (b.productType is null or b.productType = ''))
+                    or b.productType = :productType)
                and (:keyword is null or p.code like concat('%', :keyword, '%')
                                      or p.name like concat('%', :keyword, '%'))
              group by p.id, p.code, p.name, p.cityName, month(s.salesDate)
@@ -1631,6 +1634,7 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
                and s.salesDate between :fromDate and :toDate
                and (:anyGrade = true or b.grade in :grades)
                and (:partnerId is null or p.id = :partnerId)
+               and (:anyProductYear = true or b.productYear in :productYears)
              group by p.region, p.code, p.name, s.schoolCode, s.schoolName, b.grade,
                       year(s.salesDate), month(s.salesDate)
              order by p.region, p.code, s.schoolCode, b.grade
@@ -1644,7 +1648,10 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
                                                @Param("toDate") LocalDate toDate,
                                                @Param("anyGrade") boolean anyGrade,
                                                @Param("grades") java.util.Collection<String> grades,
-                                               @Param("partnerId") Long partnerId);
+                                               @Param("partnerId") Long partnerId,
+                                               @Param("anyProductYear") boolean anyProductYear,
+                                               @Param("productYears")
+                                               java.util.Collection<Integer> productYears);
 
     /**
      * 발송 단위(일자·거래처·학교·분류)의 출고 창고. 작업결과의 '출고창고' 컬럼·필터.
@@ -1737,13 +1744,18 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
      * {@code canceled} 로 표시하므로 조건으로 뺀다(같은 결과다).
      */
     @Query("""
-            select s.schoolCode as schoolCode, s.product.grade as grade, sum(s.qty) as qty
-              from Sale s
+            select s.schoolCode as schoolCode, b.grade as grade, sum(s.qty) as qty
+              from Sale s join s.product b
              where s.canceled = false and s.deletedAt is null
                and s.salesDate between :from and :to
                and s.schoolCode is not null and s.schoolCode <> ''
-             group by s.schoolCode, s.product.grade
+               and (:productType is null
+                    or (:productType = '(미분류)'
+                        and (b.productType is null or b.productType = ''))
+                    or b.productType = :productType)
+             group by s.schoolCode, b.grade
             """)
     List<com.daesung.sales.sale.dto.AttendanceRatioAgg> ratioBookCounts(
-            @Param("from") LocalDate from, @Param("to") LocalDate to);
+            @Param("from") LocalDate from, @Param("to") LocalDate to,
+            @Param("productType") String productType);
 }

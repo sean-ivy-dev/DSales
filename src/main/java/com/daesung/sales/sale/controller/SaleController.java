@@ -1130,9 +1130,11 @@ public class SaleController {
             @Parameter(description = "학교/학원 구분(SCHOOL/HAKWON). 미지정=전체")
             @RequestParam(required = false) com.daesung.sales.school.entity.SchoolType schoolType,
             @Parameter(description = "거래처구분(특약점·기타학원 등). 미지정=전체", example = "특약점")
-            @RequestParam(required = false) String clientCategory) {
+            @RequestParam(required = false) String clientCategory,
+            @Parameter(description = "구분(상품 type). 레거시 ComboBox_구분 과 같다 — 미지정=전체, `(미분류)`=구분이 비어 있는 상품", example = "모의고사")
+            @RequestParam(required = false) String productType) {
         return ApiResponse.success(
-                attendanceService.regionRatio(year, schoolType, clientCategory));
+                attendanceService.regionRatio(year, schoolType, clientCategory, productType));
     }
 
     @Operation(summary = "응시현황 — 지역비율 엑셀 다운로드",
@@ -1141,7 +1143,8 @@ public class SaleController {
     public org.springframework.http.ResponseEntity<byte[]> attendanceRatioExport(
             @RequestParam int year,
             @RequestParam(required = false) com.daesung.sales.school.entity.SchoolType schoolType,
-            @RequestParam(required = false) String clientCategory) {
+            @RequestParam(required = false) String clientCategory,
+            @RequestParam(required = false) String productType) {
         List<com.daesung.sales.common.excel.ExcelExportUtil.Col> cols = List.of(
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("지역", "region"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("인원[1학년]", "studentCnt1"),
@@ -1158,7 +1161,7 @@ public class SaleController {
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("비율[계]", "ratioTotal"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("학교수", "schoolCount"));
         byte[] xlsx = excel.toXlsx("응시현황(지역비율)", cols,
-                attendanceService.regionRatio(year, schoolType, clientCategory).rows(),
+                attendanceService.regionRatio(year, schoolType, clientCategory, productType).rows(),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Heading(
                         "응시현황(지역비율)", "조회기준 : " + year + "년"),
                 com.daesung.sales.common.excel.ExcelExportUtil.AGG_BY_ROW_TYPE);
@@ -1223,10 +1226,15 @@ public class SaleController {
                     ‼️모르는 값은 400 — 조용히 기본값으로 주면 행 수가 수십 배 달라지는데 오류가 안 난다.""")
             @RequestParam(required = false) String groupBy,
             @Parameter(description = "키워드 — 코드·명칭을 함께 훑는다(부분일치)")
-            @RequestParam(required = false) String keyword) {
+            @RequestParam(required = false) String keyword,
+            @Parameter(description = """
+                    상품년도 **다중선택** — 예: `2025,2026`. **도서의 상품년도**이며
+                    거래일자 연도가 아니다(2026년에 2025년판을 파는 경우가 있어 다르다).
+                    미지정=전체. 레거시 조회화면 '상품년도' 에 대응한다.""")
+            @RequestParam(required = false) List<Integer> productYears) {
         assertWithinTwelveMonths(fromDate, toDate);
         AttendancePeriodResponse r = attendanceService.period(fromDate, toDate, grade, grades,
-                partnerId, groupBy);
+                partnerId, groupBy, productYears);
         return ApiResponse.success(new AttendancePeriodResponse(r.fromDate(), r.toDate(), r.months(),
                 Keywords.filter(r.rows(), keyword,
                         x -> new Object[]{x.region(), x.partnerCode(), x.partnerName(),
@@ -1240,8 +1248,14 @@ public class SaleController {
             @RequestParam(name = "fromDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
             @RequestParam(name = "toDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
             @RequestParam(required = false) String grade,
-            @RequestParam(required = false) Long partnerId) {
-        AttendancePeriodResponse res = attendanceService.period(fromDate, toDate, grade, partnerId);
+            @RequestParam(required = false) Long partnerId,
+            @RequestParam(required = false) List<String> grades,
+            @RequestParam(required = false) String groupBy,
+            @RequestParam(required = false) List<Integer> productYears) {
+        // ‼️엑셀도 조회와 **같은 조건**을 받는다. 예전에 순매출(P-19)에서 엑셀만 조건을 안 받아,
+        //   화면에서 거래처별로 보고 엑셀을 받으면 다른 표가 나오는 일이 있었다.
+        AttendancePeriodResponse res = attendanceService.period(fromDate, toDate, grade, grades,
+                partnerId, groupBy, productYears);
         var cols = new java.util.ArrayList<com.daesung.sales.common.excel.ExcelExportUtil.Col>();
         cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("구분", "rowType"));
         cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("지역", "region"));

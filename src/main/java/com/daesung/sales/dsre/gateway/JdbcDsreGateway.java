@@ -350,6 +350,28 @@ public class JdbcDsreGateway implements DsreGateway {
         return dsreJdbcTemplate.update("DELETE FROM tbl_logis_cost WHERE dtl_cd=?", dtlCd);
     }
 
+    /**
+     * 빈 시행 일괄 추가. 레거시 {@code 물류비용등록.vb:563} 의 SQL 을 그대로 쓴다.
+     *
+     * <p>★{@code NOT EXISTS} 로 이미 단가가 있는 시행을 건너뛰므로 <b>여러 번 돌려도
+     * 중복이 생기지 않는다</b>(두 번째부터는 0개 추가).
+     * ★{@code DISTINCT} 도 레거시대로 둔다 — {@code tbl_product_dtl} 에 같은 DTL_CD 가
+     * 여러 행 있을 수 있고, 그대로 넣으면 한 시행에 단가가 두 줄 생긴다.
+     */
+    @Override
+    public int initMissingLogisCosts() {
+        // 상수 SQL 하나다 — 조각을 붙이지 않는다(정적분석 게이트: 파라미터 바인딩 전수 적용).
+        return dsreJdbcTemplate.update("""
+                INSERT INTO tbl_logis_cost
+                       (dtl_cd, paper, omr, etc, label, basic, trade, packtype, bSpare, inputDate)
+                SELECT DISTINCT PROD.DTL_CD, 50, 50, 50, 0, 0, 0, 1, 'Y', now()
+                  FROM tbl_product_dtl AS PROD
+                 WHERE PROD.USE_YN = 'Y'
+                   AND NOT EXISTS (SELECT 1 FROM tbl_logis_cost AS LOGC
+                                    WHERE LOGC.DTL_CD = PROD.DTL_CD)
+                """);
+    }
+
     @Override
     public void updateReturnRate(int paper, int omr, int etc) {
         int updated = dsreJdbcTemplate.update(

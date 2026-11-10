@@ -28,6 +28,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -266,6 +267,29 @@ public class LogisticsController {
                 req.basic(), req.trade(), req.packtype(), req.bSpare());
         workTypeService.markOverride(dtlCd);
         return ApiResponse.success(null);
+    }
+
+    @Operation(summary = "★빈 시행 일괄 추가(DSRE 상품 가져오기)",
+            description = """
+                    단가가 **아직 없는 사용 중 시행**(`tbl_product_dtl.USE_YN='Y'`)을
+                    기본값으로 한 번에 추가한다. 응답은 추가한 수 — 화면은 레거시처럼
+                    "n개의 항목 추가 완료" 로 쓰면 된다.
+
+                    기본값(레거시 `물류비용등록.vb:563` 그대로):
+                    시험지 50 · OMR 50 · 단행본 50 · 라벨 0 · 기본작업비 0 · 출고비 0 ·
+                    작업구분 1 · 여분 Y.
+
+                    ★**예외로 치지 않는다** — `PUT /rates/{dtlCd}` 와 다른 점이다.
+                    그 경로는 행마다 '예외' 표시를 남겨 이후 작업구분 기준단가 일괄 반영이
+                    그 행을 건너뛴다. 빈 칸을 채우려고 한 것이 전부 예외가 되면
+                    기준단가가 영원히 안 먹는다(프론트 요청 2026-11-10 §1-3).
+
+                    ★**여러 번 눌러도 안전하다** — 이미 단가가 있는 시행은 건너뛰므로
+                    두 번째부터는 0개 추가다.""")
+    @PostMapping("/rates/init-missing")
+    public ApiResponse<com.daesung.sales.logistics.dto.LogisCostInitResult> initMissingRates() {
+        return ApiResponse.success(new com.daesung.sales.logistics.dto.LogisCostInitResult(
+                dsreGateway.initMissingLogisCosts()));
     }
 
     @Operation(summary = "물류단가 삭제",

@@ -103,7 +103,7 @@ public class AttendanceService {
      */
     public AttendancePeriodResponse period(LocalDate fromDate, LocalDate toDate,
                                            String grade, Long partnerId) {
-        return period(fromDate, toDate, grade, null, partnerId, null);
+        return period(fromDate, toDate, grade, null, partnerId, null, null);
     }
 
     /**
@@ -125,10 +125,26 @@ public class AttendanceService {
     public AttendancePeriodResponse period(LocalDate fromDate, LocalDate toDate,
                                            String grade, List<String> grades,
                                            Long partnerId, String groupBy) {
+        return period(fromDate, toDate, grade, grades, partnerId, groupBy, null);
+    }
+
+    /**
+     * 위와 같고 <b>상품년도</b> 조건이 붙는다(프론트 요청 2026-11-10 §1-2 · F-24).
+     *
+     * <p>레거시 조회화면(20장 빨간 박스)의 '상품년도' 다. <b>도서의 상품년도</b>
+     * ({@code products.product_year})이며 거래일자 연도가 아니다 — 2026년에 2025년판을
+     * 파는 일이 흔하므로 둘을 섞으면 숫자가 달라진다.
+     *
+     * <p>★다중선택이다. 빈 목록·null 이면 전체다.
+     */
+    public AttendancePeriodResponse period(LocalDate fromDate, LocalDate toDate,
+                                           String grade, List<String> grades,
+                                           Long partnerId, String groupBy,
+                                           List<Integer> productYears) {
         List<String> gradeFilter = com.daesung.sales.common.query.MultiSelect.merge(
                 blankToNull(grade), grades);
         String unit = normalizeGroupBy(groupBy);
-        return periodInternal(fromDate, toDate, gradeFilter, partnerId, unit);
+        return periodInternal(fromDate, toDate, gradeFilter, partnerId, unit, productYears);
     }
 
     /**
@@ -152,7 +168,7 @@ public class AttendanceService {
 
     private AttendancePeriodResponse periodInternal(LocalDate fromDate, LocalDate toDate,
                                                     List<String> gradeFilter, Long partnerId,
-                                                    String unit) {
+                                                    String unit, List<Integer> productYears) {
         List<String> months = monthsBetween(fromDate, toDate);
         Map<String, Integer> monthIndex = new LinkedHashMap<>();
         for (int i = 0; i < months.size(); i++) {
@@ -164,7 +180,11 @@ public class AttendanceService {
         for (AttendancePeriodAgg a : saleRepository.attendancePeriod(fromDate, toDate,
                 com.daesung.sales.common.query.MultiSelect.isAny(gradeFilter),
                 com.daesung.sales.common.query.MultiSelect.orPlaceholder(gradeFilter, "\u0000"),
-                partnerId)) {
+                partnerId,
+                com.daesung.sales.common.query.MultiSelect.isAny(productYears),
+                // ‼️빈 목록을 그대로 넘기면 `in ()` 가 돼 HQL 이 터진다 — 자리표를 둔다.
+                //   상품년도에 쓰이지 않는 값이어야 한다(연도에 -1 은 없다).
+                com.daesung.sales.common.query.MultiSelect.orPlaceholder(productYears, -1))) {
             String region = nz(a.getRegion());
             String key = region + "|" + nz(a.getPartnerCode()) + "|" + nz(a.getSchoolCode())
                     + "|" + nz(a.getGrade());
@@ -342,10 +362,25 @@ public class AttendanceService {
     public AttendanceRatioResponse regionRatio(int year,
                                                com.daesung.sales.school.entity.SchoolType schoolType,
                                                String clientCategory) {
+        return regionRatio(year, schoolType, clientCategory, null);
+    }
+
+    /**
+     * 지역비율 + <b>「구분」(상품 type)</b> 조건(프론트 요청 2026-11-20 §1-4).
+     *
+     * <p>레거시 {@code ComboBox_구분} 은 <b>[전체] · [미분류] + bookData.type 값</b>이다.
+     * 그래서 {@code productType} 이 {@code (미분류)} 면 <b>구분이 비어 있는 상품</b>을 고른다 —
+     * 연도별({@code attendanceYearly})과 같은 규칙이다. 규칙이 갈리면 같은 콤보를 쓰는
+     * 두 화면이 다른 답을 낸다.
+     */
+    public AttendanceRatioResponse regionRatio(int year,
+                                               com.daesung.sales.school.entity.SchoolType schoolType,
+                                               String clientCategory, String productType) {
         List<SchoolStudentAgg> schools = schoolRepository.studentCounts(schoolType, clientCategory);
         Map<String, long[]> bookBySchool = new java.util.HashMap<>();
         for (AttendanceRatioAgg a : saleRepository.ratioBookCounts(
-                LocalDate.of(year, 1, 1), LocalDate.of(year, 12, 31))) {
+                LocalDate.of(year, 1, 1), LocalDate.of(year, 12, 31),
+                blankToNull(productType))) {
             int idx = gradeIndex(a.getGrade());
             if (idx < 0) {
                 continue;   // 학년이 없는 도서(공통·자재)는 학년 분해에서 빠진다 — 레거시도 같다

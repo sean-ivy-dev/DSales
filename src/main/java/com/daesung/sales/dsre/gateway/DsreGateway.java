@@ -65,6 +65,20 @@ public interface DsreGateway {
     /** 물류단가 삭제(dtl_cd). 삭제 행수 반환. */
     int deleteLogisCost(int dtlCd);
 
+    /**
+     * 단가가 <b>아직 없는 사용 중 시행</b>을 기본값으로 한 번에 넣는다. 추가한 수를 돌려준다.
+     *
+     * <p>레거시 {@code 물류비용등록.vb:563 Button_Input_Click} 그대로 —
+     * {@code tbl_product_dtl.USE_YN='Y'} 인데 {@code tbl_logis_cost} 에 행이 없는 시행을
+     * {@code 시험지 50 · OMR 50 · 단행본 50 · 라벨 0 · 기본작업비 0 · 출고비 0 · 작업구분 1 · 여분 Y}
+     * 로 INSERT 하고 "n개의 항목 추가 완료" 를 띄운다.
+     *
+     * <p>‼️<b>개별 upsert 로 대신할 수 없다.</b> 그 경로는 행마다 '예외' 표시를 남겨
+     * 이후 작업구분 기준단가 일괄 반영이 그 행을 건너뛴다 — 빈 칸을 채우려고 한 것이
+     * 전부 예외가 되면 기준단가가 영원히 안 먹는다(프론트 요청 2026-11-10 §1-3).
+     */
+    int initMissingLogisCosts();
+
     /** 회수단가(dtl_cd=0) 수정(PAPER/OMR/ETC만). 없으면 생성. */
     void updateReturnRate(int paper, int omr, int etc);
 
