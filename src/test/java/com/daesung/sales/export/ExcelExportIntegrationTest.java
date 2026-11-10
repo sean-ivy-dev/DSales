@@ -55,10 +55,23 @@ class ExcelExportIntegrationTest extends IntegrationTestSupport {
         post("/stock/inbound", Map.of("processedDate", YEAR + "-01-05", "supplierClientId", sup,
                 "destinationWarehouseId", wh,
                 "items", List.of(Map.of("productId", product, "unitCost", 3000, "qty", 1000))));
+        // ‼️응시현황은 **학교 마스터 기준**이고 **학교코드가 붙은 매출만** 센다(2026-11-10 레거시 대조).
+        //   학교를 만들지 않으면 그 엑셀의 월 칸이 통째로 0 이 되어 이 테스트가 잡아낸다.
+        java.util.Map<String, Object> sch = new java.util.HashMap<>();
+        sch.put("schoolCode", "XLH" + SFX);
+        sch.put("schoolName", "엑셀고");
+        sch.put("custCode", "XLP" + SFX);
+        sch.put("custName", "엑셀거래처");
+        sch.put("city", "서울");
+        sch.put("partnerLoc", "강남");
+        sch.put("manageYn", "Y");
+        sch.put("cls3StudentCnt", 100);
+        post("/masters/schools", sch);
+
         post("/sales/entries", Map.of("salesDate", YEAR + "-03-10", "partnerId", partner,
                 "warehouseId", wh,
                 "items", List.of(Map.of("productId", product, "shipmentType", "NORMAL_SHIP",
-                        "qty", 100, "tax", 75_000))));
+                        "qty", 100, "tax", 75_000, "schoolCode", "XLH" + SFX))));
         post("/closing/collections", Map.of("collDate", YEAR + "-03-20", "writeDate", YEAR + "-03-31",
                 "partnerId", partner, "collType", "CASH", "collAmt", 300_000));
     }
@@ -190,7 +203,8 @@ class ExcelExportIntegrationTest extends IntegrationTestSupport {
         // ‼️0행이 아니라 headerRow 로 찾는다 — 제목·조회기준 2행이 붙으면(2026-11-05 F-19 대응으로
         //   응시현황에도 붙였다) 헤더가 0행이 아니다. 0행을 박아 두면 제목만 추가해도 깨진다.
         int hr = headerRow(att);
-        assertThat(att.get(hr)).as("응시현황 컬럼 수").hasSize(31);
+        // 31 → 34: 상세지역·학교·인원 3칸이 늘었다(프론트 §1-1 ⒝ — 레거시 지역/특약점 뷰 칸).
+        assertThat(att.get(hr)).as("응시현황 컬럼 수").hasSize(34);
         assertFilled(att, "응시현황", 10);
 
         // 3월 매출을 넣었으므로 3월[수량] 칸에 값이 있어야 한다(칸 위치까지 확인).

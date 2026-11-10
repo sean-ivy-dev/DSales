@@ -1,6 +1,5 @@
 package com.daesung.sales.sale.service;
 
-import com.daesung.sales.sale.dto.AttendanceAgg;
 import com.daesung.sales.sale.dto.AttendancePeriodAgg;
 import com.daesung.sales.sale.dto.AttendancePeriodResponse;
 import com.daesung.sales.sale.dto.AttendanceRatioAgg;
@@ -44,40 +43,166 @@ public class AttendanceService {
      * 거래처코드·거래처명 부분일치다(통합매출조회 등 다른 화면의 keyword 검색과 같은 규칙).
      */
     public AttendanceResponse yearly(int year, String grade, String productType, String keyword) {
-        // 거래처별로 12개월 칸을 채운다(빈 달은 0).
-        Map<String, Bucket> byPartner = new LinkedHashMap<>();
-        for (AttendanceAgg a : saleRepository.attendanceYearly(year, blankToNull(grade),
-                blankToNull(productType), blankToNull(keyword))) {
-            Bucket b = byPartner.computeIfAbsent(a.getPartnerCode(),
-                    k -> new Bucket(regionGroup(a.getPartnerCode(), a.getCityName()),
-                            a.getPartnerCode(), a.getPartnerName(), a.getCityName()));
-            int idx = a.getMonth() - 1;
-            b.qty[idx] += (a.getQty() == null) ? 0 : a.getQty();
-            b.amount[idx] += (a.getAmount() == null) ? 0 : a.getAmount();
+        return yearly(year, grade, productType, keyword, null, null, null);
+    }
+
+    /**
+     * 응시현황(연도별) — <b>조회구분(거래처/학교) · 학교·학원 · 거래처</b> 조건까지(프론트 §1-1).
+     *
+     * <p>레거시 두 화면은 같은 쿼리의 rollup 깊이 차이다 —
+     * 지역/특약점 {@code rollup(지역구분, custCode)} · 학교/원 {@code rollup(지역구분, custCode, schCode)}.
+     * 경로를 둘로 두면 계산식이 두 곳에 생기므로 {@code groupBy} 로 가른다.
+     *
+     * <p>★<b>학교 마스터가 기준이다.</b> 레거시가 학교 전체를 만들고 매출을 {@code LEFT OUTER JOIN}
+     * 으로 붙이므로 <b>매출이 없는 거래처·학교도 행이 나온다</b> — "안 판 학교"를 보는 화면이다.
+     *
+     * <p>‼️<b>학교코드가 붙은 매출만</b> 센다. 학교에 안 붙은 출고(본사 판매실·온라인몰 등)는
+     * 레거시 조인에서 떨어져 어느 행에도 들어가지 않는다. 섞으면 보급률의 분자만 부푼다.
+     *
+     * @param schoolType 학교/학원. 판정은 {@code isSchool} 로 한다({@link #isSchoolOf} 참고)
+     * @param custCode   거래처 조건(레거시 {@code ComboBox_CustList}). null=전체
+     * @param groupBy    {@code PARTNER}(기본) / {@code SCHOOL}
+     */
+    public AttendanceResponse yearly(int year, String grade, String productType, String keyword,
+                                     com.daesung.sales.school.entity.SchoolType schoolType,
+                                     String custCode, String groupBy) {
+        String unit = normalizeYearlyGroupBy(groupBy);
+        String gradeFilter = blankToNull(grade);
+
+        // 매출: 학교×월. 학교코드에만 붙는다.
+        Map<String, long[]> qtyBySchool = new java.util.HashMap<>();
+        Map<String, long[]> amtBySchool = new java.util.HashMap<>();
+        for (com.daesung.sales.sale.dto.SchoolMonthAgg m : saleRepository.attendanceYearlyBySchool(
+                year, gradeFilter, blankToNull(productType))) {
+            int idx = m.getMonth() - 1;
+            if (idx < 0 || idx >= MONTHS) {
+                continue;
+            }
+            qtyBySchool.computeIfAbsent(m.getSchoolCode(), k -> new long[MONTHS])[idx] +=
+                    (m.getQty() == null) ? 0L : m.getQty();
+            amtBySchool.computeIfAbsent(m.getSchoolCode(), k -> new long[MONTHS])[idx] +=
+                    (m.getAmount() == null) ? 0L : m.getAmount();
         }
 
-        // 지역구분 → 거래처 순서로 묶어 소계·총계를 만든다(레거시 rollup 순서와 같다).
-        Map<String, List<Bucket>> byRegion = new LinkedHashMap<>();
-        byPartner.values().stream()
-                .sorted((x, y) -> {
-                    int c = x.regionGroup.compareTo(y.regionGroup);
-                    return (c != 0) ? c : x.partnerCode.compareTo(y.partnerCode);
-                })
-                .forEach(b -> byRegion.computeIfAbsent(b.regionGroup, k -> new ArrayList<>()).add(b));
-
-        List<AttendanceResponse.Row> rows = new ArrayList<>();
-        Bucket grand = new Bucket("", null, null, null);
-        for (Map.Entry<String, List<Bucket>> e : byRegion.entrySet()) {
-            Bucket sub = new Bucket(e.getKey(), null, null, null);
-            for (Bucket b : e.getValue()) {
-                rows.add(b.toRow("PARTNER"));
-                sub.add(b);
-                grand.add(b);
+        // 학교 마스터. ‼️같은 학교코드가 거래처별로 여러 행인 경우가 있다(실측 96곳) —
+        //   매출은 학교코드에만 붙으므로 그대로 두면 **같은 매출이 여러 거래처 행에 복사**되고
+        //   총계가 부풀어 오른다. 재학생 수도 두 번 세어진다. 그래서 **첫 행만** 쓴다
+        //   (쿼리가 custCode·schoolCode 로 정렬돼 있어 어느 거래처를 고를지 결정적이다).
+        //   지역비율(regionRatio)도 같은 규칙이다.
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        List<Bucket> schools = new ArrayList<>();
+        Boolean isSchool = (schoolType == null)
+                ? null : schoolType == com.daesung.sales.school.entity.SchoolType.SCHOOL;
+        for (com.daesung.sales.sale.dto.SchoolAttendanceAgg sc : schoolRepository.attendanceSchools(
+                isSchool, blankToNull(custCode))) {
+            if (!seen.add(sc.getSchoolCode())) {
+                continue;
             }
-            rows.add(sub.toRow("REGION_SUBTOTAL"));
+            Bucket b = new Bucket(regionGroup(sc.getCustCode(), sc.getCity()),
+                    sc.getCustCode(), sc.getCustName(), sc.getCity(), sc.getPartnerLoc());
+            b.schoolCode = sc.getSchoolCode();
+            b.schoolName = sc.getSchoolName();
+            b.isSchool = sc.getIsSchool();
+            b.schoolCount = 1;
+            b.studentCnt = studentsOf(sc, gradeFilter);
+            long[] q = qtyBySchool.get(sc.getSchoolCode());
+            long[] a = amtBySchool.get(sc.getSchoolCode());
+            for (int i = 0; i < MONTHS; i++) {
+                b.qty[i] = (q == null) ? 0L : q[i];
+                b.amount[i] = (a == null) ? 0L : a[i];
+            }
+            schools.add(b);
+        }
+
+        // 지역구분 → 거래처 → 학교 순서(레거시 rollup·ORDER BY 와 같다)
+        schools.sort((x, y) -> {
+            int c = nz(x.regionGroup).compareTo(nz(y.regionGroup));
+            if (c != 0) {
+                return c;
+            }
+            c = nz(x.partnerCode).compareTo(nz(y.partnerCode));
+            return (c != 0) ? c : nz(x.schoolCode).compareTo(nz(y.schoolCode));
+        });
+
+        String kw = blankToNull(keyword);
+        List<AttendanceResponse.Row> rows = new ArrayList<>();
+        Bucket grand = new Bucket("", null, null, null, null);
+        int i = 0;
+        while (i < schools.size()) {
+            String region = nz(schools.get(i).regionGroup);
+            Bucket regionSub = new Bucket(region, null, null, null, null);
+            boolean regionHasRow = false;
+            while (i < schools.size() && region.equals(nz(schools.get(i).regionGroup))) {
+                String partner = nz(schools.get(i).partnerCode);
+                Bucket partnerSub = new Bucket(region, schools.get(i).partnerCode,
+                        schools.get(i).partnerName, null, null);
+                List<Bucket> mine = new ArrayList<>();
+                while (i < schools.size() && region.equals(nz(schools.get(i).regionGroup))
+                        && partner.equals(nz(schools.get(i).partnerCode))) {
+                    mine.add(schools.get(i++));
+                }
+                // 키워드는 거래처 코드·명에 건다(레거시 조회화면의 거래처 찾기와 같은 축).
+                if (kw != null && !matches(mine.get(0), kw)) {
+                    continue;
+                }
+                regionHasRow = true;
+                int seq = 0;
+                for (Bucket b : mine) {
+                    partnerSub.add(b);
+                    if ("SCHOOL".equals(unit)) {
+                        b.seq = ++seq;
+                        rows.add(b.toRow("SCHOOL"));
+                    }
+                }
+                rows.add(partnerSub.toRow("SCHOOL".equals(unit) ? "PARTNER_SUBTOTAL" : "PARTNER"));
+                regionSub.add(partnerSub);
+                grand.add(partnerSub);
+            }
+            if (regionHasRow) {
+                rows.add(regionSub.toRow("REGION_SUBTOTAL"));
+            }
         }
         rows.add(grand.toRow("TOTAL"));
         return new AttendanceResponse(year, rows);
+    }
+
+    private static boolean matches(Bucket b, String keyword) {
+        return nz(b.partnerCode).contains(keyword) || nz(b.partnerName).contains(keyword);
+    }
+
+    /**
+     * 연도별 조회구분. 미지정이면 거래처 단위(레거시 기본 라디오).
+     *
+     * <p>‼️모르는 값은 400 이다 — 조용히 기본값으로 답하면 행 수가 수십 배 달라지는데
+     * 오류가 안 나서 담당자는 그 표가 맞다고 읽는다.
+     */
+    private static String normalizeYearlyGroupBy(String groupBy) {
+        if (groupBy == null || groupBy.isBlank()) {
+            return "PARTNER";
+        }
+        String v = groupBy.trim();
+        if (!"PARTNER".equals(v) && !"SCHOOL".equals(v)) {
+            throw new com.daesung.sales.common.exception.BusinessException(
+                    com.daesung.sales.common.exception.ErrorCode.INVALID_INPUT,
+                    "조회구분은 PARTNER(거래처별) 또는 SCHOOL(학교별)만 됩니다. 받은 값=" + groupBy);
+        }
+        return v;
+    }
+
+    /** 학년을 지정하면 그 학년 재학생, 미지정이면 1~3학년 합(레거시 querySel 과 같다). */
+    private static long studentsOf(com.daesung.sales.sale.dto.SchoolAttendanceAgg sc, String grade) {
+        long c1 = (sc.getCls1StudentCnt() == null) ? 0L : sc.getCls1StudentCnt();
+        long c2 = (sc.getCls2StudentCnt() == null) ? 0L : sc.getCls2StudentCnt();
+        long c3 = (sc.getCls3StudentCnt() == null) ? 0L : sc.getCls3StudentCnt();
+        if (grade == null) {
+            return c1 + c2 + c3;
+        }
+        return switch (grade.trim()) {
+            case "1" -> c1;
+            case "2" -> c2;
+            case "3" -> c3;
+            default -> c1 + c2 + c3;
+        };
     }
 
     /**
@@ -376,7 +501,13 @@ public class AttendanceService {
     public AttendanceRatioResponse regionRatio(int year,
                                                com.daesung.sales.school.entity.SchoolType schoolType,
                                                String clientCategory, String productType) {
-        List<SchoolStudentAgg> schools = schoolRepository.studentCounts(schoolType, clientCategory);
+        // ‼️학교/학원 판정은 **isSchool** 이다 — 레거시 응시현황 세 화면 모두
+        //   `AllSch.isSchool = 'Y'` / `<> 'Y'` 로 거른다. schoolType 으로 거르면
+        //   **실측 106곳이 어긋난다**(isSchool=false 인데 schoolType=SCHOOL 인 행).
+        //   파라미터 이름은 프론트가 이미 쓰고 있어 그대로 두고 판정만 레거시에 맞췄다.
+        Boolean isSchool = (schoolType == null)
+                ? null : schoolType == com.daesung.sales.school.entity.SchoolType.SCHOOL;
+        List<SchoolStudentAgg> schools = schoolRepository.studentCounts(isSchool, clientCategory);
         Map<String, long[]> bookBySchool = new java.util.HashMap<>();
         for (AttendanceRatioAgg a : saleRepository.ratioBookCounts(
                 LocalDate.of(year, 1, 1), LocalDate.of(year, 12, 31),
@@ -528,14 +659,23 @@ public class AttendanceService {
         private final String partnerCode;
         private final String partnerName;
         private final String cityName;
+        private final String partnerLoc;
+        private String schoolCode;
+        private String schoolName;
+        private Integer seq;
+        private Boolean isSchool;
+        private long schoolCount;
+        private long studentCnt;
         private final long[] qty = new long[MONTHS];
         private final long[] amount = new long[MONTHS];
 
-        private Bucket(String regionGroup, String partnerCode, String partnerName, String cityName) {
+        private Bucket(String regionGroup, String partnerCode, String partnerName,
+                       String cityName, String partnerLoc) {
             this.regionGroup = regionGroup;
             this.partnerCode = partnerCode;
             this.partnerName = partnerName;
             this.cityName = cityName;
+            this.partnerLoc = partnerLoc;
         }
 
         private void add(Bucket o) {
@@ -543,6 +683,8 @@ public class AttendanceService {
                 qty[i] += o.qty[i];
                 amount[i] += o.amount[i];
             }
+            schoolCount += o.schoolCount;
+            studentCnt += o.studentCnt;
         }
 
         private AttendanceResponse.Row toRow(String rowType) {
@@ -557,7 +699,8 @@ public class AttendanceService {
                 ta += amount[i];
             }
             return new AttendanceResponse.Row(rowType, regionGroup, partnerCode, partnerName,
-                    cityName, q, a, tq, ta);
+                    cityName, partnerLoc, schoolCode, schoolName, seq, isSchool,
+                    schoolCount, studentCnt, q, a, tq, ta);
         }
     }
 }

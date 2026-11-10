@@ -1,6 +1,5 @@
 package com.daesung.sales.sale.repository;
 
-import com.daesung.sales.sale.dto.AttendanceAgg;
 import com.daesung.sales.sale.dto.AttendancePeriodAgg;
 import com.daesung.sales.sale.dto.BookSalesAgg;
 import com.daesung.sales.sale.dto.CategorySalesAgg;
@@ -1560,41 +1559,43 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
         Integer getReqCd();
     }
 
+
     /**
-     * 응시현황(연도별) 원자료 — 거래처×월 수량·금액. 근거: 레거시 응시현황.vb:330~.
+     * 응시현황(연도별) 원자료 — <b>학교×월</b> 부수·금액.
      *
-     * <p>레거시는 {@code salesData}를 학교(schCode)로 묶어 월별 bookCnt/totalAmt를 만들고
-     * 거래처로 rollup한다. 반품은 레거시가 <b>음수로 저장</b>해 SUM만으로 순수량이 나오는데,
-     * 우리는 RETURN을 양수+구분으로 저장하므로 <b>여기서 부호를 뒤집어</b> 같은 값이 되게 한다.
-     * 취소 건은 양쪽 모두 제외한다.
+     * <p>★<b>학교코드가 있는 매출만</b> 센다. 레거시가
+     * {@code LEFT OUTER JOIN (… GROUP BY schCode) ON AllSch.schCode = SD.schCode} 라
+     * 학교에 붙지 않은 매출은 어느 행에도 들어가지 않는다 — 응시현황은 "어느 학교에
+     * 몇 부 들어갔나"를 보는 화면이고, 학교 없는 출고(본사 판매실·온라인몰 등)를 섞으면
+     * 보급률의 분자가 부풀어 분모(재학생)와 맞지 않는다.
      *
-     * <p>필터(학년·상품구분)는 레거시 queryWhere와 같은 축이다(bookData.grade / bookData.type).
+     * <p>★반품은 음수로 더한다(레거시는 반품을 음수로 저장해 그냥 SUM 하면 같은 결과).
+     * 취소·삭제분은 뺀다.
+     *
+     * <p>필터는 레거시 {@code queryWhere} 와 같은 축이다 — 학년({@code bookData.grade}) ·
+     * 구분({@code bookData.type}, {@code (미분류)} 는 빈 값).
      */
     @Query("""
-            select p.id as partnerId, p.code as partnerCode, p.name as partnerName,
-                   p.cityName as cityName,
-                   month(s.salesDate) as month,
+            select s.schoolCode as schoolCode, month(s.salesDate) as month,
                    sum(case when s.salesCategory = com.daesung.sales.salestype.entity.SalesCategory.RETURN
                             then -s.qty else s.qty end) as qty,
                    sum(case when s.salesCategory = com.daesung.sales.salestype.entity.SalesCategory.RETURN
                             then -s.totalAmount else s.totalAmount end) as amount
-              from Sale s join s.partner p join s.product b
-             where s.canceled = false
+              from Sale s join s.product b
+             where s.canceled = false and s.deletedAt is null
                and year(s.salesDate) = :year
+               and s.schoolCode is not null and s.schoolCode <> ''
                and (:grade is null or b.grade = :grade)
                and (:productType is null
                     or (:productType = '(미분류)'
                         and (b.productType is null or b.productType = ''))
                     or b.productType = :productType)
-               and (:keyword is null or p.code like concat('%', :keyword, '%')
-                                     or p.name like concat('%', :keyword, '%'))
-             group by p.id, p.code, p.name, p.cityName, month(s.salesDate)
-             order by p.code, month(s.salesDate)
+             group by s.schoolCode, month(s.salesDate)
             """)
-    List<AttendanceAgg> attendanceYearly(@Param("year") int year,
-                                         @Param("grade") String grade,
-                                         @Param("productType") String productType,
-                                         @Param("keyword") String keyword);
+    List<com.daesung.sales.sale.dto.SchoolMonthAgg> attendanceYearlyBySchool(
+            @Param("year") int year,
+            @Param("grade") String grade,
+            @Param("productType") String productType);
 
     /**
      * 응시현황(기간별, 18p) 원자료. 지역·거래처·학교·학년·연월·처리구분별 인원(수량).

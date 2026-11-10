@@ -117,11 +117,43 @@ public interface SchoolRepository extends JpaRepository<School, Long> {
                and s.manageYn = 'Y'
                and (s.cls1StudentCnt is not null or s.cls2StudentCnt is not null
                     or s.cls3StudentCnt is not null)
-               and (:schoolType is null or s.schoolType = :schoolType)
+               and (:isSchool is null or s.isSchool = :isSchool)
                and (:clientCategory is null or s.clientCategory = :clientCategory)
              order by s.schoolCode, s.custCode
             """)
     List<com.daesung.sales.sale.dto.SchoolStudentAgg> studentCounts(
-            @Param("schoolType") SchoolType schoolType,
+            @Param("isSchool") Boolean isSchool,
             @Param("clientCategory") String clientCategory);
+
+    /**
+     * 응시현황(연도별) 학교 목록 — <b>재학생 수가 없는 학교도 포함</b>한다.
+     *
+     * <p>{@link #studentCounts} 와 달리 재학생 칸 조건이 없다. 연도별 화면은
+     * <b>학교 수</b>를 함께 세는데(레거시 {@code COUNT(ISNULL(cls{n}GCnt,0))}),
+     * 인원이 비어 있는 학교도 한 곳으로 세어야 하기 때문이다.
+     *
+     * <p>★학교/학원 판정은 <b>{@code isSchool}</b> 이다. 레거시 세 화면이 모두
+     * {@code AllSch.isSchool = 'Y'} / {@code <> 'Y'} 로 거른다 —
+     * {@code schoolType} 으로 거르면 <b>실측 106곳이 어긋난다</b>
+     * (isSchool=false 인데 schoolType=SCHOOL 인 행들).
+     *
+     * <p>★{@code custCode} 는 레거시 {@code ComboBox_CustList} 의 거래처 조건이다
+     * (전체면 null).
+     */
+    @Query("""
+            select s.schoolCode as schoolCode, s.schoolName as schoolName,
+                   s.custCode as custCode, s.custName as custName,
+                   s.city as city, s.partnerLoc as partnerLoc, s.isSchool as isSchool,
+                   s.cls1StudentCnt as cls1StudentCnt, s.cls2StudentCnt as cls2StudentCnt,
+                   s.cls3StudentCnt as cls3StudentCnt
+              from School s
+             where s.active = true
+               and s.manageYn = 'Y'
+               and (:isSchool is null or s.isSchool = :isSchool)
+               and (:custCode is null or s.custCode = :custCode)
+             order by s.custCode, s.schoolCode
+            """)
+    List<com.daesung.sales.sale.dto.SchoolAttendanceAgg> attendanceSchools(
+            @Param("isSchool") Boolean isSchool,
+            @Param("custCode") String custCode);
 }

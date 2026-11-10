@@ -1076,8 +1076,21 @@ public class SaleController {
             @Parameter(description = "상품구분 필터. 미지정=전체", example = "교재")
             @RequestParam(required = false) String productType,
             @Parameter(description = "거래처 검색(코드·명 부분일치). 미지정=전체", example = "대성")
-            @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(attendanceService.yearly(year, grade, productType, keyword));
+            @RequestParam(required = false) String keyword,
+            @Parameter(description = """
+                    조회구분 — `PARTNER`(지역/특약점, 기본) / `SCHOOL`(학교·원별).
+                    레거시 라디오에 대응한다. 두 보기는 같은 집계의 rollup 깊이 차이다.
+                    ‼️모르는 값은 400 — 조용히 기본값으로 주면 행 수가 수십 배 달라지는데 오류가 안 난다.""")
+            @RequestParam(required = false) String groupBy,
+            @Parameter(description = """
+                    학교/학원 — `SCHOOL`(학교만) / `HAKWON`(학원만). 미지정=둘 다.
+                    레거시 체크박스 둘에 대응한다. 판정은 학교의 `isSchool` 이다.""")
+            @RequestParam(required = false) com.daesung.sales.school.entity.SchoolType schoolType,
+            @Parameter(description = "거래처(특약점) 코드. 미지정=전체(레거시 ComboBox_CustList)",
+                    example = "A0003")
+            @RequestParam(required = false) String custCode) {
+        return ApiResponse.success(attendanceService.yearly(year, grade, productType, keyword,
+                schoolType, custCode, groupBy));
     }
 
     @Operation(summary = "응시현황(연도별) 엑셀 다운로드")
@@ -1086,13 +1099,25 @@ public class SaleController {
             @RequestParam int year,
             @RequestParam(required = false) String grade,
             @RequestParam(required = false) String productType,
-            @RequestParam(required = false) String keyword) {
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String groupBy,
+            @RequestParam(required = false) com.daesung.sales.school.entity.SchoolType schoolType,
+            @RequestParam(required = false) String custCode) {
         var cols = new java.util.ArrayList<com.daesung.sales.common.excel.ExcelExportUtil.Col>();
         cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("구분", "rowType"));
         cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("지역구분", "regionGroup"));
         cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("특약점코드", "partnerCode"));
         cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("특약점명", "partnerName"));
         cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("지역", "cityName"));
+        cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("상세지역", "partnerLoc"));
+        // 조회구분은 정확일치다(서비스 normalizeYearlyGroupBy 와 같은 규칙).
+        if ("SCHOOL".equals(groupBy)) {
+            cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("순번", "seq"));
+            cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("학교코드", "schoolCode"));
+            cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("학교이름", "schoolName"));
+        }
+        cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("학교", "schoolCount"));
+        cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("인원", "studentCnt"));
         for (int m = 1; m <= 12; m++) {
             cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col(
                     m + "월[수량]", "monthlyQty[" + (m - 1) + "]"));
@@ -1101,7 +1126,8 @@ public class SaleController {
         }
         cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("합계[수량]", "totalQty"));
         cols.add(new com.daesung.sales.common.excel.ExcelExportUtil.Col("합계[매출]", "totalAmount"));
-        byte[] xlsx = excel.toXlsx("응시현황", cols, attendanceService.yearly(year, grade, productType, keyword).rows(),
+        byte[] xlsx = excel.toXlsx("응시현황", cols, attendanceService.yearly(year, grade, productType, keyword,
+                        schoolType, custCode, groupBy).rows(),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Heading("응시현황(연도별)", "조회기준 : " + year + "년"),
                 com.daesung.sales.common.excel.ExcelExportUtil.AGG_BY_ROW_TYPE);
         return excel.asDownload(xlsx, "응시현황_연도별.xlsx");
