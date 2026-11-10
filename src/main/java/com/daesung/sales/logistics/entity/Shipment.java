@@ -5,6 +5,7 @@ import com.daesung.sales.partner.entity.Partner;
 import jakarta.persistence.Column;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -541,4 +542,22 @@ public class Shipment extends BaseEntity {
     public boolean isSent() {
         return sentDate != null;
     }
+    /**
+     * 법인 축(V125). 그 **거래처**를 따라간다 — 발송은 상품·매출 FK 가 없어 매출을 따라갈 수 없다.
+     *
+     * <p>★조회 조건에는 아직 쓰이지 않는다 — 다음 단계(법인별 조회)에서 붙는다.
+     *   값만 등록 시점에 채워 둔다(안 채우면 다음 단계에서 또 백필해야 한다).
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "corp", length = 10)
+    private com.daesung.sales.common.corp.Corp corp;
+
+    /** 법인 축 자동 채움. 거래처가 없으면 비워 둔다. */
+    @PrePersist
+    void fillCorp() {
+        if (corp == null) {
+            corp = (partner != null) ? partner.getCorp() : null;
+        }
+    }
+
 }

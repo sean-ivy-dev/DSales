@@ -6,6 +6,7 @@ import com.daesung.sales.product.entity.Product;
 import com.daesung.sales.salestype.entity.ShipmentType;
 import com.daesung.sales.warehouse.entity.Warehouse;
 import jakarta.persistence.Column;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -307,4 +308,22 @@ public class InventoryTxn extends com.daesung.sales.common.entity.SoftDeletableE
         t.memo = memo;
         return t;
     }
+    /**
+     * 법인 축(V125). 그 **상품**을 따라간다. ‼️**자재 이벤트는 NULL** — 자재에는 법인 축이 없다.
+     *
+     * <p>★조회 조건에는 아직 쓰이지 않는다 — 다음 단계(법인별 조회)에서 붙는다.
+     *   값만 등록 시점에 채워 둔다(안 채우면 다음 단계에서 또 백필해야 한다).
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "corp", length = 10)
+    private com.daesung.sales.common.corp.Corp corp;
+
+    /** 법인 축 자동 채움. product 가 null 인 행(자재 이벤트)은 비워 둔다. */
+    @PrePersist
+    void fillCorp() {
+        if (corp == null) {
+            corp = (product != null) ? product.getCorp() : null;
+        }
+    }
+
 }
