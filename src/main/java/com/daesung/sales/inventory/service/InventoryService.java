@@ -269,6 +269,44 @@ public class InventoryService {
     }
 
     /**
+     * <b>단품에 직접 붙인 자재</b>를 증감한다(단품 「자재 연결」 탭으로 맺은 매칭).
+     *
+     * <p>회차 개념이 없으므로 <b>세트당수량을 그대로</b> 쓴다 —
+     * {@link com.daesung.sales.material.entity.MaterialBom#qtyPerRound(int)} 는 공통 자재를
+     * 회차수로 나누는데, 단품은 구성 회차가 없어 그 값이 0 이 된다(나눌 대상이 없다).
+     * 담당자가 "이 도서 1부에 이 자재 n개"라고 넣은 값이 곧 소요량이다.
+     *
+     * @return 움직인 자재 수(붙은 자재가 없으면 0)
+     */
+    private int applyDirectMaterials(Product product, Warehouse warehouse, int delta,
+                                     TxnType txnType, LocalDate tradeDate,
+                                     String refNo, String memo) {
+        List<com.daesung.sales.material.entity.MaterialBom> direct =
+                materialBomRepository.findBySet(product.getId());
+        int moved = 0;
+        for (com.daesung.sales.material.entity.MaterialBom b : direct) {
+            // 이 상품이 '세트'로서 회차를 품은 매칭이면 건너뛴다 — 그건 조립이 처리한다.
+            if (b.getRoundProduct() != null) {
+                continue;
+            }
+            long per = b.getQtyPerSet();
+            if (per == 0) {
+                continue;
+            }
+            int d = (int) (delta * per);
+            applyMaterialDelta(b.getMaterial(), warehouse, d);
+            moved++;
+            inventoryTxnRepository.save(
+                    com.daesung.sales.inventory.entity.InventoryTxn.materialTxn(
+                            b.getMaterial(), warehouse, txnType, d, tradeDate, refNo,
+                            "단품 직접연결 소요 " + per + "개/부"
+                                    + ((memo == null || memo.isBlank()) ? "" : " / " + memo)));
+        }
+        return moved;
+    }
+
+    /**
+     * 출고 상품이 <b>다른 세트의 회차</b>면 그 회차 자재를 증감한다.    /**
      * 출고 상품이 <b>다른 세트의 회차</b>면 그 회차 자재를 증감한다.
      *
      * <p>회차당 소요는 {@link com.daesung.sales.material.entity.MaterialBom#qtyPerRound(int)}가
@@ -290,7 +328,16 @@ public class InventoryService {
         List<com.daesung.sales.material.entity.MaterialBom> asRound =
                 materialBomRepository.findByRoundProductId(product.getId());
         if (asRound.isEmpty()) {
-            return 0;   // 회차 도서가 아니다 — 자재를 깎을 일이 없다
+            // ★**단품에 자재를 직접 붙인 경우**(단품 「자재 연결」 탭)도 깎는다.
+            //   근거: F-37 ①("회차 도서를 **단품으로 둔 채** 자재 연결·세트 구성·조립·해체가 모두 되게")
+            //        + ④⑤("회차 단독 출고 시 그 회차 **자재 낱장이 빠지는지** 확인할 수 있게").
+            //   그 매칭은 setProduct=그 상품 / roundProduct=null 로 저장되므로 위 조회에 걸리지 않았다.
+            //
+            //   ‼️**세트(is_set=true)는 제외한다.** 세트 자재는 **조립 시점**에 빠지므로
+            //     (`assemble` → `findBySet`) 출고에서 또 깎으면 **이중 차감**이다.
+            //     단품은 조립 없이 바로 나가니 출고가 유일한 차감 지점이다.
+            return product.isSet() ? 0 : applyDirectMaterials(
+                    product, warehouse, delta, txnType, tradeDate, refNo, memo);
         }
         // 소속 세트별로 처리한다. 같은 회차 도서가 여러 세트에 들어가 있을 수 있다.
         java.util.Set<Long> setIds = new java.util.LinkedHashSet<>();
@@ -609,6 +656,13 @@ public class InventoryService {
             Product product = productRepository.findById(item.productId())
                     .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
                             "상품이 없습니다. id=" + item.productId()));
+            // ★**폐기도 자재를 깎는다**(2026-11-10). 출고는 자재 낱장을 깎는데 폐기는 안 깎아
+            //   "회차 단독 재고 = 자재 잔여"(F-37 ④⑤)가 폐기만큼 실제보다 많이 남았다.
+            //   8/31 화면기획 보완요청안도 "**폐기는 매출·교사용과 동일하게** 소요량에 합산"이다.
+            //   ‼️수불부 자재 상세(`consumedQtyByProduct`)는 **상품 txn** 으로 세므로
+            //     거기에는 이미 DISPOSE 가 들어 있다 — 여기서 자재 원장을 맞추는 것은 별개 축이다.
+            applyRoundMaterials(product, warehouse, -item.qty(), TxnType.DISPOSE,
+                    req.processedDate(), disposalNo, item.note());
             int balance = applyDelta(product, warehouse, -item.qty());
             inventoryTxnRepository.save(InventoryTxn.dispose(product, warehouse, -item.qty(),
                     // 화면 라벨이 '비고'라 reason/memo 어느 쪽으로 와도 같은 칸이다(note()).
