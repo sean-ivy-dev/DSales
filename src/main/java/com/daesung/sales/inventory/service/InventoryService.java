@@ -325,19 +325,29 @@ public class InventoryService {
     private int applyRoundMaterials(Product product, Warehouse warehouse, int delta,
                                         TxnType txnType, LocalDate tradeDate,
                                         String refNo, String memo) {
+        // ★★**직접 연결이 세트 구성회차보다 먼저다**(프론트 실측 2026-11-10 §6 으로 바로잡음).
+        //   근거: F-37 ②("회차 도서에 그 회차 시험지·해설지 + **OMR(소요 1)** 직접 연결").
+        //   회차 도서에 직접 붙인 값이 그 도서 1부의 소요량이고, 그게 발주처가 적어 준 수치다.
+        //
+        //   ‼️거꾸로 두면 공통 자재가 틀어진다. 세트 기준으로 계산하면 OMR 소요가
+        //     `세트당 6 ÷ 등록된 회차수` 인데, 지금 1·2회만 있어 **6 ÷ 2 = 3** 이 된다.
+        //     직접 연결에는 **1** 로 적혀 있다. 3~6회가 등록되면 6÷6=1 로 같아지지만,
+        //     그 전까지는 회차 단독 출고가 OMR 을 3배로 깎는다.
+        //
+        //   ‼️**둘 다 깎지는 않는다**(이중 차감). 아래는 if/else 다 —
+        //     직접 연결이 있으면 그것만, 없으면 세트 구성회차 규칙만 쓴다.
+        int direct = product.isSet() ? 0
+                : applyDirectMaterials(product, warehouse, delta, txnType, tradeDate, refNo, memo);
+        if (direct > 0) {
+            return direct;
+        }
+
         List<com.daesung.sales.material.entity.MaterialBom> asRound =
                 materialBomRepository.findByRoundProductId(product.getId());
         if (asRound.isEmpty()) {
-            // ★**단품에 자재를 직접 붙인 경우**(단품 「자재 연결」 탭)도 깎는다.
-            //   근거: F-37 ①("회차 도서를 **단품으로 둔 채** 자재 연결·세트 구성·조립·해체가 모두 되게")
-            //        + ④⑤("회차 단독 출고 시 그 회차 **자재 낱장이 빠지는지** 확인할 수 있게").
-            //   그 매칭은 setProduct=그 상품 / roundProduct=null 로 저장되므로 위 조회에 걸리지 않았다.
-            //
-            //   ‼️**세트(is_set=true)는 제외한다.** 세트 자재는 **조립 시점**에 빠지므로
-            //     (`assemble` → `findBySet`) 출고에서 또 깎으면 **이중 차감**이다.
-            //     단품은 조립 없이 바로 나가니 출고가 유일한 차감 지점이다.
-            return product.isSet() ? 0 : applyDirectMaterials(
-                    product, warehouse, delta, txnType, tradeDate, refNo, memo);
+            // 직접 연결도 없고 세트 구성회차도 아니다 — 자재를 깎을 일이 없다.
+            // (세트 자체는 조립 시점에 자재가 빠지므로 출고에서 깎지 않는다 — 이중 차감 방지.)
+            return 0;
         }
         // 소속 세트별로 처리한다. 같은 회차 도서가 여러 세트에 들어가 있을 수 있다.
         java.util.Set<Long> setIds = new java.util.LinkedHashSet<>();

@@ -134,8 +134,13 @@ public class AttendanceService {
             boolean regionHasRow = false;
             while (i < schools.size() && region.equals(nz(schools.get(i).regionGroup))) {
                 String partner = nz(schools.get(i).partnerCode);
+                // ‼️거래처 줄에 **지역·상세지역을 함께 싣는다**(프론트 실측 2026-11-10 §1).
+                //   레거시 `Refresh_DatagridView_특약점` 은 이 줄에 MAX(custCity)='지역' ·
+                //   MAX(custLoc)='상세지역' 을 낸다 — 소 계·총 계 줄만 '' 이다.
+                //   예전엔 null 로 만들어 거래처 보기에서 두 칸이 늘 비었다.
                 Bucket partnerSub = new Bucket(region, schools.get(i).partnerCode,
-                        schools.get(i).partnerName, null, null);
+                        schools.get(i).partnerName,
+                        schools.get(i).cityName, schools.get(i).partnerLoc);
                 List<Bucket> mine = new ArrayList<>();
                 while (i < schools.size() && region.equals(nz(schools.get(i).regionGroup))
                         && partner.equals(nz(schools.get(i).partnerCode))) {
@@ -310,7 +315,7 @@ public class AttendanceService {
                 // ‼️빈 목록을 그대로 넘기면 `in ()` 가 돼 HQL 이 터진다 — 자리표를 둔다.
                 //   상품년도에 쓰이지 않는 값이어야 한다(연도에 -1 은 없다).
                 com.daesung.sales.common.query.MultiSelect.orPlaceholder(productYears, -1))) {
-            String region = nz(a.getRegion());
+            String region = regionOfPartnerCode(a.getPartnerCode());
             String key = region + "|" + nz(a.getPartnerCode()) + "|" + nz(a.getSchoolCode())
                     + "|" + nz(a.getGrade());
             PeriodBucket b = byKey.computeIfAbsent(key, k -> new PeriodBucket(months.size(),
@@ -647,6 +652,46 @@ public class AttendanceService {
             return "특약점_" + c.charAt(0) + cityPart;
         }
         return "특약점외";
+    }
+
+    /**
+     * 응시현황(기간별)의 <b>지역</b> — 레거시는 <b>거래처코드 앞자리</b>로 정한다.
+     *
+     * <p>근거: {@code 고사별처리인원.vb:257~270} 의 CASE 그대로.
+     * <pre>
+     *   A10 서울 · A12 광역 · A14 경기 · A16 강원 · A18 충북 · A20 충남
+     *   A22 전북 · A24 전남 · A26 경북 · A28 경남 · A30C 제주 · 그 외 '기타'
+     * </pre>
+     *
+     * <p>‼️예전엔 <b>거래처 마스터의 지역 칸</b>({@code partners.region})을 썼다. 그 칸이
+     * <b>909곳 중 382곳이 비어</b> 있어 학교 줄 260개의 지역이 빈칸으로 나왔다
+     * (프론트 실측 2026-11-10 §2). 레거시는 코드로 정하고 안 맞으면 <b>'기타'</b> 로 묶어
+     * <b>빈칸이 없다</b> — 그래서 레거시 규칙으로 통일한다.
+     *
+     * <p>★마스터 칸을 채우는 쪽(담당자 입력)으로 풀지 않은 이유: 382곳을 사람이 채워야 하고,
+     * 그 뒤에도 새 거래처가 생기면 또 빈다. 코드 규칙은 입력이 필요 없다.
+     */
+    private static String regionOfPartnerCode(String code) {
+        String c = (code == null) ? "" : code.trim();
+        if (c.length() >= 4 && "A30C".equals(c.substring(0, 4))) {
+            return "제주";
+        }
+        if (c.length() < 3) {
+            return "기타";
+        }
+        return switch (c.substring(0, 3)) {
+            case "A10" -> "서울";
+            case "A12" -> "광역";
+            case "A14" -> "경기";
+            case "A16" -> "강원";
+            case "A18" -> "충북";
+            case "A20" -> "충남";
+            case "A22" -> "전북";
+            case "A24" -> "전남";
+            case "A26" -> "경북";
+            case "A28" -> "경남";
+            default -> "기타";
+        };
     }
 
     private static String blankToNull(String v) {

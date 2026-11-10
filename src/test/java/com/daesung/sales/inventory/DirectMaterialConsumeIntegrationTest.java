@@ -161,6 +161,32 @@ class DirectMaterialConsumeIntegrationTest extends IntegrationTestSupport {
         assertThat(materialQty(matSingle)).as("자재도 원래대로").isEqualTo(before);
     }
 
+    @Test
+    @DisplayName("‼️직접 연결이 **세트 구성회차보다 먼저다** — 둘 다 있으면 직접 연결 값만 깎는다")
+    void 직접연결이_세트회차보다_먼저() {
+        // 세트를 만들고 그 구성회차로 `single` 을 넣는다. `single` 에는 직접 연결(1부당 2개)이 이미 있다.
+        Long setP = book("DMC" + SFX, true);
+        Long matSet2 = createId("/masters/materials", Map.of(
+                "code", "DMM3" + SFX, "name", "세트쪽 시험지", "materialType", "EXAM_PAPER"));
+        // 세트에 '그 회차(single) 전용' 자재를 **5개**로 붙인다 — 직접 연결(2개)과 다른 값이다.
+        assertThat(post("/masters/products/" + setP + "/materials",
+                Map.of("roundProductId", single, "materialId", matSet2, "qtyPerSet", 5))
+                .path("success").asBoolean()).isTrue();
+
+        int beforeDirect = materialQty(matSingle);
+        int beforeSet = materialQty(matSet2);
+        assertThat(post("/sales/entries", Map.of(
+                "salesDate", DATE, "partnerId", partner, "warehouseId", warehouse,
+                "items", List.of(Map.of("productId", single, "shipmentType", "NORMAL_SHIP",
+                        "qty", 3, "unitPrice", 10_000, "supplyRate", 70))))
+                .path("success").asBoolean()).isTrue();
+
+        assertThat(materialQty(matSingle))
+                .as("직접 연결이 이긴다 — 3부 × 2개 = 6").isEqualTo(beforeDirect - 6);
+        assertThat(materialQty(matSet2))
+                .as("‼️세트 구성회차 쪽은 깎이지 않는다(이중 차감 방지)").isEqualTo(beforeSet);
+    }
+
     private int materialQty(Long materialId) {
         JsonNode rows = data(get("/stock/materials?materialId=" + materialId
                 + "&warehouseId=" + warehouse));

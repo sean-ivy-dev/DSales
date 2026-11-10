@@ -121,7 +121,8 @@ public class DuffSalesImportService {
 
         // 체크한 줄만 등록 — 비우면 기간 전체(예전 동작).
         java.util.Set<String> picked = req.hasSelection()
-                ? new java.util.HashSet<>(req.sourceKeys()) : null;
+                ? new java.util.HashSet<>(req.sourceKeys())   // [] 면 빈 Set — 아무 줄도 안 고른 것이다
+                : null;
         // 줄별 수정값은 소스키로 찾는다.
         java.util.Map<String, com.daesung.sales.sale.dto.DuffImportRequest.Override> fixes =
                 new java.util.HashMap<>();

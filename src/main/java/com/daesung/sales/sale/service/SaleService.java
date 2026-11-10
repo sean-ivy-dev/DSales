@@ -523,12 +523,21 @@ public class SaleService {
      *
      * <p>★재고관리 상품인지까지 본다 — 모의고사처럼 재고를 안 세는 상품만 있는 요청이라면
      * 창고가 없어도 어긋날 게 없다.
+     *
+     * <p>‼️<b>수량 0 줄도 본다.</b> F-17(수량 없이 금액만 매출)로 넣는 줄은 재고 증감이 0 이라
+     * 창고가 없어도 장부가 갈라지지 않는다. 그런데 이 검사가 수량을 보지 않아
+     * <b>수량 0 인데 창고를 고르라고 막고 있었다</b>(프론트 실측 2026-11-10 §3).
+     * 발주처가 "수량 없이 금액만 등록"을 허용하라고 한 것과 정면으로 어긋난다.
      */
     private void assertWarehouseWhenStockMoves(SalesEntryRequest req, Warehouse warehouse) {
         if (warehouse != null) {
             return;
         }
         for (SalesEntryRequest.Item item : req.items()) {
+            // 수량 0 은 재고가 움직이지 않는다 — 창고를 요구할 이유가 없다.
+            if (item.qty() == 0) {
+                continue;
+            }
             Product p = productRepository.findById(item.productId()).orElse(null);
             if (p != null && p.isStockManaged()) {
                 throw new BusinessException(ErrorCode.INVALID_INPUT,

@@ -129,9 +129,20 @@ public record DuffImportRequest(
     ) {
     }
 
-    /** 소스키 필터가 걸려 있나. 비어 있으면 기간 전체가 대상이다. */
+    /**
+     * 소스키 필터가 걸려 있나.
+     *
+     * <p>‼️<b>`null`(칸 없음)과 `[]`(빈 배열)을 다르게 읽는다</b>(프론트 실측 2026-11-10 §5).
+     * <pre>
+     *   sourceKeys 없음(null) → 기간 전체가 대상(예전 호출 호환)
+     *   sourceKeys = []       → **고른 줄이 없다**. 신청 줄은 하나도 등록하지 않는다
+     *   sourceKeys = [...]    → 그 줄만
+     * </pre>
+     * 예전엔 둘을 같게 봐서, <b>수기 줄만 넣으려고 소스키를 비우면 그 기간 신청이 전부 매출이 됐다.</b>
+     * 수백 건이 한 번에 들어가는 사고라, 화면이 "어느 줄과도 안 맞는 가짜 키"를 넣어 피하고 있었다.
+     */
     public boolean hasSelection() {
-        return sourceKeys != null && !sourceKeys.isEmpty();
+        return sourceKeys != null;
     }
 
     public boolean onlyCompleteOrFalse() {

@@ -316,6 +316,34 @@ public class Product extends BaseEntity {
         if (corp == null) {
             corp = com.daesung.sales.common.corp.Corp.DSLAB;
         }
+        fillProductYear();
+    }
+
+    /**
+     * 상품년도 자동 채움 — <b>분류코드의 연도</b>({@code substring(cat_code,2,4)}).
+     *
+     * <p>근거: 레거시 상품년도가 그것이다({@code CommonDB.GetCatYearList}).
+     * 분류코드 형식이 {@code [영문1][연도4][영문·숫자1~3]} 이고 실측 14,808권 전부 그 형식이다.
+     *
+     * <p>‼️<b>V127 백필만으로는 부족하다.</b> 그 뒤 등록되는 상품은 또 비고, 응시현황
+     * 상품년도 조건이 그 상품을 못 찾는다(프론트 실측 2026-11-10 §4 — 값이 3권만 있어
+     * 어느 연도로 걸어도 0건이었다). 그래서 등록 시점에도 채운다.
+     *
+     * <p>‼️담당자가 넣은 값은 덮지 않고, 형식에 맞지 않는 분류코드는 비워 둔다 —
+     * 근거 없이 연도를 만들면 그 상품이 엉뚱한 해로 묶인다.
+     */
+    private void fillProductYear() {
+        if (productYear != null || catCode == null || catCode.length() < 5) {
+            return;
+        }
+        String y = catCode.substring(1, 5);
+        if (!Character.isLetter(catCode.charAt(0)) || !y.chars().allMatch(Character::isDigit)) {
+            return;
+        }
+        int v = Integer.parseInt(y);
+        if (v >= 1990 && v <= 2100) {
+            productYear = v;
+        }
     }
 
 }
