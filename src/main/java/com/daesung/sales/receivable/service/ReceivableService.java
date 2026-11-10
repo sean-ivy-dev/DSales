@@ -667,6 +667,20 @@ public class ReceivableService {
             if (excludePurchasers && isPurchaser) {
                 continue;
             }
+            // ★**그 기간에 이월·매출·수금·매입이 모두 없는 거래처는 행을 내지 않는다**(PM 확정 2026-11-10).
+            //   레거시도 같다 — 외상매출현황 SQL 의 union 안에 그 거래처 행이 하나도 없으면 group 이
+            //   생기지 않아 **화면에 아예 안 나온다**(`외상매출현황조회.vb:177` 바깥 WHERE
+            //   `(무상 and supRate>0) or (반품 and supRate>0) or (무상·반품·대체 아님)`).
+            //   ‼️걸러내는 기준은 **잔액 0 이 아니라 '활동 없음'** 이다. 매출 100 · 수금 100 이면
+            //   잔액은 0 이지만 그 해에 거래가 있었으므로 **남겨야** 한다(receivableGen 이 0 이 아니다).
+            //   ‼️수량 칸은 보지 않는다 — 공급률 0 무가(교사용·증정) 수량만 있는 거래처가 바로
+            //   이 케이스다(A30D274 교사용 200부 · A30D294 110부, 금액 전부 0). 레거시는 supRate=0
+            //   무가를 union 에서 빼기 때문에 그 거래처가 화면에 없었다.
+            boolean noActivity = opening == 0 && s[0] == 0 && collected == 0
+                    && purchased == 0 && purchasedQty == 0;
+            if (noActivity) {
+                continue;
+            }
             String kind = isPurchaser ? PARTNER_KIND_PURCHASE : PARTNER_KIND_SALES;
             ArStatusResponse.Row row = new ArStatusResponse.Row("DETAIL",
                     pid, p.getCode(), p.getName(), p.getBossName(),
