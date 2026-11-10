@@ -71,6 +71,7 @@ public class DuffSalesImportService {
     private final PartnerRepository partnerRepository;
     private final ProductRepository productRepository;
     private final PeriodLockService periodLockService;
+    private final com.daesung.sales.school.repository.SchoolRepository schoolRepository;
 
     /** 청구인원 판정 결과 — 몇 명을, 무슨 근거로. */
     record Charge(int inwon, String basis) {}
@@ -96,7 +97,8 @@ public class DuffSalesImportService {
                                           DuffChargeMode mode, boolean onlyComplete,
                                           Long productId, boolean dryRun) {
         return importSales(new com.daesung.sales.sale.dto.DuffImportRequest(
-                fromDate, toDate, mode, onlyComplete, null, productId, null, null, null), dryRun);
+                fromDate, toDate, mode, onlyComplete, null, productId, null, null,
+                null, null, null, null), dryRun);
     }
 
     /**
@@ -134,6 +136,26 @@ public class DuffSalesImportService {
                         new com.daesung.sales.common.exception.BusinessException(
                                 com.daesung.sales.common.exception.ErrorCode.NOT_FOUND,
                                 "상품이 없습니다. id=" + req.productId()));
+
+        // ★**신규임의등록**(레거시 CheckBox_Custom) — 체크한 줄의 매출코드·학교 대신
+        //   담당자가 고른 거래처·학교로 등록한다. 거래처 매핑이 안 되던 줄을 살리는 경로다.
+        Partner customPartner = (req.partnerId() == null) ? null
+                : partnerRepository.findById(req.partnerId()).orElseThrow(() ->
+                        new com.daesung.sales.common.exception.BusinessException(
+                                com.daesung.sales.common.exception.ErrorCode.NOT_FOUND,
+                                "거래처가 없습니다. id=" + req.partnerId()));
+        // ‼️partnerId 없이 schoolCode 만 오면 **그 칸은 무시된다**(줄의 원래 학교를 쓴다).
+        //   조용히 무시하지 않고 거부한다 — 담당자는 학교를 바꿨다고 믿고 있다.
+        if (customPartner == null && req.schoolCode() != null && !req.schoolCode().isBlank()) {
+            throw new com.daesung.sales.common.exception.BusinessException(
+                    com.daesung.sales.common.exception.ErrorCode.INVALID_INPUT,
+                    "학교(schoolCode)만으로는 바꿀 수 없습니다. 신규임의등록은 거래처(partnerId)와 "
+                            + "함께 보냅니다. 학교 없이 그 특약점으로 넣으려면 schoolCode 를 비우세요.");
+        }
+        String customSchoolCode = (customPartner == null) ? null : blankToNullStr(req.schoolCode());
+        String customSchoolName = (customSchoolCode == null) ? null
+                : schoolRepository.findBySchoolCode(customSchoolCode)
+                        .map(com.daesung.sales.school.entity.School::getSchoolName).orElse(null);
 
         // ★★마감 검사는 **줄마다 실제 거래일**로 한다(프론트 실측 2026-10-23 §4①).
         //
@@ -221,8 +243,9 @@ public class DuffSalesImportService {
                 charge = new Charge(fix.inwon(), "MANUAL");
             }
 
-            Partner partner = (row.machulCode() == null) ? null
-                    : partnerByCode.get(row.machulCode());
+            // 신규임의등록이 있으면 그것이 이긴다(레거시 CheckBox_Custom 과 같다).
+            Partner partner = (customPartner != null) ? customPartner
+                    : (row.machulCode() == null) ? null : partnerByCode.get(row.machulCode());
             // 담당자가 고른 상품이 있으면 **그걸 쓴다**. 과목코드 매칭은 그다음이다 —
             // DSRE 과목(시행일×영역)과 우리 도서는 1:1이 아니라 자동 매칭이 늘 비는 쪽이다.
             Product product = (chosen != null) ? chosen
@@ -324,8 +347,10 @@ public class DuffSalesImportService {
                 continue;
             }
 
-            // 세액은 자동산출하지 않는다(발주처 확정 2026-08-06). DSRE에 입력 경로가 없어 0.
-            long tax = 0L;
+            // 세액은 자동산출하지 않는다(발주처 확정 2026-08-06) — 기본 0 이고,
+            // 담당자가 줄별 '세금'을 체크한 줄에만 총금액÷10 이 붙는다(레거시 줄별 세금 칸).
+            long tax = taxOf((fix == null) ? null : fix.tax(), total, product,
+                    "소스키=" + sourceKey);
             String salesNo = "I-" + to.format(YYYYMMDD) + "-"
                     + sequenceService.next(SequenceService.SEQ_INVOICE);
             Sale sale = Sale.createBulk(salesNo, tradeDate,
@@ -351,8 +376,100 @@ public class DuffSalesImportService {
             lines.add(line(shown, charge, unit, total, "IMPORTED", null, salesNo, sourceKey));
         }
 
+        // ★**수기 줄**(레거시 '항목 추가') — 원천에 없는 줄을 **같은 묶음**으로 함께 등록한다.
+        //   따로 [매출 등록] 화면으로 보내면 다른 묶음번호가 되어 "몇 번째 줄"로 찾는 경로가 끊긴다.
+        //   ‼️소스키가 없으므로 중복 검사·write-back 대상이 아니다(원천에 되돌릴 것이 없다).
+        if (req.manualLines() != null && !req.manualLines().isEmpty()) {
+            if (chosen == null) {
+                throw new com.daesung.sales.common.exception.BusinessException(
+                        com.daesung.sales.common.exception.ErrorCode.INVALID_INPUT,
+                        "수기 줄을 넣으려면 상품(productId)을 함께 골라야 합니다. "
+                                + "레거시도 고른 분류·도서를 모든 줄에 적용합니다.");
+            }
+            int manualSeq = 0;
+            for (com.daesung.sales.sale.dto.DuffImportRequest.ManualLine ml : req.manualLines()) {
+                manualSeq++;
+                if (ml == null) {
+                    continue;
+                }
+                String where = "수기 " + manualSeq + "번째 줄:";
+                if (ml.partnerId() == null) {
+                    throw new com.daesung.sales.common.exception.BusinessException(
+                            com.daesung.sales.common.exception.ErrorCode.INVALID_INPUT,
+                            where + " 거래처(partnerId)는 비울 수 없습니다.");
+                }
+                int inwon = (ml.inwon() == null) ? 0 : ml.inwon();
+                if (inwon <= 0) {
+                    // 레거시도 '인원이 있는 경우만 등록함' — 0명은 조용히 건너뛴다.
+                    zeroInwon++;
+                    continue;
+                }
+                Partner mp = partnerRepository.findById(ml.partnerId()).orElseThrow(() ->
+                        new com.daesung.sales.common.exception.BusinessException(
+                                com.daesung.sales.common.exception.ErrorCode.NOT_FOUND,
+                                where + " 거래처가 없습니다. id=" + ml.partnerId()));
+                int mPrice = (ml.unitPrice() != null) ? ml.unitPrice()
+                        : (chosen.getPrice() == null ? 0 : chosen.getPrice());
+                int mRate = (ml.supplyRate() != null) ? ml.supplyRate()
+                        : (chosen.getSupplyRate() == null ? 0 : chosen.getSupplyRate());
+                Integer mDiscount = ml.discount();
+                long mTotal = (ml.totalAmount() != null) ? ml.totalAmount()
+                        : Amounts.supplyOf(mPrice, mRate, inwon, mDiscount);
+                LocalDate mDate = (req.salesDate() != null) ? req.salesDate() : to;
+                if (!dryRun) {
+                    periodLockService.assertNotLocked(mDate);
+                }
+                long mTax = taxOf(ml.tax(), mTotal, chosen, where);
+                String mSchoolCode = blankToNullStr(ml.schoolCode());
+                String mSchoolName = (mSchoolCode == null) ? null
+                        : schoolRepository.findBySchoolCode(mSchoolCode)
+                                .map(com.daesung.sales.school.entity.School::getSchoolName)
+                                .orElse(null);
+                long mUnit = Amounts.supplyOf(mPrice, mRate, 1, mDiscount);
+                if (dryRun) {
+                    lines.add(manualLine(mp, mSchoolCode, mSchoolName, chosen, inwon,
+                            mPrice, mRate, mDiscount, mUnit, mTotal, "PREVIEW", null, manualSeq));
+                    continue;
+                }
+                String mSalesNo = "I-" + to.format(YYYYMMDD) + "-"
+                        + sequenceService.next(SequenceService.SEQ_INVOICE);
+                Sale ms = Sale.createBulk(mSalesNo, mDate, mp, chosen,
+                        ShipmentType.NORMAL_SHIP, SalesCategory.SALE,
+                        mPrice, mRate, inwon, mTotal, mTax, mTotal + mTax,
+                        joinMemo(null, ml.memo(), req.memo()), null);
+                ms.applyUploadDetail(mSchoolCode, mSchoolName, null);
+                ms.applyDiscount(mDiscount);
+                ms.applyEntry(entryNo, ++entrySeq);
+                saleRepository.save(ms);
+                imported++;
+                totalSum += mTotal;
+                lines.add(manualLine(mp, mSchoolCode, mSchoolName, chosen, inwon,
+                        mPrice, mRate, mDiscount, mUnit, mTotal, "IMPORTED", mSalesNo, manualSeq));
+            }
+        }
+
         return new DuffImportResponse(dryRun, m.name(), imported, skipped, unmapped, zeroInwon,
                 zeroAmount, totalSum, lines);
+    }
+
+    /**
+     * 수기 줄의 결과 줄. 원천 값이 없으니 신청번호·인원 칸은 0 이고,
+     * {@code sourceKey} 는 {@code MANUAL:n} 으로 둔다 — 화면이 "몇 번째 수기 줄"을 가리킬 수 있어야 한다.
+     */
+    private static DuffImportResponse.Line manualLine(Partner p, String schoolCode, String schoolName,
+                                                      Product product, int inwon, int price, int rate,
+                                                      Integer discount, long unit, long total,
+                                                      String result, String salesNo, int seq) {
+        return new DuffImportResponse.Line(
+                "MANUAL:" + seq,
+                0, null, null, p.getCode(), p.getName(),
+                schoolCode, schoolName, product.getGrade(),
+                product.getCatCode(), product.getCatName(), product.getCode(), product.getName(),
+                null, null, 0,
+                0, 0, 0, 0,
+                inwon, "MANUAL",
+                price, rate, (discount == null) ? 0 : discount, unit, total,
+                result, null, salesNo);
     }
 
     /**
@@ -436,6 +553,32 @@ public class DuffSalesImportService {
             return specified;
         }
         return (reqDate != null) ? reqDate : to;
+    }
+
+    private static String blankToNullStr(String v) {
+        return (v == null || v.isBlank()) ? null : v;
+    }
+
+    /**
+     * 줄별 '세금' 체크 → 세액. 레거시 {@code CLng(총금액 / 10)} 그대로(버림).
+     *
+     * <p>★세액은 자동산출하지 않는다는 발주처 확정(2026-08-06)과 어긋나지 않는다 —
+     * 담당자가 <b>체크한 줄에만</b> 붙는 수동 입력이다. 미체크는 0 이다.
+     *
+     * <p>‼️<b>면세 상품에 체크하면 거부</b>한다. 조용히 0 으로 무시하면 담당자는
+     * 세액이 붙었다고 믿는다(매출등록 쪽과 같은 규율).
+     */
+    static long taxOf(Boolean checked, long total, Product product, String where) {
+        if (!Boolean.TRUE.equals(checked)) {
+            return 0L;
+        }
+        if (product != null && product.isTaxFree()) {
+            throw new com.daesung.sales.common.exception.BusinessException(
+                    com.daesung.sales.common.exception.ErrorCode.INVALID_INPUT,
+                    "면세 상품에는 세액을 넣을 수 없습니다. " + where
+                            + " 상품=" + product.getCode() + " / 세금 체크를 해제하세요.");
+        }
+        return total / 10L;
     }
 
     private static DuffImportResponse.Line line(DuffSalesRow r, Charge c, long unit, long total,

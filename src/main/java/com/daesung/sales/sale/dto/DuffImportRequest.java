@@ -46,6 +46,27 @@ public record DuffImportRequest(
 
         @Schema(description = "등록되는 모든 줄에 붙일 공통 메모") String memo,
 
+        @Schema(description = """
+                **신규임의등록** — 체크한 줄의 매출코드·학교 대신 **이 거래처**로 등록한다
+                (레거시 `CheckBox_Custom` + 아래 특약점 콤보).
+                ★비우면 줄의 원래 거래처(DSRE machul_cd 매핑)를 쓴다.
+                ★이걸 주면 거래처 매핑이 안 되던 줄도 등록된다(UNMAPPED_PARTNER 가 사라진다) —
+                  마스터에 없는 거래처를 담당자가 지정해 살리는 것이 이 기능의 목적이다.""")
+        Long partnerId,
+
+        @Schema(description = """
+                **신규임의등록의 학교**. `partnerId` 와 함께 쓴다.
+                ★`partnerId` 를 주고 이 칸을 **비우면 학교 없이 그 특약점으로** 등록된다
+                (프론트 요청 2026-11-10 §1-5 "비우면 학교 없이 특약점").
+                ★`partnerId` 가 없으면 이 칸은 무시된다 — 줄의 원래 학교를 쓴다.""")
+        String schoolCode,
+
+        @Schema(description = """
+                **수기 줄** — 원천(DSRE)에 없는 줄을 손으로 채워 **같은 묶음으로** 함께 등록한다
+                (레거시 '항목 추가'). 소스키가 없으므로 중복 검사 대상이 아니다.
+                ★상품은 `productId`(위 콤보)를 쓴다 — 레거시도 고른 분류·도서를 모든 줄에 적용한다.""")
+        List<ManualLine> manualLines,
+
         @Schema(description = "줄별 수정값 — 보낸 줄만 바뀐다") List<Override> overrides
 ) {
     /**
@@ -72,7 +93,39 @@ public record DuffImportRequest(
                     공통 메모(`memo`)와 **함께** 실린다. 저장되는 모양은
                     `원천 메모 / 줄 메모 / 공통 메모` 순이다 —
                     원천(DSRE)을 지우면 그 줄이 왜 그렇게 들어왔는지 되짚을 수 없다.""")
-            String memo
+            String memo,
+
+            @Schema(description = """
+                    **세금** 체크(레거시 줄별 '세금' 칸). `true` 면 **세액 = 총금액 ÷ 10**(버림),
+                    합계 = 총금액 + 세액으로 저장한다.
+                    ★기본은 `false`(세액 0) — 세액은 자동산출하지 않는다는 발주처 확정 그대로다.
+                      담당자가 체크한 줄에만 붙는다.
+                    ‼️**면세 상품에 체크하면 그 줄을 거부**한다(조용히 무시하면 담당자가
+                      값이 사라진 걸 모른다).""")
+            Boolean tax
+    ) {
+    }
+
+    /**
+     * 수기 줄 하나(레거시 '항목 추가'로 만든 빈 줄).
+     *
+     * <p>원천에 없는 줄이라 <b>소스키가 없다</b> — 중복 검사·write-back 대상이 아니다.
+     * 상품은 요청의 {@code productId} 를 쓴다.
+     */
+    @Schema(name = "DuffImportManualLine", description = "수기 줄")
+    public record ManualLine(
+            @Schema(description = "거래처 id", requiredMode = Schema.RequiredMode.REQUIRED)
+            Long partnerId,
+            @Schema(description = "학교코드(선택). 비우면 학교 없이 등록") String schoolCode,
+            @Schema(description = "인원(수량)", requiredMode = Schema.RequiredMode.REQUIRED)
+            Integer inwon,
+            @Schema(description = "정가") Integer unitPrice,
+            @Schema(description = "공급률(%)") Integer supplyRate,
+            @Schema(description = "할인액") Integer discount,
+            @Schema(description = "총금액을 직접 지정. 주면 계산하지 않고 이 값을 쓴다")
+            Long totalAmount,
+            @Schema(description = "세금 체크 — 세액 = 총금액 ÷ 10") Boolean tax,
+            @Schema(description = "메모") String memo
     ) {
     }
 

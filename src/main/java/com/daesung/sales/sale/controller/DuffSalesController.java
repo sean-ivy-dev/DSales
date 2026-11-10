@@ -97,7 +97,8 @@ public class DuffSalesController {
             com.daesung.sales.sale.dto.DuffImportRequest body) {
         com.daesung.sales.sale.dto.DuffImportRequest req = (body != null) ? body
                 : new com.daesung.sales.sale.dto.DuffImportRequest(
-                        null, null, null, null, null, null, null, null, null);
+                        null, null, null, null, null, null, null, null,
+                        null, null, null, null);
         return ApiResponse.success(duffSalesImportService.importSales(req, false));
     }
 }
