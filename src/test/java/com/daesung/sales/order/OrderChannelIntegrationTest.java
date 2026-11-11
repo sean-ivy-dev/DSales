@@ -157,6 +157,30 @@ class OrderChannelIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
+    @DisplayName("★★특약점이 취소(삭제)한 주문도 온라인으로 남는다 — 칸과 조건이 같은 값을 말한다")
+    void 삭제된_온라인주문() {
+        // 특약점팀 운영 실측(2026-11-11, E-20261111-152): 특약점에서 취소하면 칸이 '수기'로 바뀌었다.
+        // 칸은 삭제 줄을 못 보고(JPQL @SQLRestriction), 조건은 삭제 줄까지 봐서 서로 달랐다.
+        JsonNode r = postAsDealerSite("/dealer-site/orders", Map.of(
+                "partnerCode", PARTNER_CODE, "orderDate", DATE,
+                "items", List.of(Map.of("productCode", BOOK_CODE, "qty", 1))), DEALER_SITE_KEY);
+        assertThat(r.path("success").asBoolean()).as("%s", r).isTrue();
+        String no = data(r).path("entryNo").asText();
+
+        JsonNode d = deleteAsDealerSite("/dealer-site/orders/" + no + "?partnerCode=" + PARTNER_CODE,
+                DEALER_SITE_KEY);
+        assertThat(d.path("success").asBoolean()).as("%s", d).isTrue();
+
+        JsonNode o = orderOf(no, "");
+        assertThat(o).as("삭제된 주문도 주문조회에 있다").isNotNull();
+        assertThat(o.path("deleted").asBoolean()).isTrue();
+        assertThat(o.path("channel").asText()).isEqualTo("ONLINE");
+        assertThat(o.path("channelName").asText()).isEqualTo("온라인");
+        assertThat(orderOf(no, "&channel=ONLINE")).as("온라인 조회에 든다").isNotNull();
+        assertThat(orderOf(no, "&channel=MANUAL")).as("수기 조회에는 없다").isNull();
+    }
+
+    @Test
     @DisplayName("엑셀에도 접수경로 칸이 있다")
     void 엑셀() {
         register(null);

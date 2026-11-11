@@ -103,7 +103,7 @@ public class SalesOrderQueryService {
         Map<String, com.daesung.sales.sale.entity.OrderChannel> channels = new LinkedHashMap<>();
         if (!entryNos.isEmpty()) {
             for (Object[] r : saleRepository.channelsByEntryNo(entryNos)) {
-                channels.put((String) r[0], (com.daesung.sales.sale.entity.OrderChannel) r[1]);
+                channels.put((String) r[0], com.daesung.sales.sale.entity.OrderChannel.valueOf((String) r[1]));
             }
         }
 

@@ -1727,9 +1727,17 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
      *
      * <p>주문조회 행은 발송 건(Shipment)으로 만들고 접수경로는 매출(Sale)에 있어, 등록번호로
      * 이어 붙인다. 한 묶음에 여러 줄이 있어도 경로는 같으므로 {@code distinct} 로 충분하다.
+     *
+     * <p>‼️<b>삭제된 줄도 본다(native).</b> JPQL 이면 {@code Sale} 의 {@code @SQLRestriction}
+     * ("deleted_at is null")이 자동으로 붙어, 통째로 지운 주문(특약점 취소 · 등록번호 삭제)은
+     * 찾을 줄이 없어 기본값 '수기'로 내려갔다. 그런데 접수경로 <b>조건</b>
+     * ({@code ShipmentRepository} 의 {@code :channel})은 삭제 줄까지 보므로 "온라인 조건에 걸리는데
+     * 칸은 수기"가 됐다(특약점팀 운영 실측 2026-11-11, E-20261111-152). 접수경로는 주문이 어디서
+     * 들어왔는지라 삭제와 무관하다 — 칸과 조건이 같은 줄을 보게 한다.
+     * 반환 channel 은 문자열(enum 이름)이다.
      */
-    @Query("select distinct s.entryNo, s.channel from Sale s "
-            + "where s.entryNo in :entryNos and s.channel is not null")
+    @Query(value = "SELECT DISTINCT s.entry_no, s.channel FROM sales s "
+            + "WHERE s.entry_no IN (:entryNos) AND s.channel IS NOT NULL", nativeQuery = true)
     List<Object[]> channelsByEntryNo(@Param("entryNos") Collection<String> entryNos);
 
     /**
