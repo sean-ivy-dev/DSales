@@ -249,6 +249,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ★Dockerfile 은 이미지 안에서 빌드하지 않는다 — test 잡이 만든 jar 를 받아 넣는다(build-deploy 와 같다).
+      - name: 실행 jar 받기(test 잡에서 빌드한 것)
+        uses: actions/download-artifact@v4
+        with:
+          name: app-jar
+          path: build/libs
+
       - name: 필수 시크릿 확인
         env:
           PROD_DB_HOST: ${{ secrets.PROD_DB_HOST }}
@@ -290,6 +297,9 @@ jobs:
           MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
           MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
           MAIL_FROM: ${{ vars.MAIL_FROM }}
+          # 특약점 사이트 서버 간 연동 — 비어 있으면 /api/v1/dealer-site/** 가 401(기동은 된다).
+          DEALER_SITE_API_KEY: ${{ secrets.DEALER_SITE_API_KEY }}
+          DEALER_SITE_WAREHOUSE_CODE: ${{ vars.DEALER_SITE_WAREHOUSE_CODE }}
         run: |
           set -e
           ENVF="$RUNNER_TEMP/dsales.env"
@@ -319,6 +329,8 @@ jobs:
           MAIL_SSL=${MAIL_SSL}
           MAIL_STARTTLS=${MAIL_STARTTLS}
           MAIL_SSL_TRUST=${MAIL_SSL_TRUST}
+          DEALER_SITE_API_KEY=${DEALER_SITE_API_KEY}
+          DEALER_SITE_WAREHOUSE_CODE=${DEALER_SITE_WAREHOUSE_CODE}
           JAVA_TOOL_OPTIONS=-Xmx1536m -XX:+ExitOnOutOfMemoryError
           ENV
           docker network create dsales-net 2>/dev/null || true
