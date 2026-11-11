@@ -37,12 +37,24 @@ public interface PartnerRepository extends JpaRepository<Partner, Long> {
     /**
      * 거래처 검색. 키워드(코드·거래처명 부분일치) + 만료 포함 여부.
      * includeExpired=false면 거래중(end_date IS NULL)만 — 레거시 거래처관리 기본 동작.
+     *
+     * <p>‼️<b>이름의 공백을 무시해서도 찾는다</b>(발주처 2026-11-11 승인).
+     * 레거시가 개인 거래처를 {@code '조 병 준'} 처럼 <b>글자 사이에 공백을 넣어</b> 저장해
+     * 뒀고 그대로 이관됐다 — <b>75곳</b>이 그 모양이다. 담당자가 "조병준"으로 검색하면
+     * 한 건도 안 나와서 "거래처가 없다"고 판단하게 된다(실제로 그렇게 오진한 적이 있다).
+     * 그래서 <b>이름 데이터는 그대로 두고 검색만</b> 공백을 지워 한 번 더 비교한다.
+     * 키워드 쪽 공백도 함께 지우므로 "조 병 준"으로 검색해도 찾는다.
+     *
+     * <p>⚠️{@code replace()} 는 인덱스를 타지 못하지만, 바로 위의 {@code like '%...%'} 가
+     * 이미 전체 스캔이라 비용이 늘지 않는다(거래처는 1천 행 미만).
      */
     @org.springframework.data.jpa.repository.Query("""
             select p from Partner p
              where (:keyword is null
                     or lower(p.code) like lower(concat('%', :keyword, '%'))
-                    or lower(p.name) like lower(concat('%', :keyword, '%')))
+                    or lower(p.name) like lower(concat('%', :keyword, '%'))
+                    or replace(lower(p.name), ' ', '')
+                       like replace(lower(concat('%', :keyword, '%')), ' ', ''))
                and (:includeExpired = true or p.endDate is null)
              order by p.code
             """)
@@ -63,7 +75,9 @@ public interface PartnerRepository extends JpaRepository<Partner, Long> {
             select p from Partner p
              where (:keyword is null
                     or lower(p.code) like lower(concat('%', :keyword, '%'))
-                    or lower(p.name) like lower(concat('%', :keyword, '%')))
+                    or lower(p.name) like lower(concat('%', :keyword, '%'))
+                    or replace(lower(p.name), ' ', '')
+                       like replace(lower(concat('%', :keyword, '%')), ' ', ''))
                and (:clientCategory is null or p.clientCategory = :clientCategory)
                and (:includeExpired = true or p.endDate is null)
              order by p.code
