@@ -354,7 +354,9 @@ public class OrderService {
                 req.schoolCode(), null, null, null, sl.memo());
         SalesEntryRequest entry = new SalesEntryRequest(
                 (sl.salesDate() != null) ? sl.salesDate() : LocalDate.now(),
-                sl.partnerId(), sl.warehouseId(), null,
+                sl.partnerId(), sl.warehouseId(),
+                null,                 // 위탁창고 — 이 경로는 위탁출고를 만들지 않는다
+                null,
                 null, null, null, null,  // 발송구분·수령인·이메일 — 아래 autoFillDelivery(DSRE 축)로 따로 채운다
                 // 배송지는 이 경로에도 입력칸이 있다(OrderCreateRequest.zipCode/address) —
                 // 그대로 작업요청서로 내린다(특약점팀 요청 2026-11-03 §2와 같은 칸).

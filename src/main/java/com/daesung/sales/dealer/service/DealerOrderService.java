@@ -222,6 +222,7 @@ public class DealerOrderService {
         //   사이트에서 온 주문을 수기로 위장할 수 있으면 §2-1 의 "함께 보여주고"가 무의미해진다.
         return new SalesEntryRequest(
                 date, partner.getId(), warehouseId,
+                null,                 // 위탁창고 — 특약점 신청은 정상출고다
                 null, null,
                 receiverOrDefault(req.receiverName(), partner.getBossName()),
                 receiverOrDefault(req.receiverPhone(), partner.getTel1()),

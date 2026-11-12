@@ -306,4 +306,76 @@ class ConsignOrderEntryIntegrationTest extends IntegrationTestSupport {
         }
         assertThat(consignRows).as("그 날 미결은 위탁 한 건뿐").isEqualTo(1);
     }
+
+    /**
+     * 위탁창고가 <b>두 곳 이상</b>인 거래처 — 화면이 고른 창고를 받는다
+     * (프론트 전달 2026-11-12 §4).
+     *
+     * <p>예전엔 서버가 그 거래처의 위탁창고를 혼자 정해서(목록의 첫 번째),
+     * 두 곳 이상이면 <b>등록 자체가 막혔다.</b> 이제 {@code consignWarehouseId} 로 고른다.
+     *
+     * <p>★<b>남의 위탁창고는 거부</b>한다 — 화면 값을 그대로 믿으면 미결원장이
+     * 엉뚱한 거래처에 선다.
+     */
+    @Test
+    @DisplayName("★위탁창고가 2곳이어도 **고른 창고**로 들어간다 — 예전엔 등록이 막혔다")
+    void 위탁창고를_고를_수_있다() {
+        // ‼️**별도 거래처**로 만든다 — 공용 `partner` 에 위탁창고를 하나 더 붙이면
+        //   "위탁창고가 2개" 가 되어 **다른 테스트가 전부 깨진다**(실제로 그렇게 깨뜨렸다).
+        Long p2 = createId("/masters/clients",
+                Map.of("code", "CMP" + SFX, "name", "위탁창고2개거래처", "type", "NORMAL"));
+        createId("/masters/warehouses", Map.of("code", "CM1" + SFX,
+                "name", "위탁창고A", "type", "CONSIGN", "ownerClientId", p2));
+        Long consign2 = createId("/masters/warehouses", Map.of("code", "CM2" + SFX,
+                "name", "위탁창고B", "type", "CONSIGN", "ownerClientId", p2));
+
+        String day = "2049-03-03";
+        Map<String, Object> req = new HashMap<>();
+        req.put("salesDate", day);
+        req.put("partnerId", p2);
+        req.put("warehouseId", main);
+        req.put("consignWarehouseId", consign2);        // ← 화면이 고른 창고(둘 중 뒤엣것)
+        req.put("items", List.of(item(5)));
+
+        JsonNode res = post("/sales/entries", req);
+        assertThat(res.path("success").asBoolean())
+                .as("‼️위탁창고가 2곳이라고 막히면 안 된다: %s", res).isTrue();
+
+        // 고른 쪽(위탁창고2)에 들어갔는지 — 첫 번째 창고가 아니다
+        JsonNode rows = get("/stock/records?fromDate=" + day + "&toDate=" + day);
+        boolean intoChosen = false;
+        for (JsonNode r : rows.path("data")) {
+            if (consign2.equals(r.path("warehouseId").asLong()) && r.path("qtyDelta").asInt() > 0) {
+                intoChosen = true;
+            }
+        }
+        assertThat(intoChosen).as("고른 위탁창고로 재고가 들어와야 한다: %s", rows).isTrue();
+
+        // 안 고르면 종전대로 거부 — 서버가 임의로 정하지 않는다
+        req.remove("consignWarehouseId");
+        req.put("salesDate", "2049-03-05");
+        JsonNode no = post("/sales/entries", req);
+        assertThat(no.path("success").asBoolean()).as("안 고르면 거부: %s", no).isFalse();
+        assertThat(no.path("error").path("message").asText()).contains("위탁창고가 2개");
+    }
+
+    @Test
+    @DisplayName("‼️남의 거래처 위탁창고를 고르면 거부 — 미결이 엉뚱한 거래처에 서면 안 된다")
+    void 남의_위탁창고는_거부() {
+        Long other = createId("/masters/clients",
+                Map.of("code", "COX" + SFX, "name", "다른거래처", "type", "NORMAL"));
+        Long othersWarehouse = createId("/masters/warehouses", Map.of("code", "COY" + SFX,
+                "name", "남의위탁창고", "type", "CONSIGN", "ownerClientId", other));
+
+        Map<String, Object> req = new HashMap<>();
+        req.put("salesDate", "2049-03-04");
+        req.put("partnerId", partner);
+        req.put("warehouseId", main);
+        req.put("consignWarehouseId", othersWarehouse);
+        req.put("items", List.of(item(5)));
+
+        JsonNode res = post("/sales/entries", req);
+        assertThat(res.path("success").asBoolean()).as("거부돼야 한다: %s", res).isFalse();
+        assertThat(res.path("error").path("message").asText()).contains("위탁창고가 아닙니다");
+    }
 }

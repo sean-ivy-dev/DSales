@@ -76,12 +76,27 @@ public class OrderController {
                     더프 매핑에서도 같은 혼동이 있었습니다.
                     그래서 `machulCode` 를 함께 내려, 우리 마스터와 이어 볼 수 있게 했습니다.
 
-                    · 예전엔 이 경로가 없어 화면이 주문 목록을 전부 훑어 지사를 모았습니다(수십 초).""")
+                    · 예전엔 이 경로가 없어 화면이 주문 목록을 전부 훑어 지사를 모았습니다(수십 초).
+
+                    ★**만료 지사**는 `expired` 로 내려갑니다(DSRE `END_GUBUN='Y'`).
+                    ‼️**지사명 앞의 `[만료]` 표시로 가리지 마세요** — 기준이 아닙니다.
+                    특약점팀 실측(2026-11-12): Y 인데 표시 없는 곳 10곳 ·
+                    표시는 있는데 N 인 곳 1곳(99001)이라 11곳이 틀리게 나옵니다.
+                    목록에서 아예 빼려면 `excludeExpired=true` 를 쓰세요.""")
     @GetMapping("/branches")
     public ApiResponse<List<BranchRow>> branches(
             @Parameter(description = "지사명·풀네임·매출코드·지사코드 부분일치. 미지정=전체")
-            @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(dsreGateway.listBranches(keyword));
+            @RequestParam(required = false) String keyword,
+            @Parameter(description = """
+                    만료 지사(`END_GUBUN='Y'`)를 **빼고** 줍니다. 기본 false(전부 줍니다).
+                    매출일괄등록 특약점 드롭다운처럼 "고르는 목록"에서 씁니다
+                    (발주처 2026-11-12 요청 3번 "만료된 특약점은 목록에 나오지 않게").""")
+            @RequestParam(defaultValue = "false") boolean excludeExpired) {
+        List<BranchRow> rows = dsreGateway.listBranches(keyword);
+        if (excludeExpired) {
+            rows = rows.stream().filter(r -> !r.expired()).toList();
+        }
+        return ApiResponse.success(rows);
     }
 
     @Operation(summary = "지사별 학교/학원 목록",

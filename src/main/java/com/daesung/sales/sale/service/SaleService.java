@@ -933,10 +933,25 @@ public class SaleService {
                     "그 거래처의 위탁창고가 없습니다. 창고관리에서 **소속거래처**를 그 거래처로 둔"
                             + " 위탁창고를 먼저 등록하세요.");
         }
-        if (consignWarehouses.size() > 1) {
+
+        // ★화면이 고른 위탁창고를 받는다(프론트 전달 2026-11-12 §4).
+        //   예전엔 서버가 혼자 정해서, 위탁창고가 2곳 이상인 거래처는 등록 자체가 막혔다.
+        //   ‼️그 거래처의 위탁창고가 맞는지 반드시 확인한다 — 남의 위탁창고로 물건이 넘어가면
+        //     미결원장이 엉뚱한 거래처에 선다. 화면 값을 그대로 믿으면 안 된다.
+        Warehouse consignWarehouse;
+        if (req.consignWarehouseId() != null) {
+            consignWarehouse = consignWarehouses.stream()
+                    .filter(w -> req.consignWarehouseId().equals(w.getId()))
+                    .findFirst()
+                    .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT,
+                            "그 거래처의 위탁창고가 아닙니다. 창고관리에서 **소속거래처**가"
+                                    + " 이 거래처인 위탁창고만 고를 수 있습니다."));
+        } else if (consignWarehouses.size() > 1) {
             throw new BusinessException(ErrorCode.INVALID_INPUT,
                     "그 거래처의 위탁창고가 " + consignWarehouses.size() + "개입니다 — 어디로 보낼지"
-                            + " 정할 수 없습니다. 위탁출고 화면에서 창고를 직접 고르세요.");
+                            + " 정할 수 없습니다. 출고 창고에서 위탁창고를 직접 고르세요.");
+        } else {
+            consignWarehouse = consignWarehouses.get(0);
         }
 
         List<ConsignmentOutRequest.Item> items = new ArrayList<>();
@@ -961,7 +976,7 @@ public class SaleService {
         SalesEntryRequest.Item first = req.items().get(0);
         ConsignmentOutResponse out = consignmentService.consignmentOut(new ConsignmentOutRequest(
                 req.salesDate(), req.partnerId(), req.warehouseId(),
-                consignWarehouses.get(0).getId(), first.schoolCode(), first.schoolName(), items));
+                consignWarehouse.getId(), first.schoolCode(), first.schoolName(), items));
 
         List<SalesEntryResponse.Line> lines = new ArrayList<>();
         for (ConsignmentOutResponse.Line l : out.items()) {
