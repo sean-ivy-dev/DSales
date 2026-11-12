@@ -1226,13 +1226,13 @@ public class JdbcDsreGateway implements DsreGateway {
     // ── 주문 등록 보조 조회(지사·지사별 학교·상세) ─────────────────────────────
 
     private static final String SQL_BRANCHES = """
-            SELECT CUST_CD, CUST_NM, CUST_FNM, CITY_NM, MACHUL_CD
+            SELECT CUST_CD, CUST_NM, CUST_FNM, CITY_NM, MACHUL_CD, END_GUBUN
               FROM tbl_cust_info
              ORDER BY CITY_NM, CUST_NM
             """;
 
     private static final String SQL_BRANCHES_KEYWORD = """
-            SELECT CUST_CD, CUST_NM, CUST_FNM, CITY_NM, MACHUL_CD
+            SELECT CUST_CD, CUST_NM, CUST_FNM, CITY_NM, MACHUL_CD, END_GUBUN
               FROM tbl_cust_info
              WHERE CUST_NM LIKE ? OR CUST_FNM LIKE ? OR MACHUL_CD LIKE ? OR CUST_CD LIKE ?
              ORDER BY CITY_NM, CUST_NM
@@ -1243,7 +1243,8 @@ public class JdbcDsreGateway implements DsreGateway {
         RowMapper<BranchRow> mapper = (rs, i) -> new BranchRow(
                 trim(rs.getString("CUST_CD")), rs.getString("CUST_NM"),
                 rs.getString("CUST_FNM"), rs.getString("CITY_NM"),
-                trim(rs.getString("MACHUL_CD")));
+                trim(rs.getString("MACHUL_CD")),
+                "Y".equals(trim(rs.getString("END_GUBUN"))));
         if (keyword == null || keyword.isBlank()) {
             return dsreJdbcTemplate.query(SQL_BRANCHES, mapper);
         }

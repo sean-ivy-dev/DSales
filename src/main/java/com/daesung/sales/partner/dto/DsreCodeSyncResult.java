@@ -42,6 +42,24 @@ public record DsreCodeSyncResult(
                 PDF 파일명이 그 대표값을 쓰므로, 여기 나온 거래처는
                 **어느 코드로 파일명을 만들지 확인이 필요하다.**""",
                 example = "[\"A30D201 → 90001,99001\"]")
-        List<String> multiMappedPartners
+        List<String> multiMappedPartners,
+
+        @Schema(description = """
+                DSRE 만료(`END_GUBUN='Y'`)로 **새로 만료 처리한** 거래처 수.
+
+                ‼️그 거래처의 DSRE 지사가 **모두 Y** 일 때만 건다 — 하나라도 사용 중이면
+                만료가 아니다(매출코드를 지사 여럿이 공유하는 곳이 있다).
+                ‼️만료일은 **동기화가 처음 Y 를 본 날**이다. DSRE 에 만료 날짜 칸이 없어서다.
+                이미 만료된 거래처는 날짜를 덮지 않으므로 재실행하면 0 이다.""",
+                example = "19")
+        int dsreExpired,
+
+        @Schema(description = """
+                DSRE 가 `N` 으로 돌아와 **만료를 푼** 거래처 수.
+
+                ★`end_source='DSRE'` 인 행만 푼다 — 담당자가 [거래 종료]한 거래처나
+                레거시에서 이관된 만료는 DSRE 와 무관하므로 그대로 둔다.""",
+                example = "0")
+        int dsreRestored
 ) {
 }

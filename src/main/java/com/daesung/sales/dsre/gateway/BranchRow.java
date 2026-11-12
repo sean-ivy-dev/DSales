@@ -18,6 +18,17 @@ public record BranchRow(
         @Schema(description = "지사 풀네임") String custFullName,
         @Schema(description = "관할/도시명") String cityName,
         @Schema(description = "매출코드 — 우리 거래처 마스터의 코드와 같은 값", example = "A26D153")
-        String machulCode
+        String machulCode,
+
+        /**
+         * <b>만료 지사인가</b>(DSRE {@code tbl_cust_info.END_GUBUN = 'Y'}, 기본 N).
+         *
+         * <p>‼️DSRE 에는 <b>만료 날짜 칸이 없다</b> — 이 플래그가 전부다.
+         * <p>‼️거래처명 앞의 {@code [만료]} 표시는 기준이 <b>아니다</b>(특약점팀 실측 2026-11-12:
+         * Y 인데 표시 없는 곳 10곳 · 표시는 있는데 N 인 곳 1곳).
+         */
+        @Schema(description = "만료 지사 여부(DSRE END_GUBUN='Y'). DSRE 에는 만료일 칸이 없다",
+                example = "false")
+        boolean expired
 ) {
 }

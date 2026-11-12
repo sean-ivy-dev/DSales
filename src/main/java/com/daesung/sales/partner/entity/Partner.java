@@ -154,6 +154,16 @@ public class Partner extends BaseEntity {
     @Column(name = "end_date")
     private LocalDate endDate;
 
+    /**
+     * 만료 <b>출처</b> — {@code MANUAL}(거래 종료·레거시 이관) / {@code DSRE}(END_GUBUN 동기화).
+     * 만료가 아니면 {@code null}.
+     *
+     * <p>‼️이 칸이 없으면 <b>DSRE 가 N 으로 돌아올 때 담당자가 직접 끝낸 거래처까지 풀린다.</b>
+     * 동기화는 {@code DSRE} 인 행만 되살린다({@link #clearDsreExpiry()}).
+     */
+    @Column(name = "end_source", length = 10)
+    private String endSource;
+
     /** 거래 만료 여부. */
     public boolean isExpired() {
         return endDate != null;
@@ -200,12 +210,52 @@ public class Partner extends BaseEntity {
     public void discontinue(LocalDate on) {
         if (this.endDate == null) {
             this.endDate = on;
+            this.endSource = "MANUAL";
         }
     }
 
     /** 사용 재개 — 만료일을 지운다. */
     public void restore() {
         this.endDate = null;
+        this.endSource = null;
+    }
+
+    /**
+     * DSRE 동기화가 만료를 <b>건다</b>({@code END_GUBUN='Y'}).
+     *
+     * <p>‼️<b>이미 만료된 거래처는 건드리지 않는다.</b> 담당자가 직접 끝낸 날짜(또는 레거시
+     * 이관 날짜)가 동기화 날짜로 밀리면 "언제부터 안 쓰게 됐는지"가 사라진다.
+     *
+     * <p>‼️날짜는 <b>동기화가 처음 Y 를 본 날</b>이다 — DSRE 에 만료일 칸이 없어서다
+     * ({@code tbl_cust_info} 에 날짜는 {@code REG_DATE} 뿐). 실제 만료일과 다를 수 있다.
+     *
+     * @return 이번에 새로 만료가 걸렸으면 true
+     */
+    public boolean markDsreExpired(LocalDate seenOn) {
+        if (this.endDate != null) {
+            return false;
+        }
+        this.endDate = seenOn;
+        this.endSource = "DSRE";
+        return true;
+    }
+
+    /**
+     * DSRE 동기화가 만료를 <b>푼다</b>({@code END_GUBUN} 이 N 으로 돌아왔을 때).
+     *
+     * <p>★<b>DSRE 가 건 것만 푼다.</b> 담당자가 [거래 종료]한 거래처나 레거시에서 이관된
+     * 만료는 DSRE 와 무관하므로 그대로 둔다 — 그러지 않으면 DSRE 쪽 사정으로
+     * 우리가 끝낸 거래처가 되살아난다.
+     *
+     * @return 이번에 만료가 풀렸으면 true
+     */
+    public boolean clearDsreExpiry() {
+        if (!"DSRE".equals(this.endSource)) {
+            return false;
+        }
+        this.endDate = null;
+        this.endSource = null;
+        return true;
     }
 
     public void updateCredit(Long assureAmount, LocalDate assureExpiry, String assureNote) {
