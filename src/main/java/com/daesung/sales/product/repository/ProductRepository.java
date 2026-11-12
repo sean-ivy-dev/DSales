@@ -169,7 +169,28 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      *                                   (★거래처x대분류 매핑을 아예 보지 않는다)
      *   (3) 열기 행 있음               -&gt; 노출
      *   (4) 거래처x대분류 매핑(PartnerSupplyRate, web_visible=Y·use_yn=Y) -&gt; 노출 / 그 외 비노출
+     *   (5) ★단가를 구할 수 있어야 한다 — 정가 &gt; 0 이고 공급률(거래처 매핑 or 도서)이 있을 것
      * </pre>
+     *
+     * <h3>★(5) 는 왜 있나 — "고를 수는 있는데 저장이 안 되는" 상태를 막는다</h3>
+     * 특약점팀 전달(2026-11-12): 목록에는 뜨는데 신청하면 400 으로 거절됐다
+     * ({@code DL-A2012A-01} 「2013 학습서 언어영역(비문학)」). 노출은 "노출 켜짐"만 보고
+     * 주문 접수({@code SaleService.resolve})는 단가를 요구해서, 둘 사이에 틈이 있었다.
+     * 요청 2번("단가를 정할 수 없는 도서는 products 목록에서 제외 — 주문 접수 규칙과 같은 기준")
+     * 을 그대로 넣은 것이다. <b>접수가 거부할 도서는 애초에 고르지 못하게 한다.</b>
+     *
+     * <p>실측(2026-11-12 운영): 노출 후보 5,723종 중 <b>정가가 없거나 0 인 것이 2,506종</b>
+     * (IC 2,012 · 모의고사 361 · 기타고사 101 · 특강 22 · 교재 10)이고,
+     * 그중 <b>1,682종이 「해설」</b>이다. 나머지도 지도서·교사용·플래너·쿠폰·「기타매출」·
+     * 「단가조정분」처럼 <b>따로 파는 물건이 아니다</b> — 정가가 0 인 게 맞다.
+     *
+     * <p>‼️레거시와도 어긋나지 않는다. DSRE 특약점 교재 목록({@code tbl_booklist_dtl}) <b>34종</b>에
+     * 해설·지도서·교사용은 <b>하나도 없고</b> 전부 정가·공급률이 채워져 있다 —
+     * 레거시는 목록이 {@code 정가 × DISSUSU / 100} 까지 계산해 보여줬으므로
+     * <b>단가 없는 도서가 목록에 오를 수 없는 구조</b>였다.
+     *
+     * <p>⚠️공급률은 <b>거래처 매핑이 먼저, 없으면 도서 기본 공급률</b>이다 —
+     * 주문 접수({@code SaleService.resolve})와 같은 우선순위다. 한쪽만 바꾸면 틈이 다시 생긴다.
      *
      * <p>★<b>'닫기'는 없다</b> — 예외 행은 이제 <b>열기 하나</b>뿐이고, 닫는 것은 행을 지우는
      * 것이다. 10/31 판은 열기/닫기 두 상태였는데, "지정 거래처에만 노출"을 그 구조로 하려면
@@ -204,6 +225,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
                and p.useYn = true
                and (ex.id is not null
                  or (p.restrictedVisible = false and m.webVisible = true and m.useYn = true))
+               and coalesce(p.price, 0) > 0
+               and coalesce(m.supplyRate, p.supplyRate) is not null
              order by p.catCode asc, p.code asc
             """)
     java.util.List<Product> findDealerVisible(
@@ -240,6 +263,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
                and p.useYn = true
                and (ex.id is not null
                  or (p.restrictedVisible = false and m.webVisible = true and m.useYn = true))
+               and coalesce(p.price, 0) > 0
+               and coalesce(m.supplyRate, p.supplyRate) is not null
             """)
     boolean isDealerVisible(@org.springframework.data.repository.query.Param("partnerId") Long partnerId,
                             @org.springframework.data.repository.query.Param("product") Product product);

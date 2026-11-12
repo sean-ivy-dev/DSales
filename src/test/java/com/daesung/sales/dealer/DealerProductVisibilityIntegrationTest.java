@@ -224,4 +224,59 @@ class DealerProductVisibilityIntegrationTest extends IntegrationTestSupport {
         // 전역 JsonInclude.NON_NULL — 값이 없으면 키 자체가 빠진다.
         assertThat(r.path("data").hasNonNull("receiverName")).isFalse();
     }
+
+    /**
+     * ★<b>단가를 못 구하는 도서는 목록에 없다</b>(특약점팀 요청 2026-11-12 §2).
+     *
+     * <p>그전엔 "노출 켜짐"만 보고 목록을 만들어, 정가가 없는 도서가 목록엔 뜨고
+     * 신청하면 400 으로 거절됐다({@code DL-A2012A-01}). 접수가 거부할 도서는
+     * 애초에 고르지 못하게 한다.
+     *
+     * <p>운영 실측(2026-11-12): 정가 0 인 노출 후보 2,506종 중 1,682종이 「해설」이고
+     * 나머지도 지도서·교사용·쿠폰처럼 따로 파는 물건이 아니다. 레거시 특약점 교재
+     * 목록 34종에도 해설·지도서는 하나도 없다.
+     */
+    @Test
+    @DisplayName("★★정가가 0/없는 도서는 목록에서 빠진다 — 고를 수는 있는데 저장이 안 되던 것")
+    void 정가없으면_목록에서_빠진다() {
+        String noPrice = "DVB3" + SFX;
+        Map<String, Object> b = new HashMap<>();
+        b.put("code", noPrice);
+        b.put("name", "해설(정가 0)");
+        b.put("contentType", "SELF");
+        b.put("price", 0);                       // ← 해설·지도서가 이 모양이다
+        b.put("supplyRate", 70);
+        b.put("salesDivision", "교재");
+        b.put("catCode", "A2089A");
+        b.put("catName", "노출분류");
+        b.put("webVisible", true);               // 노출은 켜 둔다
+        createId("/masters/products", b);
+
+        assertThat(visibleCodes())
+                .as("‼️정가가 없으면 단가를 못 구한다 — 목록에 있으면 신청이 400 으로 거절된다")
+                .doesNotContain(noPrice)
+                .as("다른 도서는 그대로 보인다").contains(visibleCode);
+    }
+
+    @Test
+    @DisplayName("★공급률을 못 구해도 빠진다 — 거래처 매핑도 도서 기본값도 없을 때")
+    void 공급률없으면_목록에서_빠진다() {
+        // 대분류가 '기타고사'인 도서 — 이 거래처에는 교재 매핑만 있어 기타고사 매핑이 없다.
+        // 도서 자체 공급률도 비워 두면 어느 쪽으로도 공급률을 구할 수 없다.
+        String noRate = "DVB4" + SFX;
+        Map<String, Object> b = new HashMap<>();
+        b.put("code", noRate);
+        b.put("name", "공급률 없는 도서");
+        b.put("contentType", "SELF");
+        b.put("price", 10000);                   // 정가는 있다
+        b.put("salesDivision", "기타고사");        // 매핑 없는 대분류
+        b.put("catCode", "A2089A");
+        b.put("catName", "노출분류");
+        b.put("webVisible", true);
+        createId("/masters/products", b);
+
+        assertThat(visibleCodes())
+                .as("공급률을 못 구하면 단가도 못 구한다")
+                .doesNotContain(noRate);
+    }
 }
