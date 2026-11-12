@@ -181,6 +181,42 @@ public class AuthService {
         return toUserResponse(user);
     }
 
+    /**
+     * 관리자 비밀번호 초기화(발주처 2026-11-12 ③ — "잊은 경우는 관리자 초기화로 처리").
+     *
+     * <p>★그 사용자의 refresh 를 모두 폐기한다 — 비밀번호가 바뀌었는데 예전 세션이 14일 동안
+     * 재발급으로 이어지면 초기화한 의미가 없다. access 는 만료(30분)까지 남는다(계정 중지와 같다).
+     */
+    @Transactional
+    public UserResponse resetPassword(Long userId, String newPassword) {
+        AppUser user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "계정이 없습니다. id=" + userId));
+        user.changePassword(passwordEncoder.encode(newPassword));
+        refreshTokenStore.revokeAllByUser(user.getId());
+        return toUserResponse(user);
+    }
+
+    /**
+     * 본인 비밀번호 변경(발주처 2026-11-12 ③). 지금 비밀번호가 맞아야 한다 —
+     * 자리를 비운 사이 열린 화면으로 남이 바꾸는 것을 막는다.
+     *
+     * <p>다른 곳에 남은 세션(refresh)은 모두 끊는다. 지금 화면도 access 만료(30분) 뒤에는
+     * 새 비밀번호로 다시 로그인해야 한다.
+     */
+    @Transactional
+    public void changeOwnPassword(String username, String currentPassword, String newPassword) {
+        AppUser user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "계정이 없습니다."));
+        if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "지금 비밀번호가 맞지 않습니다.");
+        }
+        if (passwordEncoder.matches(newPassword, user.getPassword())) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "새 비밀번호가 지금 비밀번호와 같습니다.");
+        }
+        user.changePassword(passwordEncoder.encode(newPassword));
+        refreshTokenStore.revokeAllByUser(user.getId());
+    }
+
     /** refresh 토큰은 원문 대신 SHA-256 해시로 저장. */
     private static String sha256(String s) {
         try {

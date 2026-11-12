@@ -80,6 +80,9 @@ public class SecurityConfig {
                         //   deny-by-default에 걸려 403이 된다 — 로그인한 사람이 로그아웃을
                         //   못 하는 상태였다(전 API 점검에서 잡힘). 권한으로 통제할 대상이 아니다.
                         .requestMatchers("/api/v1/auth/logout", "/api/v1/auth/me").authenticated()
+                        // 본인 비밀번호 변경(발주처 11/12 ③-2) — 역할과 무관하게 자기 것만 바꾼다.
+                        //   권한 표에 /auth 화면이 없어 여기 두지 않으면 deny-by-default 로 403 이 된다.
+                        .requestMatchers("/api/v1/auth/me/password").authenticated()
                         // ── 그 외 전부: 권한 표에서 판정한다 ──────────────────────────────
                         // 예전엔 여기에 경로별 hasRole(...)이 스무 줄 나열돼 있었다.
                         // 발주처 요구(2026-08-21 ①)가 "화면/필드 단위 권한을 관리자가 운영 중

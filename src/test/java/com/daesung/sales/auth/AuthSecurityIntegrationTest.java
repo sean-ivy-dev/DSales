@@ -195,6 +195,58 @@ class AuthSecurityIntegrationTest extends IntegrationTestSupport {
         assertThat(after.getStatusCode().value()).isEqualTo(401);
     }
 
+    @Test
+    @DisplayName("★비밀번호 — 관리자 초기화 · 본인 변경(발주처 11/12 ③). 바꾸면 옛 비밀번호·옛 세션은 끝난다")
+    void 비밀번호_초기화와_변경() throws Exception {
+        String user = "pw-user-" + System.nanoTime() % 1_000_000L;
+        createUser(user, "SALES");
+        long id = 0;
+        for (JsonNode u : om.readTree(
+                exchangeRaw(HttpMethod.GET, "/permissions/users", null, token(), null).getBody())
+                .path("data")) {
+            if (user.equals(u.path("username").asText())) {
+                id = u.path("userId").asLong();
+            }
+        }
+        assertThat(id).as("만든 계정이 목록에 있다").isPositive();
+        String oldCookie = refreshCookieValue(exchangeRaw(HttpMethod.POST, "/auth/login",
+                Map.of("username", user, "password", "Pw123456!"), null, null));
+
+        // ① 관리자 초기화 — 관리자만, 8자 이상
+        assertThat(status(HttpMethod.PUT, "/auth/users/" + id + "/password",
+                Map.of("newPassword", "Temp1234!"), loginToken("rbac-sales"))).isEqualTo(403);
+        assertThat(status(HttpMethod.PUT, "/auth/users/" + id + "/password",
+                Map.of("newPassword", "short"), token())).isEqualTo(400);
+        assertThat(status(HttpMethod.PUT, "/auth/users/" + id + "/password",
+                Map.of("newPassword", "Temp1234!"), token())).isEqualTo(200);
+        assertThat(loginStatus(user, "Pw123456!")).as("옛 비밀번호는 안 된다").isEqualTo(401);
+        assertThat(loginStatus(user, "Temp1234!")).isEqualTo(200);
+        assertThat(exchangeRaw(HttpMethod.POST, "/auth/refresh", null, null,
+                oldCookie).getStatusCode().value())
+                .as("초기화 전 세션은 재발급이 막힌다").isEqualTo(401);
+
+        // ② 본인 변경 — 역할과 무관하게 자기 것. 지금 비밀번호가 맞아야 하고, 같은 값은 안 된다
+        String bearer = om.readTree(exchangeRaw(HttpMethod.POST, "/auth/login",
+                Map.of("username", user, "password", "Temp1234!"), null, null).getBody())
+                .path("data").path("accessToken").asText();
+        assertThat(status(HttpMethod.PUT, "/auth/me/password",
+                Map.of("currentPassword", "wrong-pass", "newPassword", "Mine5678!"), bearer)).isEqualTo(400);
+        assertThat(status(HttpMethod.PUT, "/auth/me/password",
+                Map.of("currentPassword", "Temp1234!", "newPassword", "Temp1234!"), bearer)).isEqualTo(400);
+        assertThat(status(HttpMethod.PUT, "/auth/me/password",
+                Map.of("currentPassword", "Temp1234!", "newPassword", "Mine5678!"), bearer)).isEqualTo(200);
+        assertThat(loginStatus(user, "Temp1234!")).isEqualTo(401);
+        assertThat(loginStatus(user, "Mine5678!")).isEqualTo(200);
+        assertThat(status(HttpMethod.PUT, "/auth/me/password",
+                Map.of("currentPassword", "Mine5678!", "newPassword", "Other999!"), null))
+                .as("로그인 안 하면 못 바꾼다").isEqualTo(401);
+    }
+
+    private int loginStatus(String username, String password) {
+        return exchangeRaw(HttpMethod.POST, "/auth/login",
+                Map.of("username", username, "password", password), null, null).getStatusCode().value();
+    }
+
     // ── helpers ──
 
     private ResponseEntity<String> login() {

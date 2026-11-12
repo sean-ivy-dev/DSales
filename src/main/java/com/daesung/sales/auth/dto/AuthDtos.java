@@ -50,6 +50,22 @@ public final class AuthDtos {
             @NotNull Boolean active) {
     }
 
+    /** 관리자 비밀번호 초기화 — 관리자가 정한 임시 비밀번호로 바꾼다(발주처 11/12 ③-1·3). */
+    public record PasswordResetRequest(
+            @Schema(description = "새 비밀번호(8자 이상). 사용자에게 전달한 뒤 본인이 바꾸게 한다",
+                    requiredMode = Schema.RequiredMode.REQUIRED)
+            @NotBlank @jakarta.validation.constraints.Size(min = 8, max = 100) String newPassword) {
+    }
+
+    /** 본인 비밀번호 변경(발주처 11/12 ③-2). 지금 비밀번호를 한 번 더 받는다. */
+    public record PasswordChangeRequest(
+            @Schema(description = "지금 비밀번호", requiredMode = Schema.RequiredMode.REQUIRED)
+            @NotBlank String currentPassword,
+            @Schema(description = "새 비밀번호(8자 이상, 지금 것과 달라야 함)",
+                    requiredMode = Schema.RequiredMode.REQUIRED)
+            @NotBlank @jakarta.validation.constraints.Size(min = 8, max = 100) String newPassword) {
+    }
+
     public record UserResponse(
             @Schema(description = "사용자 id") Long id,
             @Schema(description = "아이디") String username,

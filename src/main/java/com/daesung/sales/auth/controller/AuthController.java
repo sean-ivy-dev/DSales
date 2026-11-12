@@ -2,6 +2,8 @@ package com.daesung.sales.auth.controller;
 
 import com.daesung.sales.auth.config.JwtProperties;
 import com.daesung.sales.auth.dto.AuthDtos.LoginRequest;
+import com.daesung.sales.auth.dto.AuthDtos.PasswordChangeRequest;
+import com.daesung.sales.auth.dto.AuthDtos.PasswordResetRequest;
 import com.daesung.sales.auth.dto.AuthDtos.RefreshRequest;
 import com.daesung.sales.auth.dto.AuthDtos.TokenResponse;
 import com.daesung.sales.auth.dto.AuthDtos.UserActiveRequest;
@@ -78,6 +80,36 @@ public class AuthController {
             Principal principal) {
         return ApiResponse.success(
                 authService.setActive(id, req.active(), principal == null ? null : principal.getName()));
+    }
+
+    @Operation(summary = "비밀번호 초기화(관리자 전용)",
+            description = """
+                    관리자가 정한 **임시 비밀번호**로 바꾼다. 근거: 발주처 2026-11-12 ③
+                    "비밀번호를 잊은 경우는 관리자 초기화로 처리(별도 찾기 화면은 필요 없음)".
+
+                    · 그 사용자의 다른 세션(refresh)은 모두 끊는다 — 예전 비밀번호로 연 세션이
+                      재발급으로 이어지지 않게. 이미 발급된 access 는 만료(30분)까지 남는다.
+                    · 임시 비밀번호는 관리자가 사용자에게 전달하고, 사용자는 로그인 후
+                      `PUT /auth/me/password` 로 바꾼다.
+                    · 8자 이상.""")
+    @PutMapping("/users/{id}/password")
+    public ApiResponse<UserResponse> resetPassword(
+            @Parameter(description = "사용자 id", required = true) @PathVariable Long id,
+            @Valid @RequestBody PasswordResetRequest req) {
+        return ApiResponse.success(authService.resetPassword(id, req.newPassword()));
+    }
+
+    @Operation(summary = "내 비밀번호 변경",
+            description = """
+                    로그인한 사용자가 **본인** 비밀번호를 바꾼다. 근거: 발주처 2026-11-12 ③-2.
+
+                    · 지금 비밀번호가 맞아야 한다(틀리면 400). 새 비밀번호는 8자 이상, 지금 것과 달라야 한다.
+                    · 다른 곳에 남은 세션은 모두 끊긴다. 지금 화면도 access 만료(30분) 뒤에는
+                      새 비밀번호로 다시 로그인해야 한다 — 프론트는 성공하면 바로 다시 로그인시키는 편이 깔끔하다.""")
+    @PutMapping("/me/password")
+    public ApiResponse<Void> changeMyPassword(@Valid @RequestBody PasswordChangeRequest req, Principal principal) {
+        authService.changeOwnPassword(principal.getName(), req.currentPassword(), req.newPassword());
+        return ApiResponse.success(null);
     }
 
     @Operation(summary = "로그인",
