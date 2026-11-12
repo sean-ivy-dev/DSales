@@ -411,6 +411,10 @@ public class ExcelExportUtil {
             // ★집계행은 **단계마다 다른 색**이다(F-33 레거시 색 코드). 예전엔 전 단계가 한 색이라
             //   소계·누계·합계·총계가 구분되지 않았다 — 같은 회색이면 어디가 끝인지 안 보인다.
             java.util.Map<String, CellStyle> aggStyles = new java.util.HashMap<>();
+            // ★날짜 칸은 **날짜 값 + yyyy-mm-dd 서식**으로 쓴다(발주처 2026-11-12 ④ — 텍스트로 들어가
+            //   엑셀 필터·피벗에서 연·월 묶기가 안 됐다). 바탕 스타일(본문·집계 색)마다 날짜판을 하나씩 둔다.
+            java.util.Map<CellStyle, CellStyle> dateStyles = new java.util.IdentityHashMap<>();
+            short dateFormat = wb.getCreationHelper().createDataFormat().getFormat("yyyy-mm-dd");
 
             // ‼️제목·조회기준 2행은 **맨 마지막에** 쓴다. 먼저 쓰면 그 긴 문구가 A열에 들어가
             //   autoSizeColumn 이 A열을 그 길이에 맞춰 버린다(실측: 날짜 칸이 26.5자로 부풀었다).
@@ -438,8 +442,21 @@ public class ExcelExportUtil {
                 }
                 for (int c = 0; c < headers.size(); c++) {
                     Cell cell = row.createCell(c);
-                    setCell(cell, c < r.values().size() ? r.values().get(c) : null);
-                    cell.setCellStyle(style);
+                    Object v = c < r.values().size() ? r.values().get(c) : null;
+                    java.time.LocalDate date = asDate(v);
+                    if (date != null) {
+                        cell.setCellValue(date);
+                        CellStyle base = style;
+                        cell.setCellStyle(dateStyles.computeIfAbsent(base, b -> {
+                            CellStyle d = wb.createCellStyle();
+                            d.cloneStyleFrom(b);
+                            d.setDataFormat(dateFormat);
+                            return d;
+                        }));
+                    } else {
+                        setCell(cell, v);
+                        cell.setCellStyle(style);
+                    }
                 }
             }
 
@@ -521,6 +538,28 @@ public class ExcelExportUtil {
         s.setBorderLeft(org.apache.poi.ss.usermodel.BorderStyle.THIN);
         s.setBorderRight(org.apache.poi.ss.usermodel.BorderStyle.THIN);
         return s;
+    }
+
+    /** {@code yyyy-MM-dd} 꼴 값만 날짜로 본다. 값은 Jackson 평탄화를 거쳐 문자열로 온다. */
+    private static final java.util.regex.Pattern ISO_DATE =
+            java.util.regex.Pattern.compile("\\d{4}-\\d{2}-\\d{2}");
+
+    /**
+     * 날짜로 쓸 값이면 그 날짜, 아니면 null. {@code LocalDate} 이거나 정확히 {@code yyyy-MM-dd} 인
+     * 문자열만 — 시각이 붙은 값·코드 등은 건드리지 않는다. 달력에 없는 날(2026-02-30)도 글자로 둔다.
+     */
+    static java.time.LocalDate asDate(Object v) {
+        if (v instanceof java.time.LocalDate d) {
+            return d;
+        }
+        if (v instanceof String s && ISO_DATE.matcher(s).matches()) {
+            try {
+                return java.time.LocalDate.parse(s);
+            } catch (java.time.format.DateTimeParseException e) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private void setCell(Cell cell, Object v) {
