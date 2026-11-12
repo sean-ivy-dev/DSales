@@ -107,6 +107,24 @@ class ArNoActivityRowIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
+    @DisplayName("★★앞 구간에만 거래가 있고 다 수금돼 시작 잔액이 0 이어도 행은 남는다 — 레거시 6구간(11/12)")
+    void 앞구간기록만_있어도_행유지() {
+        // 3월에 매출 = 수금으로 끝난 거래처를 4~12월로 조회한다. 기초(opening) 금액은 0, 기간 중 거래도 없다.
+        // 레거시는 1/1~시작 전날 매출·수금 행이 union 에 있어 그룹이 생긴다 → 화면에 있다.
+        // 금액으로 거르면 이런 거래처가 빠져 9월 연구소 174곳 6구간이 149곳 3구간이 됐다(발주처 11/12 지적).
+        JsonNode r = null;
+        for (JsonNode x : data(get("/closing/ar-status?fromDate=" + YEAR + "-04-01&toDate=" + YEAR + "-12-31"))
+                .path("rows")) {
+            if (nettedCode.equals(x.path("partnerCode").asText())) {
+                r = x;
+            }
+        }
+        assertThat(r).as("앞 구간 기록이 있는 거래처가 빠졌다 — 레거시 화면엔 있다").isNotNull();
+        assertThat(r.path("opening").asLong()).isZero();
+        assertThat(r.path("balance").asLong()).isZero();
+    }
+
+    @Test
     @DisplayName("보통 매출은 그대로 나온다")
     void 보통매출은_유지() {
         JsonNode r = row(plainCode);

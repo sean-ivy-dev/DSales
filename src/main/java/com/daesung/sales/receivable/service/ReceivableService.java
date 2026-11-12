@@ -676,7 +676,14 @@ public class ReceivableService {
             //   ‼️수량 칸은 보지 않는다 — 공급률 0 무가(교사용·증정) 수량만 있는 거래처가 바로
             //   이 케이스다(A30D274 교사용 200부 · A30D294 110부, 금액 전부 0). 레거시는 supRate=0
             //   무가를 union 에서 빼기 때문에 그 거래처가 화면에 없었다.
-            boolean noActivity = opening == 0 && s[0] == 0 && collected == 0
+            //   ‼️기초(opening)는 **금액이 아니라 기록이 있는지**로 본다(2026-11-12 정정). 레거시 union 의
+            //     이월 쪽 세 줄(그해 carrData · 1/1~시작 전날 매출 · 수금)은 **행이 하나라도 있으면**
+            //     그룹을 만든다 — 상반기에 이월을 다 받아 9월 시작 잔액이 0 인 거래처도 레거시 화면엔 있다.
+            //     금액(opening == 0)으로 보면 그런 거래처가 빠져 9월 연구소 174곳 6구간이 149곳 3구간이
+            //     됐다(D·G·H 구간이 통째로 사라짐. 금액은 0 이라 합계는 같았다 — 발주처 11/12 지적).
+            boolean hasOpeningRecord = carry.containsKey(pid) || priorSales.containsKey(pid)
+                    || priorColl.containsKey(pid) || priorPurchase.containsKey(pid);
+            boolean noActivity = !hasOpeningRecord && s[0] == 0 && collected == 0
                     && purchased == 0 && purchasedQty == 0;
             if (noActivity) {
                 continue;
