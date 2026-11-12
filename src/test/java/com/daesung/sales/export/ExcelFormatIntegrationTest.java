@@ -88,15 +88,24 @@ class ExcelFormatIntegrationTest extends IntegrationTestSupport {
         boolean foundPlainDetail = false;
         for (Row row : s) {
             Cell first = row.getCell(0);
-            if (first == null || first.getCellType() != org.apache.poi.ss.usermodel.CellType.STRING) {
+            if (first == null) {
+                continue;
+            }
+            boolean filled = first.getCellStyle().getFillPattern() == FillPatternType.SOLID_FOREGROUND;
+            // ★명세행의 첫 칸(날짜)은 이제 **날짜 셀**이다(발주처 11/12 ④ — 텍스트였다).
+            if (first.getCellType() == org.apache.poi.ss.usermodel.CellType.NUMERIC
+                    && org.apache.poi.ss.usermodel.DateUtil.isCellDateFormatted(first)) {
+                if (first.getLocalDateTimeCellValue().getYear() == YEAR) {   // 날짜로 시작하는 명세행
+                    foundPlainDetail |= !filled;
+                }
+                continue;
+            }
+            if (first.getCellType() != org.apache.poi.ss.usermodel.CellType.STRING) {
                 continue;
             }
             String v = first.getStringCellValue();
-            boolean filled = first.getCellStyle().getFillPattern() == FillPatternType.SOLID_FOREGROUND;
             if (v.contains("계")) {          // 일 계 · 월 계 · 누 계 · 이월 금액
                 foundFilledAggregate |= filled;
-            } else if (v.startsWith(String.valueOf(YEAR))) {   // 날짜로 시작하는 명세행
-                foundPlainDetail |= !filled;
             }
         }
         assertThat(foundFilledAggregate).as("집계행에 색이 없다").isTrue();
