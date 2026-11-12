@@ -45,12 +45,15 @@ import org.springframework.transaction.annotation.Transactional;
  *           반품 = 이관 시작값 + 기준일 이후 매출프로그램 반품(RETURN) 합계
  *           재고만 특약점이 입력, 매입·반품 입력은 무시(이관 시작값을 덮어쓰면 안 된다)
  *   대상   교재만(대분류=교재)
- *   범위   그 거래처에 §1 노출 규칙(①②③④)으로 노출되는 교재 ∪ 이력 있는 교재(§2)
+ *   범위   특약점 재고현황 교재({@code dealer_stock_listed}) ∪ 이력 있는 교재(§2)
  * </pre>
  *
- * <p>★<b>노출 판정을 또 구현하지 않는다.</b> {@link DealerProductService}(요청1)가 쓰는
- * {@link ProductRepository#findDealerVisible} 를 그대로 재사용해 <b>교재만</b> 추려낸다 —
- * 노출 규칙이 두 곳에 갈리면 "신청 화면엔 보이는데 재고현황엔 안 보이는" 어긋남이 생긴다.
+ * <p>★★<b>신청 화면 노출({@link ProductRepository#findDealerVisible})을 쓰지 않는다</b>(PM 2026-11-12 §1).
+ * 예전엔 그걸 재사용했는데, 그 규칙은 거래처별(Web게시 + 거래처×대분류 설정)이라
+ * 설정이 켜진 3곳만 교재 85종이 보이고 나머지 특약점은 재고 기록이 있는 교재만 보였다 —
+ * <b>재고 기록이 없는 특약점은 새 교재의 재고를 입력할 수도 없었다.</b>
+ * 레거시 특약점 화면은 DSRE 교재 목록(USE_YN) 하나로 <b>모든 특약점에 같은 10종</b>을 보인다.
+ * 그 축을 {@link Product#isDealerStockListed()} 로 따로 둔다 — Web게시를 끄면 신청 목록·접수까지 막힌다.
  */
 @Service
 @RequiredArgsConstructor
@@ -227,7 +230,7 @@ public class DealerStockService {
     }
 
     /**
-     * 그 거래처가 볼 교재 전체 — <b>(노출 교재) ∪ (이력 있는 교재)</b>. 근거: 11/05 회신 §2
+     * 그 거래처가 볼 교재 전체 — <b>(특약점 재고현황 교재 — 모든 특약점 공통) ∪ (이력 있는 교재)</b>. 근거: 11/05 회신 §2
      * (11/04 §4의 "최근 12개월"을 <b>기간 무제한</b>으로 대체 + 사용여부(useYn) N인 도서는
      * 제외). 노출이 꺼진 뒤에도 특약점이 들고 있는 재고 숫자가 화면에서 사라지면 안 된다
      * (이미 입력한 값을 잃어버린 것처럼 보인다).
@@ -237,13 +240,13 @@ public class DealerStockService {
      * {@link #list} 가 저장값을 붙일 때 따로 조회하지 않고 여기서 교재 목록에 먼저
      * 합쳐 둔다.
      *
-     * <p>★<b>useYn 은 ①·②에도 적용한다</b> — {@link ProductRepository#findDealerVisible} 는
+     * <p>★<b>useYn 은 ①·②에도 적용한다</b> — {@link ProductRepository#findDealerStockListed} 는
      * 이미 {@code useYn=true} 를 보지만, 이력으로 끌어오는 도서는 그 쿼리를 거치지 않아
      * 같은 필터를 여기서 다시 걸어야 한다(안 그러면 그만 쓰는 도서가 이력 때문에 다시
      * 노출된다).
      */
     private List<Product> textbooksVisibleTo(Long partnerId) {
-        List<Product> visible = productRepository.findDealerVisible(partnerId);
+        List<Product> visible = productRepository.findDealerStockListed();
         Map<Long, Product> byId = visible.stream()
                 .collect(Collectors.toMap(Product::getId, p -> p, (a, b) -> a, java.util.LinkedHashMap::new));
 

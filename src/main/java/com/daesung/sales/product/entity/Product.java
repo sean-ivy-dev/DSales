@@ -127,6 +127,16 @@ public class Product extends BaseEntity {
     @Column(name = "stock_managed", nullable = false)
     private boolean stockManaged = true;
 
+    /**
+     * 특약점 재고현황 교재(PM 2026-11-12 §1). true면 <b>모든 특약점</b>의 재고현황에 보이고
+     * 재고를 입력할 수 있다. 레거시 DSRE 교재 목록(USE_YN)과 같은 축이다.
+     *
+     * <p>‼️{@link #webVisible} 과 다른 축이다 — Web게시는 <b>신청 화면</b> 노출 기준이라,
+     * 재고현황 목록을 줄이려고 그걸 끄면 신청 목록·접수까지 같이 막힌다.
+     */
+    @Column(name = "dealer_stock_listed", nullable = false)
+    private boolean dealerStockListed = false;
+
     public static Product create(String code, String name, ContentType contentType, boolean set,
                                  Integer price, boolean taxFree, String grade,
                                  String catCode, String catName, boolean useYn,
@@ -220,6 +230,7 @@ public class Product extends BaseEntity {
         m.put("webVisible|Web게시", String.valueOf(webVisible));
         m.put("restrictedVisible|지정거래처전용", String.valueOf(restrictedVisible));
         m.put("stockManaged|재고관리", String.valueOf(stockManaged));
+        m.put("dealerStockListed|특약점재고현황교재", String.valueOf(dealerStockListed));
         return m;
     }
 
@@ -229,7 +240,8 @@ public class Product extends BaseEntity {
      */
     public void updateFlags(Boolean webVisible, Boolean taxFree, Boolean ledgerVisible,
                             Boolean useYn, Boolean stockManaged, Boolean priceVisible,
-                            Boolean restrictedVisible) {
+                            Boolean restrictedVisible, Boolean dealerStockListed) {
+        this.dealerStockListed = keep(dealerStockListed, this.dealerStockListed);
         this.webVisible = keep(webVisible, this.webVisible);
         this.taxFree = keep(taxFree, this.taxFree);
         this.ledgerVisible = keep(ledgerVisible, this.ledgerVisible);

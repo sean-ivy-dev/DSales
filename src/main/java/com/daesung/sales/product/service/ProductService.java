@@ -291,7 +291,7 @@ public class ProductService {
     public ProductFlagBulkResult bulkUpdateFlags(ProductFlagBulkRequest req) {
         if (req.hasNoFlag()) {
             throw new BusinessException(ErrorCode.INVALID_INPUT,
-                    "변경할 항목을 하나 이상 지정해야 합니다(Web게시·면세·수불부노출·사용여부·재고관리).");
+                    "변경할 항목을 하나 이상 지정해야 합니다(Web게시·면세·수불부노출·사용여부·재고관리·특약점재고현황교재).");
         }
         int changed = 0;
         int unchanged = 0;
@@ -317,7 +317,8 @@ public class ProductService {
             Product p = found.get();
             Map<String, String> before = p.auditSnapshot();
             p.updateFlags(req.webVisible(), req.taxFree(), req.ledgerVisible(),
-                    req.useYn(), req.stockManaged(), req.priceVisible(), req.restrictedVisible());
+                    req.useYn(), req.stockManaged(), req.priceVisible(), req.restrictedVisible(),
+                    req.dealerStockListed());
             Map<String, String> after = p.auditSnapshot();
             if (before.equals(after)) {
                 unchanged++;

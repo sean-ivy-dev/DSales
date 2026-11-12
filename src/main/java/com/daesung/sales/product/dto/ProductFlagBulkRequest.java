@@ -52,11 +52,18 @@ public record ProductFlagBulkRequest(
 
         @Schema(description = "재고관리 여부 — 미지정이면 건드리지 않음. "
                 + "끄면 매출 시 재고가 차감되지 않으니 주의", example = "true")
-        Boolean stockManaged
+        Boolean stockManaged,
+
+        @Schema(description = """
+                특약점 재고현황 교재 — 미지정이면 건드리지 않음. true면 **모든 특약점**의
+                재고현황에 보이고 재고를 입력할 수 있다(PM 2026-11-12). Web게시와 별개 축이다 —
+                Web게시는 신청 화면 노출 기준이다.""", example = "true")
+        Boolean dealerStockListed
 ) {
     /** 바꿀 플래그가 하나도 없으면 무의미한 요청이다(전 건을 훑고 아무것도 안 한다). */
     public boolean hasNoFlag() {
         return webVisible == null && taxFree == null && ledgerVisible == null && priceVisible == null
-                && useYn == null && stockManaged == null && restrictedVisible == null;
+                && useYn == null && stockManaged == null && restrictedVisible == null
+                && dealerStockListed == null;
     }
 }

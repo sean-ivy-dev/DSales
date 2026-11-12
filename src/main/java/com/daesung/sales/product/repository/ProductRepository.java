@@ -210,6 +210,17 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             @org.springframework.data.repository.query.Param("partnerId") Long partnerId);
 
     /**
+     * 특약점 재고현황 교재 — <b>모든 특약점 공통</b> 목록(PM 2026-11-12 §1).
+     * 교재(대분류) 여부는 호출부({@code DealerStockService})가 이력 도서와 함께 한 번에 거른다.
+     */
+    @org.springframework.data.jpa.repository.Query("""
+            select p from Product p
+             where p.dealerStockListed = true and p.useYn = true
+             order by p.catCode asc, p.code asc
+            """)
+    java.util.List<Product> findDealerStockListed();
+
+    /**
      * {@link #findDealerVisible} 과 <b>같은 WHERE</b>를 쓰되 단건 판정용 — "이 거래처에
      * 이 도서가 보이는가". [도서관리] '거래처별 노출' 설정 화면이 거래처마다 이걸 묻는다.
      *

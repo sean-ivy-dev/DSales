@@ -38,6 +38,8 @@ public record ProductResponse(
         /** 지정 거래처 전용(화이트리스트). true면 열기로 지정한 거래처에만 노출(11/04 회신 §1). */
         boolean restrictedVisible,
         boolean stockManaged,
+        /** 특약점 재고현황 교재 — true면 모든 특약점 재고현황에 보인다(PM 2026-11-12). Web게시와 별개 축. */
+        boolean dealerStockListed,
 
         @io.swagger.v3.oas.annotations.media.Schema(description = """
                 마지막 변경 시각 — **수정 시각, 없으면 등록 시각**이다.
@@ -69,7 +71,7 @@ public record ProductResponse(
                 (major == null) ? null : major.label(),
                 p.getProductYear(), p.getProductType(), p.getSupplyRate(),
                 p.isLedgerVisible(), p.isPriceVisible(), p.isWebVisible(), p.isRestrictedVisible(),
-                p.isStockManaged(),
+                p.isStockManaged(), p.isDealerStockListed(),
                 // ‼️서버가 `updatedSince` 로 거르는 기준과 **같은 값**을 준다 —
                 //   다르면 화면이 만든 기준으로 다시 물었을 때 같은 건이 또 오거나 빠진다.
                 (p.getUpdatedAt() != null) ? p.getUpdatedAt() : p.getCreatedAt(),

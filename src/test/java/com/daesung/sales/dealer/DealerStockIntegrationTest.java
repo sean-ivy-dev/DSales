@@ -45,18 +45,27 @@ class DealerStockIntegrationTest extends IntegrationTestSupport {
                 Map.of("supplyRate", 70, "webVisible", true, "useYn", true));
     }
 
+    /** 특약점 재고현황 교재로 지정한 교재(모든 특약점 공통 목록, PM 2026-11-12). */
     private Long textbook(String code) {
-        return createId("/masters/products", Map.of("code", code, "name", code + "교재",
+        Long id = createId("/masters/products", Map.of("code", code, "name", code + "교재",
                 "contentType", "SELF", "price", 10000, "supplyRate", 70,
                 "salesDivision", "교재", "catCode", "A2093A", "catName", "재고현황분류",
                 "webVisible", true));
+        listed(id, true);
+        return id;
     }
 
     private Long mockExam(String code) {
-        return createId("/masters/products", Map.of("code", code, "name", code + "모의고사",
+        Long id = createId("/masters/products", Map.of("code", code, "name", code + "모의고사",
                 "contentType", "SELF", "price", 10000, "supplyRate", 70,
                 "salesDivision", "모의고사", "catCode", "B2093A", "catName", "모의고사분류",
                 "webVisible", true));
+        listed(id, true);
+        return id;
+    }
+
+    private void listed(Long productId, boolean on) {
+        put("/masters/products/flags", Map.of("productIds", java.util.List.of(productId), "dealerStockListed", on));
     }
 
     private JsonNode stockList() {
@@ -236,8 +245,8 @@ class DealerStockIntegrationTest extends IntegrationTestSupport {
                 "productCode", code, "purchaseQty", 30, "returnQty", 0, "stockQty", 5), DEALER_SITE_KEY);
         assertThat(rowOf(code)).as("처음엔 노출돼서 목록에 있다").isNotNull();
 
-        // 도서 Web게시를 끈다 — ①규칙상 더는 '노출'이 아니다.
-        put("/masters/products/flags", Map.of("productIds", java.util.List.of(id), "webVisible", false));
+        // 재고현황 교재 지정을 끈다 — 더는 공통 목록이 아니다.
+        listed(id, false);
 
         JsonNode row = rowOf(code);
         assertThat(row).as("재고 이력이 있으니 그대로 남는다").isNotNull();
@@ -251,7 +260,7 @@ class DealerStockIntegrationTest extends IntegrationTestSupport {
         Long id = textbook(code);
         postAsDealerSite("/dealer-site/stock", Map.of("partnerCode", partnerCode,
                 "productCode", code, "purchaseQty", 10, "returnQty", 0, "stockQty", 0), DEALER_SITE_KEY);
-        put("/masters/products/flags", Map.of("productIds", java.util.List.of(id), "webVisible", false));
+        listed(id, false);
 
         JsonNode r = postAsDealerSite("/dealer-site/stock", Map.of("partnerCode", partnerCode,
                 "productCode", code, "purchaseQty", 10, "returnQty", 2, "stockQty", 3), DEALER_SITE_KEY);
@@ -267,7 +276,7 @@ class DealerStockIntegrationTest extends IntegrationTestSupport {
         String code = "STJ" + SFX;
         Long id = textbook(code);
         // 노출을 먼저 끈 뒤 매출을 등록한다 — 노출 규칙만으로는 안 보여야 정상이다.
-        put("/masters/products/flags", Map.of("productIds", java.util.List.of(id), "webVisible", false));
+        listed(id, false);
         assertThat(rowOf(code)).as("비노출 + 이력 없음 → 목록에 없다").isNull();
 
         Long wh = createId("/masters/warehouses",
@@ -290,7 +299,7 @@ class DealerStockIntegrationTest extends IntegrationTestSupport {
     void 기간무제한_오래된출고도_포함() {
         String code = "STK" + SFX;
         Long id = textbook(code);
-        put("/masters/products/flags", Map.of("productIds", java.util.List.of(id), "webVisible", false));
+        listed(id, false);
         assertThat(rowOf(code)).as("비노출 + 이력 없음 → 아직 목록에 없다").isNull();
 
         Long wh = createId("/masters/warehouses",
@@ -319,7 +328,7 @@ class DealerStockIntegrationTest extends IntegrationTestSupport {
 
         String saleCode = "STM" + SFX;
         Long saleId = textbook(saleCode);
-        put("/masters/products/flags", Map.of("productIds", java.util.List.of(saleId), "webVisible", false));
+        listed(saleId, false);
         Long wh = createId("/masters/warehouses",
                 Map.of("code", "STWN" + SFX, "name", "재고현황사용여부창고", "type", "MAIN"));
         Long sup = createId("/masters/clients",
@@ -337,5 +346,41 @@ class DealerStockIntegrationTest extends IntegrationTestSupport {
 
         assertThat(rowOf(stockCode)).as("재고 이력이 있어도 사용여부 N이면 제외").isNull();
         assertThat(rowOf(saleCode)).as("매출 출고 이력이 있어도 사용여부 N이면 제외").isNull();
+    }
+
+    @Test
+    @DisplayName("★★★모든 특약점에 같은 목록 — 신청 노출 설정이 없는 특약점에도 지정 교재가 보이고 입력된다(PM 11/12)")
+    void 노출설정없는_특약점도_지정교재가_보인다() {
+        // 거래처×대분류 노출 설정을 하나도 하지 않은 특약점 — 예전엔 재고 기록이 없으면 교재가 0종이었다.
+        String bare = "STQ" + SFX;
+        createId("/masters/clients", Map.of("code", bare, "name", "설정없는특약점", "type", "NORMAL"));
+        String code = "STR" + SFX;
+        textbook(code);
+
+        boolean seen = false;
+        for (JsonNode r : getAsDealerSite("/dealer-site/stock?partnerCode=" + bare, DEALER_SITE_KEY).path("data")) {
+            seen |= code.equals(r.path("productCode").asText());
+        }
+        assertThat(seen).as("재고 기록이 없어도 지정 교재는 보여야 한다 — 그래야 새 교재 재고를 입력한다").isTrue();
+
+        JsonNode r = postAsDealerSite("/dealer-site/stock", Map.of("partnerCode", bare,
+                "productCode", code, "purchaseQty", 0, "returnQty", 0, "stockQty", 4), DEALER_SITE_KEY);
+        assertThat(r.path("success").asBoolean()).as("입력도 된다: %s", r).isTrue();
+    }
+
+    @Test
+    @DisplayName("★★★신청 노출(Web게시+거래처 설정)과 별개 축 — 지정 안 한 교재는 노출 설정이 켜져 있어도 안 보인다(PM 11/12)")
+    void 신청노출과_별개축() {
+        // 이 클래스의 특약점은 교재 대분류 노출이 켜져 있다 = 신청 화면엔 보이는 교재.
+        String code = "STU" + SFX;
+        Long id = textbook(code);
+        listed(id, false);
+        assertThat(rowOf(code)).as("신청 화면엔 보여도 재고현황 교재가 아니면 안 보인다 — 85종이 다 뜨던 원인").isNull();
+
+        // 반대로 Web게시를 꺼도 지정 교재면 재고현황엔 남는다(신청 화면 기준과 섞지 않는다).
+        String code2 = "STV" + SFX;
+        Long id2 = textbook(code2);
+        put("/masters/products/flags", Map.of("productIds", java.util.List.of(id2), "webVisible", false));
+        assertThat(rowOf(code2)).as("Web게시는 신청 화면 기준이다 — 재고현황 목록과 무관").isNotNull();
     }
 }
