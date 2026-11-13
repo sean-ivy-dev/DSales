@@ -717,7 +717,15 @@ public class ReceivableService {
         //   숫자를 고치는 게 아니라 — 이월을 자동 생성하면 아무도 모르는 사이에 장부가 생긴다 —
         //   **비어 있다는 사실**을 알린다. 만드는 것은 담당자가 [이월생성]으로 명시적으로 한다.
         List<String> warnings = new ArrayList<>();
-        if (carry.isEmpty()) {
+        // ‼️**거래처를 지정했을 땐 그 거래처가 비었다고 경고하면 안 된다**(프론트 전달 2026-11-13 §5).
+        //   carry 는 `sumByYear(연도, partnerId)` 라 거래처를 좁히면 그 거래처 이월만 담긴다.
+        //   전년말 잔액이 0인 거래처(A14C122·A14C125 가 그렇다)는 **원래 이월 행이 없다** —
+        //   그걸 "스냅샷이 없다"로 읽어 경고를 띄우면 담당자가 멀쩡한 이월을 다시 만든다.
+        //   → 거래처 지정 조회에서는 **그 해 전체**에 스냅샷이 있는지로 판단한다.
+        boolean snapshotMissing = (partnerId == null)
+                ? carry.isEmpty()
+                : carryforwardRepository.sumByYear(openingYear, null).isEmpty();
+        if (snapshotMissing) {
             // ★경고도 **기초를 읽은 그 해**를 말해야 한다 — 다른 해를 찍으면 담당자가 엉뚱한 해의
             //   이월을 만들고도 값이 그대로라 영문을 모른다.
             warnings.add(openingYear + "년 이월 스냅샷이 없습니다. 이월이 0으로 계산되어 "
