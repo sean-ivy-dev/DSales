@@ -880,26 +880,38 @@ public class ShipmentService {
                 : sale.getProduct().getSalesDivision();
         String schoolCode = (sale.getSchoolCode() == null) ? "" : sale.getSchoolCode();
         String entryNo = (sale.getEntryNo() == null) ? "" : sale.getEntryNo();
+        String tc = (tradeClass == null) ? "" : tradeClass;
 
-        long alive = saleRepository.countLiveForShipment(sale.getSalesDate(),
-                sale.getPartner().getId(), schoolCode,
-                (tradeClass == null) ? "" : tradeClass, entryNo);
-        if (alive > 0) {
-            return false;   // 아직 쌀 것이 남았다
+        // ‼️**등록번호로만 찾으면 못 찾는다.** 살아 있는 발송 34,517건 중 34,515건이
+        //   entry_no 가 비어 있는데(이관분이 그 모양이다) 매출에는 등록번호가 있어 짝이 안 맞는다.
+        //   그래서 매출을 지워도 작업요청서가 그대로 남았다 — A10A103 #97598 이 그 사례다
+        //   (운영 실측 2026-11-13: 같은 모양 2건 더, A30D201 10/27 D모의고사).
+        //   → 등록번호가 같은 것 **∪ 등록번호가 비어 있는 것**을 함께 본다.
+        boolean removed = false;
+        for (Shipment sh : shipmentRepository.findForCleanup(sale.getSalesDate(),
+                sale.getPartner().getId(), sale.getSchoolCode(), tradeClass, sale.getEntryNo())) {
+            if (sh.getSentDate() != null) {
+                continue;   // 발송완료는 그대로 둔다 — 물건이 이미 나갔다
+            }
+            // ★남은 매출을 세는 기준이 **발송마다 다르다.**
+            //   · 등록번호가 있는 발송 → 그 주문의 매출만 센다(종전 그대로)
+            //   · 등록번호가 없는 발송 → 어느 주문 것인지 모르므로 **등록번호를 가리지 않고** 센다.
+            //     좁혀 세면 다른 주문의 매출이 아직 있는데도 0으로 보여 멀쩡한 지시를 지운다.
+            long alive = (sh.getEntryNo() == null || sh.getEntryNo().isBlank())
+                    ? saleRepository.countLiveForShipmentAnyEntry(
+                            sale.getSalesDate(), sale.getPartner().getId(), schoolCode, tc)
+                    : saleRepository.countLiveForShipment(
+                            sale.getSalesDate(), sale.getPartner().getId(), schoolCode, tc, entryNo);
+            if (alive > 0) {
+                continue;   // 아직 쌀 것이 남았다
+            }
+            sh.markDeleted(currentAuditor.username());
+            statusHistoryService.record(StatusEntityType.SHIPMENT, sh.getId(),
+                    "deleted", "false", "true",
+                    "묶인 매출이 모두 없어져 자동 정리(" + sale.getSalesNo() + ")");
+            removed = true;
         }
-
-        return shipmentRepository.findKey(sale.getSalesDate(), sale.getPartner().getId(),
-                        sale.getSchoolCode(), tradeClass, sale.getEntryNo())
-                .filter(sh -> sh.getDeletedAt() == null)
-                .filter(sh -> sh.getSentDate() == null)   // 발송완료는 그대로 둔다
-                .map(sh -> {
-                    sh.markDeleted(currentAuditor.username());
-                    statusHistoryService.record(StatusEntityType.SHIPMENT, sh.getId(),
-                            "deleted", "false", "true",
-                            "묶인 매출이 모두 없어져 자동 정리(" + sale.getSalesNo() + ")");
-                    return true;
-                })
-                .orElse(false);
+        return removed;
     }
 
     /**

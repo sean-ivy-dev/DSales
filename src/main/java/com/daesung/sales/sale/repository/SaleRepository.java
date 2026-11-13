@@ -1159,6 +1159,28 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
                               @Param("entryNo") String entryNo);
 
     /**
+     * 위와 같되 <b>주문(등록번호)을 가리지 않고</b> 센다.
+     *
+     * <p>‼️<b>{@code entryNo} 가 비어 있는 발송 전용</b>이다. 그런 발송은 어느 주문의 것인지
+     * 모르므로, <b>그 날·그 거래처·그 학교·그 분류의 매출이 하나라도 살아 있으면 지우면 안 된다</b>
+     * — 등록번호로 좁혀 세면 다른 주문의 매출이 아직 있는데도 0으로 세어 <b>멀쩡한 작업요청서를
+     * 지운다</b>. 물류가 쌀 물건이 있는데 지시가 사라지는 쪽이 빈 지시가 남는 것보다 나쁘다.
+     *
+     * <p>살아 있는 발송 34,517건 중 34,515건이 그 모양이다(2026-11-13 운영 실측).
+     */
+    @Query("""
+            select count(s) from Sale s join s.product p
+             where s.canceled = false
+               and s.salesDate = :tradeDate and s.partner.id = :partnerId
+               and coalesce(s.schoolCode, '') = :schoolCode
+               and coalesce(s.tradeClass, p.salesDivision, '') = :tradeClass
+            """)
+    long countLiveForShipmentAnyEntry(@Param("tradeDate") LocalDate tradeDate,
+                                      @Param("partnerId") Long partnerId,
+                                      @Param("schoolCode") String schoolCode,
+                                      @Param("tradeClass") String tradeClass);
+
+    /**
      * 외상매출장 명세: 특정 거래처의 기간 내 매출 라인(취소 제외, 일자순).
      *
      * <p>‼️{@code join fetch s.product} — 도서명이 행마다 필요한데

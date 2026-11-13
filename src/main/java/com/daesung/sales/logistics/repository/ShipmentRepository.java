@@ -114,6 +114,36 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
                                @Param("entryNo") String entryNo);
 
     /**
+     * <b>빈 작업요청서를 걷어낼 때</b> 쓰는 조회 — {@link #findKey} 보다 넓게 본다.
+     *
+     * <p>‼️{@code findKey} 는 {@code entryNo} 가 <b>정확히 일치</b>해야 찾는데,
+     * <b>살아 있는 발송 34,517건 중 34,515건이 {@code entryNo} 가 비어 있다</b>
+     * (2026-11-13 운영 실측 — 이관분이 그렇게 들어왔다).
+     * 매출에는 등록번호가 있으니 짝이 안 맞아, <b>매출을 지워도 발송을 못 찾고 그대로 남았다</b>
+     * — A10A103 #97598 이 그 사례이고, 같은 모양이 2건 더 있었다(A30D201 10/27 D모의고사).
+     *
+     * <p>그래서 삭제 경로에서는 <b>등록번호가 같은 것 ∪ 등록번호가 비어 있는 것</b>을 본다.
+     * ★<b>{@code findKey}(묶는 키)는 건드리지 않는다</b> — 거기서 {@code entryNo} 를 빼면
+     * "같은 날 같은 학교로 다섯 번 주문해도 작업요청서가 한 건"이던 문제가 되살아난다
+     * (프론트 B-2② 지적으로 넣은 조건이다).
+     *
+     * <p>★이미 삭제된 것은 제외한다 — 호출부가 다시 지우려 들 이유가 없다.
+     */
+    @Query("""
+            select s from Shipment s
+             where s.tradeDate = :tradeDate and s.partner.id = :partnerId
+               and ((:schoolCode is null and s.schoolCode is null) or s.schoolCode = :schoolCode)
+               and ((:tradeClass is null and s.tradeClass is null) or s.tradeClass = :tradeClass)
+               and (s.entryNo is null or s.entryNo = :entryNo)
+               and s.deletedAt is null
+            """)
+    List<Shipment> findForCleanup(@Param("tradeDate") LocalDate tradeDate,
+                                  @Param("partnerId") Long partnerId,
+                                  @Param("schoolCode") String schoolCode,
+                                  @Param("tradeClass") String tradeClass,
+                                  @Param("entryNo") String entryNo);
+
+    /**
      * 기간·조건 조회. printed: true=출력분만, false=미출력분만, null=전체
      * (레거시 작업요청서의 '출력 안 된 건만' 필터에 대응).
      * acknowledged 도 같은 규칙이다 — 확인은 출력 다음 단계라 "출력됐는데 아직 확인 안 된 건"을
