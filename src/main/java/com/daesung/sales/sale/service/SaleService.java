@@ -1451,12 +1451,14 @@ public class SaleService {
                 s, divisions.get(s.getProduct().getSalesDivision()),
                 // ‼️학교코드가 없는 매출이 흔하다(학교 없이 거래처로만 나가는 건).
                 //   Map.of() 는 **null 키 조회에서 NPE**를 던진다 — 빈 맵이어도 그렇다.
-                //   조회 전에 걸러야 한다(실제로 GET /sales 가 통째로 500이었다).
-                (s.getSchoolCode() == null) ? null : schoolTypes.get(s.getSchoolCode()),
+                //   schoolAttr 가 그 검사를 먼저 한다(실제로 GET /sales 가 통째로 500이었다).
+                // ★셋 다 **거래처 DSRE 코드 + 학교코드**로 고른다 — 같은 학교코드가
+                //   지사마다 따로 있어 코드만 보면 남의 지사 행이 붙는다(schoolTypesOf 주석).
+                schoolAttr(schoolTypes, s),
                 // 학교명 보완(항목 13-③) · 쿠폰 카운트(항목 13-⑤)
-                (s.getSchoolCode() == null) ? null : schoolNames.get(s.getSchoolCode()),
+                schoolAttr(schoolNames, s),
                 // 판매채널도 학교 마스터 값이다(레거시 schDataDT.type1).
-                (s.getSchoolCode() == null) ? null : channels.get(s.getSchoolCode()),
+                schoolAttr(channels, s),
                 couponCount);
     }
 
@@ -1500,10 +1502,8 @@ public class SaleService {
         if (codes.isEmpty()) {
             return Map.of();
         }
-        Map<String, String> names = new java.util.HashMap<>();
-        schoolRepository.findBySchoolCodeIn(codes)
-                .forEach(sc -> names.putIfAbsent(sc.getSchoolCode(), sc.getSchoolName()));
-        return names;
+        // ‼️거래처까지 맞춰 고른다 — 같은 학교코드가 지사마다 따로 있다(schoolTypesOf 주석 참고).
+        return schoolAttrOf(page, com.daesung.sales.school.entity.School::getSchoolName);
     }
 
     /** 페이지에 실린 학교코드의 <b>판매채널</b>을 한 번에 가져온다(N+1 방지). */
@@ -1517,17 +1517,45 @@ public class SaleService {
         if (codes.isEmpty()) {
             return Map.of();
         }
-        Map<String, String> out = new HashMap<>();
-        schoolRepository.findBySchoolCodeIn(codes).forEach(sc -> {
-            if (sc.getSalesChannel() != null && !sc.getSalesChannel().isBlank()) {
-                out.putIfAbsent(sc.getSchoolCode(), sc.getSalesChannel());
-            }
+        // ‼️거래처까지 맞춰 고른다 — 같은 학교코드가 지사마다 따로 있다(schoolTypesOf 주석 참고).
+        return schoolAttrOf(page, sc -> {
+            String ch = sc.getSalesChannel();
+            return (ch == null || ch.isBlank()) ? null : ch;
         });
-        return out;
     }
 
-    /** 페이지에 실린 학교코드의 학교/학원 구분을 한 번에 가져온다(N+1 방지). */
+    /**
+     * 페이지에 실린 학교코드의 학교/학원 구분을 한 번에 가져온다(N+1 방지).
+     *
+     * <p>‼️<b>학교코드만으로 찾으면 안 된다</b>(프론트 전달 2026-11-13 §2).
+     * 학교 마스터는 <b>(거래처 × 학교)</b> 단위라 <b>같은 학교코드가 지사마다 따로</b> 있고,
+     * 그 행들의 구분이 갈린다. 운영 실측 — 같은 코드에 학교·학원이 함께 있는 코드가
+     * <b>52개</b>이고 2026 매출 <b>192줄</b>이 거기 걸린다.
+     * <pre>
+     *   30081 수원학원  ·  cust_code 30002(미고북스)      → HAKWON
+     *   30081 수원학원  ·  cust_code 30003(수원 미고북스) → SCHOOL
+     * </pre>
+     * 코드만 보면 먼저 읽힌 행이 이겨서, A14C122(DSRE 30002) 매출에 SCHOOL 이 붙었다
+     * — 레거시는 「학원」이다.
+     *
+     * <p>★그래서 <b>거래처의 DSRE 코드 + 학교코드</b>로 고른다
+     * ({@code schools.cust_code} 가 DSRE 코드다 — {@code A14C122 → 30002} 실측).
+     * 거래처로 못 고르면(매핑 없음) 종전처럼 학교코드만으로 찾는다 — 그 편이 비는 것보다 낫다.
+     */
     private Map<String, com.daesung.sales.school.entity.SchoolType> schoolTypesOf(Iterable<Sale> page) {
+        return schoolAttrOf(page, com.daesung.sales.school.entity.School::getSchoolType);
+    }
+
+    /**
+     * 학교 마스터에서 값 하나를 <b>거래처까지 맞춰</b> 뽑는 공통 경로.
+     * 키는 {@code "<DSRE코드>|<학교코드>"} 와 {@code "|<학교코드>"}(거래처 못 찾은 경우) 두 가지로 담는다.
+     *
+     * <p>★{@link #schoolTypesOf}·{@link #schoolNamesOf}·{@link #salesChannelsOf} 가 같은 규칙을
+     * 쓰도록 한 곳에 둔다 — 셋이 따로 찾으면 한 화면에서 구분·이름·채널이 서로 다른 행을 가리킬 수 있다.
+     */
+    private <T> Map<String, T> schoolAttrOf(
+            Iterable<Sale> page,
+            java.util.function.Function<com.daesung.sales.school.entity.School, T> getter) {
         java.util.Set<String> codes = new java.util.HashSet<>();
         page.forEach(s -> {
             if (s.getSchoolCode() != null && !s.getSchoolCode().isBlank()) {
@@ -1537,10 +1565,37 @@ public class SaleService {
         if (codes.isEmpty()) {
             return Map.of();
         }
-        Map<String, com.daesung.sales.school.entity.SchoolType> out = new HashMap<>();
-        schoolRepository.findBySchoolCodeIn(codes)
-                .forEach(sc -> out.put(sc.getSchoolCode(), sc.getSchoolType()));
+        Map<String, T> out = new HashMap<>();
+        for (com.daesung.sales.school.entity.School sc : schoolRepository.findBySchoolCodeIn(codes)) {
+            T v = getter.apply(sc);
+            if (v == null) {
+                continue;
+            }
+            String cust = (sc.getCustCode() == null) ? "" : sc.getCustCode();
+            out.put(cust + "|" + sc.getSchoolCode(), v);
+            // 거래처를 못 맞추는 매출을 위한 보루 — 먼저 읽힌 행을 쓴다(종전 동작).
+            out.putIfAbsent("|" + sc.getSchoolCode(), v);
+        }
         return out;
+    }
+
+    /**
+     * 매출 한 줄이 가리키는 학교 속성을 꺼낸다 — <b>거래처 DSRE 코드로 먼저</b>, 없으면 학교코드만으로.
+     * {@link #schoolAttrOf} 가 담은 두 가지 키를 그 순서로 본다.
+     */
+    private static <T> T schoolAttr(Map<String, T> map, Sale s) {
+        String code = s.getSchoolCode();
+        if (code == null || code.isBlank() || map.isEmpty()) {
+            return null;
+        }
+        String dsre = (s.getPartner() == null) ? null : s.getPartner().getDsreCode();
+        if (dsre != null && !dsre.isBlank()) {
+            T hit = map.get(dsre + "|" + code);
+            if (hit != null) {
+                return hit;
+            }
+        }
+        return map.get("|" + code);
     }
 
     /** 단건 응답용 세부구분 조회. 미지정이면 null → 대분류가 '미분류'로 나간다. */
