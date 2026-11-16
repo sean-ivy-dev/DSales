@@ -100,6 +100,19 @@ public class SaleService {
     @Transactional
     public SalesEntryResponse createEntries(SalesEntryRequest req,
                                             String fixedEntryNo, Integer fixedTradeSeq) {
+        return createEntries(req, fixedEntryNo, fixedTradeSeq, null);
+    }
+
+    /**
+     * @param fallbackChannel 요청에 접수경로가 없을 때 쓸 값. <b>주문 수정이 원래 값을 넘긴다</b> —
+     *                        매출등록 화면은 이 칸을 보내지 않으므로, 폴백이 없으면
+     *                        <b>특약점 주문을 한 번 고치는 순간 '수기'로 바뀐다</b>
+     *                        (PM 전달 2026-11-16 §3 지적). 등록 경로는 {@code null} 로 둔다.
+     */
+    @Transactional
+    public SalesEntryResponse createEntries(SalesEntryRequest req,
+                                            String fixedEntryNo, Integer fixedTradeSeq,
+                                            com.daesung.sales.sale.entity.OrderChannel fallbackChannel) {
         periodLockService.assertNotLocked(req.salesDate());
 
         // ★위탁출고는 **여기서 받아** 위탁 경로로 넘긴다(10/27 명세 §4-1 "주문 등록의
@@ -173,8 +186,9 @@ public class SaleService {
             }
             sale.applyDiscount(r.discountAmount());   // 적용된 할인액을 남긴다(매핑은 나중에 바뀐다)
             sale.applyWarehouse(warehouse);   // 출고 창고(7p 재고위치 · 27p 출고창고)
-            // 접수경로(I-2). 안 보내면 null 로 둔다 — 조회에서 '수기'로 해석한다.
-            sale.applyChannel(req.channel());
+            // 접수경로(I-2). 요청에 없으면 폴백(주문 수정은 원래 값) — 둘 다 없으면 null 로
+            // 두고 조회에서 '수기'로 해석한다.
+            sale.applyChannel((req.channel() != null) ? req.channel() : fallbackChannel);
             sale.applyUploadDetail(item.schoolCode(), item.schoolName(), item.round());   // 학교·회차(12p)
             sale.applyPackType(item.packType());   // 포장구분(회차별 작업현황 집계축)
             sale.applyEntry(entryNo, ++entrySeq);  // 등록 묶음·순번(B-4)
@@ -761,6 +775,11 @@ public class SaleService {
      */
     @Transactional
     public void delete(Long id, String reason) {
+        // ★단건 삭제도 같은 기준이다. 여기를 열어 두면 줄을 하나씩 지워
+        //   `deleteEntry` 의 제한을 그대로 빠져나갈 수 있다.
+        //   ‼️내부 경로(3-arg, 주문 수정)는 이 검사를 거치지 않는다 —
+        //     `replaceEntry` 가 이미 주문 단위로 같은 판정을 끝낸 뒤 호출한다.
+        saleRepository.findById(id).ifPresent(sale -> assertEditable(sale, "삭제"));
         delete(id, reason, true);
     }
 
@@ -821,6 +840,12 @@ public class SaleService {
     @Transactional
     public int deleteEntry(String entryNo, String reason) {
         List<Sale> sales = requireEntry(entryNo);
+        // ★삭제도 수정과 같은 기준 — 접수완료에서만(PM 전달 2026-11-16 §2).
+        //   ‼️한 줄이라도 넘어갔으면 **전체를 거부**한다. 일부만 지우면 같은 주문의
+        //     갈린 발송들이 서로 다른 내용을 담는다.
+        for (Sale sale : sales) {
+            assertEditable(sale, "삭제");
+        }
         for (Sale sale : sales) {
             delete(sale.getId(), reason);
         }
@@ -858,13 +883,16 @@ public class SaleService {
         assertEditable(sales);
 
         Integer tradeSeq = first.getTradeSeq();
+        // ★접수경로를 **지우기 전에** 집어 둔다. 매출등록 화면은 이 칸을 보내지 않으므로
+        //   그냥 다시 만들면 특약점 주문이 '수기'로 바뀐다(PM 전달 2026-11-16 §3).
+        com.daesung.sales.sale.entity.OrderChannel channel = first.getChannel();
         for (Sale sale : sales) {
             // ★발송 건은 **걷지 않는다**(cleanupShipment=false). 같은 주문이라 그대로 두고
             //   줄만 바꿔야 한다 — 걷었다가 다시 만들면 출력·확인 상태가 날아가고,
             //   발송 묶음 키가 논리삭제된 행에 잡혀 있어 같은 번호로 다시 넣을 수 없다.
             delete(sale.getId(), "주문 수정(" + entryNo + ")", false);
         }
-        SalesEntryResponse res = createEntries(req, entryNo, tradeSeq);
+        SalesEntryResponse res = createEntries(req, entryNo, tradeSeq, channel);
 
         // 바꾼 뒤 줄이 줄어 **빈 발송이 생길 수 있다**(예: 두 분류였다가 하나만 남김).
         // 그건 여기서 걷는다 — 쌀 것이 없는 지시가 물류로 넘어가면 안 된다.
@@ -899,22 +927,37 @@ public class SaleService {
      */
     private void assertEditable(List<Sale> sales) {
         for (Sale sale : sales) {
-            com.daesung.sales.dsre.gateway.OrderState state =
-                    shipmentService.progressStateOf(sale).orElse(null);
-            if (state == null || state == com.daesung.sales.dsre.gateway.OrderState.RECEIVED) {
-                continue;
-            }
-            if (state == com.daesung.sales.dsre.gateway.OrderState.SHIPPED) {
-                throw new BusinessException(ErrorCode.INVALID_INPUT,
-                        "이미 발송완료된 주문입니다. 수정할 수 없습니다 — "
-                                + "물건이 나간 뒤라 줄을 바꾸면 나간 것과 장부가 갈립니다. "
-                                + "반품 또는 매출 취소로 처리하세요.");
-            }
+            assertEditable(sale, "수정");
+        }
+    }
+
+    /**
+     * 한 줄에 대한 같은 판정. <b>삭제도 같은 기준</b>이다(PM 전달 2026-11-16 §2 —
+     * "의도 아님. 수정과 같은 기준으로 맞춰 주세요").
+     *
+     * <p>‼️<b>삭제가 수정보다 느슨하면 안 된다.</b> 고칠 수 없는 주문을 <b>지우고 다시
+     * 넣으면</b> 같은 일이 되는데, 그 길이 열려 있으면 수정 제한은 우회로가 있는 장식이 된다.
+     * 실제로 발송완료된 매출을 매출 직접 입력 창에서 지울 수 있었다.
+     *
+     * @param action 거부 문구에 들어갈 동작 이름("수정" / "삭제")
+     */
+    private void assertEditable(Sale sale, String action) {
+        com.daesung.sales.dsre.gateway.OrderState state =
+                shipmentService.progressStateOf(sale).orElse(null);
+        // ★발송 건이 없는 매출(매출만·특강·창고없음)은 통과 — 물류가 넘겨받을 것이 없다.
+        if (state == null || state == com.daesung.sales.dsre.gateway.OrderState.RECEIVED) {
+            return;
+        }
+        if (state == com.daesung.sales.dsre.gateway.OrderState.SHIPPED) {
             throw new BusinessException(ErrorCode.INVALID_INPUT,
-                    "접수완료 상태일 때만 수정할 수 있습니다. 현재 상태=" + state.label() + " — "
-                            + "주문조회의 '선택 건 상태변경'으로 접수완료로 되돌린 뒤 고치거나, "
+                    "이미 발송완료된 주문입니다. " + action + "할 수 없습니다 — "
+                            + "물건이 나간 뒤라 줄을 바꾸면 나간 것과 장부가 갈립니다. "
                             + "반품 또는 매출 취소로 처리하세요.");
         }
+        throw new BusinessException(ErrorCode.INVALID_INPUT,
+                "접수완료 상태일 때만 " + action + "할 수 있습니다. 현재 상태=" + state.label() + " — "
+                        + "주문조회의 '선택 건 상태변경'으로 접수완료로 되돌린 뒤 처리하거나, "
+                        + "반품 또는 매출 취소로 처리하세요.");
     }
 
     /** 요청에 위탁출고가 섞여 있나. */

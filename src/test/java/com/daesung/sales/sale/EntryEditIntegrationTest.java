@@ -152,6 +152,125 @@ class EntryEditIntegrationTest extends IntegrationTestSupport {
         assertThat(r.path("error").path("code").asText()).isEqualTo("NOT_FOUND");
     }
 
+    // ─────────────────────────────────────────────────────────────────
+    //  삭제 기준 = 수정 기준(PM 전달 2026-11-16 §2 "의도 아님. 수정과 같은 기준으로")
+    //  ‼️여기가 비어 있으면 가드가 있어도 **지켜지는지 아무도 모른다.**
+    //    실제로 가드를 넣은 뒤 전 테스트가 통과했는데, 그건 올바르다는 뜻이 아니라
+    //    **그 상황을 만드는 테스트가 없었다**는 뜻이었다.
+    // ─────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("★★발송완료된 주문은 **삭제도** 거부한다 — 수정만 막으면 '지우고 다시 넣기'로 우회된다")
+    void 발송완료는_삭제도_거부() {
+        String date = "2043-04-01";
+        String entryNo = register(date, item(bookA, 7)).path("entryNo").asText();
+        shipOut(date);
+
+        JsonNode r = del("/sales/entries/" + entryNo, Map.of("reason", "지워 보기"));
+        assertThat(r.path("success").asBoolean()).as("%s", r).isFalse();
+        assertThat(r.path("error").path("message").asText()).contains("발송완료");
+        assertThat(liveQty(date)).as("거부됐으니 줄이 그대로 남아 있어야 한다").isEqualTo(7);
+    }
+
+    @Test
+    @DisplayName("★상품준비중도 거부 — 접수완료로 되돌리면 그때 지워진다")
+    void 상품준비중은_거부_되돌리면_삭제() {
+        String date = "2043-04-02";
+        String entryNo = register(date, item(bookA, 6)).path("entryNo").asText();
+        assertThat(handOverToLogistics(date, date, partner)).as("상품준비중으로 넘긴다").isPositive();
+
+        JsonNode r = del("/sales/entries/" + entryNo, Map.of("reason", "지워 보기"));
+        assertThat(r.path("success").asBoolean()).as("%s", r).isFalse();
+        assertThat(r.path("error").path("message").asText()).contains("접수완료 상태일 때만");
+
+        // 되돌리는 길이 실제로 통해야 한다 — 안 통하면 담당자가 지울 방법이 없다.
+        assertThat(post("/orders/progress-state", Map.of(
+                "orderNos", List.of(entryNo), "toState", "RECEIVED", "reason", "수정 위해 되돌림"))
+                .path("success").asBoolean()).isTrue();
+        assertThat(del("/sales/entries/" + entryNo, Map.of("reason", "되돌린 뒤 삭제"))
+                .path("success").asBoolean()).as("접수완료면 지워진다").isTrue();
+        assertThat(liveQty(date)).isZero();
+    }
+
+    @Test
+    @DisplayName("★단건 삭제(`DELETE /sales/{id}`)도 같은 기준 — 줄을 하나씩 지워 빠져나갈 수 없다")
+    void 단건삭제도_같은기준() {
+        String date = "2043-04-03";
+        register(date, item(bookA, 5), item(bookB, 5));
+        shipOut(date);
+
+        long saleId = data(get("/sales?fromDate=" + date + "&toDate=" + date
+                + "&partnerId=" + partner + "&size=10")).path("content").get(0).path("id").asLong();
+        JsonNode r = del("/sales/" + saleId, Map.of("reason", "한 줄만 지워 보기"));
+        assertThat(r.path("success").asBoolean()).as("%s", r).isFalse();
+        assertThat(liveQty(date)).as("한 줄도 안 빠졌다").isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("‼️「매출만(배송X)」은 상태와 무관하게 지워진다 — 물류가 넘겨받을 것이 없다")
+    void 매출만은_상태무관_삭제() {
+        String date = "2043-04-04";
+        JsonNode d = data(post("/sales/entries", Map.of("salesDate", date, "partnerId", partner,
+                "warehouseId", wh, "onlySales", true, "items", List.of(item(bookA, 4)))));
+        String entryNo = d.path("entryNo").asText();
+
+        // 발송 건이 아예 없으므로 가드가 걸릴 상태 자체가 없다.
+        assertThat(del("/sales/entries/" + entryNo, Map.of("reason", "매출만 삭제"))
+                .path("success").asBoolean()).as("%s", d).isTrue();
+        assertThat(liveQty(date)).isZero();
+    }
+
+    @Test
+    @DisplayName("★접수경로(orderChannel)가 통합매출조회 줄에 실린다 — 비어 있으면 '수기'(PM §3)")
+    void 접수경로가_실린다() {
+        String date = "2043-04-05";
+        register(date, item(bookA, 2));   // 매출등록 화면은 이 칸을 보내지 않는다
+        JsonNode row = rowOf(date);
+        // ‼️판매채널(salesChannel = 학교 마스터 값)과 **다른 칸**이다. 이름이 비슷해 섞기 쉽다.
+        // ★저장값이 비어 있어도 MANUAL 로 내려야 한다 — 주문조회가 이미 그 규칙이다.
+        //   한쪽만 비워 내리면 같은 주문이 화면마다 다르게 보인다.
+        assertThat(row.path("orderChannel").asText()).as("%s", row).isEqualTo("MANUAL");
+        assertThat(row.path("orderChannelName").asText()).isEqualTo("수기");
+    }
+
+    @Test
+    @DisplayName("★★온라인 주문을 고쳐도 '수기'로 바뀌지 않는다 — PM §3 이 짚은 결함")
+    void 수정해도_접수경로_유지() {
+        String date = "2043-04-06";
+        // 특약점 주문과 같은 모양 — 접수경로를 명시해 등록한다.
+        JsonNode d = data(post("/sales/entries", Map.of("salesDate", date, "partnerId", partner,
+                "warehouseId", wh, "channel", "ONLINE", "items", List.of(item(bookA, 3)))));
+        String entryNo = d.path("entryNo").asText();
+        assertThat(rowOf(date).path("orderChannel").asText()).isEqualTo("ONLINE");
+
+        // ‼️매출 직접 입력 창은 channel 을 보내지 않는다 — 그 상태로 수정해 본다.
+        //   그전에는 지우고 다시 만드는 과정에서 값이 사라져 '수기'가 됐다.
+        assertThat(put("/sales/entries/" + entryNo, Map.of(
+                "salesDate", date, "partnerId", partner, "warehouseId", wh,
+                "items", List.of(item(bookA, 9)))).path("success").asBoolean()).isTrue();
+
+        JsonNode after = rowOf(date);
+        assertThat(after.path("orderChannel").asText())
+                .as("고쳤다고 특약점 주문이 수기가 되면 안 된다: %s", after).isEqualTo("ONLINE");
+        assertThat(after.path("qty").asInt()).as("수정 자체는 됐다").isEqualTo(9);
+    }
+
+    /** 그 날 그 거래처의 첫 매출 줄. */
+    private JsonNode rowOf(String date) {
+        return data(get("/sales?fromDate=" + date + "&toDate=" + date
+                + "&partnerId=" + partner + "&size=10")).path("content").get(0);
+    }
+
+    /** 그 날 주문을 발송완료까지 보낸다 — 물류 인계 → 발송 처리. */
+    private void shipOut(String date) {
+        handOverToLogistics(date, date, partner);
+        long shipmentId = data(get("/logistics/work-orders?fromDate=" + date + "&toDate=" + date
+                + "&partnerId=" + partner)).path("content").get(0).path("id").asLong();
+        assertThat(put("/logistics/work-orders/" + shipmentId + "/shipping",
+                Map.of("boxCount", 1, "sentDate", date)).path("success").asBoolean())
+                .as("발송 처리").isTrue();
+    }
+
     @Test
     @DisplayName("「매출만(배송X)」 체크 상태가 조회에 그대로 실린다(B-4④)")
     void 매출만_체크상태() {

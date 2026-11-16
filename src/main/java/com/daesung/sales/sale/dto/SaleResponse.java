@@ -76,8 +76,22 @@ public record SaleResponse(
         @Schema(description = "출고 창고명(7p 재고위치). 이 컬럼 도입 전 매출은 비어 있다") String warehouseName,
         @Schema(description = """
                 판매채널(레거시 `schDataDT.type1`). **학교 마스터에서 붙인다** — 매출 원장엔 없다.
-                학교코드가 없거나 마스터에 그 학교가 없으면 null.""")
+                학교코드가 없거나 마스터에 그 학교가 없으면 null.
+                ‼️아래 `orderChannel`(접수경로)과 **다른 축**이다 — 이름이 비슷해 섞기 쉽다.""")
         String salesChannel,
+        @Schema(description = """
+                **접수경로** — `ONLINE`(특약점 사이트) / `MANUAL`(수기 등록).
+                주문조회(§2-1)의 같은 이름 칸과 **같은 값**이다(PM 전달 2026-11-16 §3).
+
+                ★<b>비어 있으면 `MANUAL` 로 내려준다</b> — 저장값이 비어 있는 옛 매출·이관분까지
+                포함해서다. 특약점 연동이 2026-11 에 열렸으므로 그 전 주문은 전부 수기가 맞고,
+                <b>주문조회가 이미 같은 규칙</b>이다({@code OrderChannel.orDefault}).
+                한쪽만 null 로 내리면 같은 주문이 화면마다 다르게 보인다.""",
+                example = "MANUAL", requiredMode = Schema.RequiredMode.REQUIRED)
+        com.daesung.sales.sale.entity.OrderChannel orderChannel,
+        @Schema(description = "접수경로 한글명(수기 / 온라인)", example = "수기",
+                requiredMode = Schema.RequiredMode.REQUIRED)
+        String orderChannelName,
         @Schema(description = """
                 등록 묶음번호(E-yyyyMMdd-n) — **한 번의 등록**을 가리킨다(현장 피드백 2026-10-14 B-4).
                 매출번호는 줄마다 따로 채번돼 묶음을 표현하지 못한다.
@@ -186,6 +200,8 @@ public record SaleResponse(
                 (s.getWarehouse() == null) ? null : s.getWarehouse().getId(),
                 (s.getWarehouse() == null) ? null : s.getWarehouse().getName(),
                 salesChannel,
+                com.daesung.sales.sale.entity.OrderChannel.orDefault(s.getChannel()),
+                com.daesung.sales.sale.entity.OrderChannel.orDefault(s.getChannel()).label(),
                 s.getEntryNo(), s.getEntrySeq(), s.getTradeSeq(), s.getOnlySales(),
                 s.isAmountOverridden(),
                 s.getMemo());
