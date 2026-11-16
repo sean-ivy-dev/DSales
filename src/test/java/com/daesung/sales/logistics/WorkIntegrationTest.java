@@ -53,6 +53,10 @@ class WorkIntegrationTest extends IntegrationTestSupport {
         post("/sales/entries", Map.of("salesDate", "2027-04-10", "partnerId", partner, "warehouseId", wh,
                 "items", List.of(Map.of("productId", book, "shipmentType", "NORMAL_SHIP", "qty", 10,
                         "schoolCode", "10001", "schoolName", "강남대성학원"))));
+
+        // ★(가)안(2026-11-16) — 등록 직후는 「접수완료」라 **작업요청서에 안 나온다**.
+        //   담당자가 상품준비중으로 넘긴 주문부터 나온다(발주처 확정). 그 조작을 여기서 한다.
+        handOverToLogistics("2027-04-01", "2027-04-30", partner);
     }
 
     private static final String RANGE = "?fromDate=2027-04-01&toDate=2027-04-30";

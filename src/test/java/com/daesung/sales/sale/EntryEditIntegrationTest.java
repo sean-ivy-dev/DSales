@@ -127,6 +127,9 @@ class EntryEditIntegrationTest extends IntegrationTestSupport {
     void 발송완료는_거부() {
         String date = "2043-03-04";
         String entryNo = register(date, item(bookA, 7)).path("entryNo").asText();
+        // ★(가)안(2026-11-16) — 등록 직후는 「접수완료」라 작업요청서에 안 나온다.
+        //   발송완료까지 가려면 먼저 상품준비중으로 넘긴다(운영에서 담당자가 하는 조작).
+        handOverToLogistics(date, date, partner);
         long shipmentId = data(get("/logistics/work-orders?fromDate=" + date + "&toDate=" + date
                 + "&partnerId=" + partner)).path("content").get(0).path("id").asLong();
         put("/logistics/work-orders/" + shipmentId + "/shipping",

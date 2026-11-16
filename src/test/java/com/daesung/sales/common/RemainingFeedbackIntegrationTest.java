@@ -108,6 +108,9 @@ class RemainingFeedbackIntegrationTest extends IntegrationTestSupport {
     }
 
     private int workOrderCount() {
+        // ★(가)안(2026-11-16) — 작업요청서는 「상품준비중」부터 보인다.
+        //   세기 전에 넘긴다(「매출만(배송X)」은 발송 자체가 없어 넘길 것도 없다 → 수가 안 늘어난다).
+        handOverToLogistics("2104-01-01", "2104-12-31", partner);
         JsonNode d = data(get("/logistics/work-orders" + RANGE + "&partnerId=" + partner)).path("content");
         JsonNode rows = d.isArray() ? d : d.path("content");
         return rows.size();

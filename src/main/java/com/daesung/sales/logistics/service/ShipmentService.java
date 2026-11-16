@@ -844,19 +844,22 @@ public class ShipmentService {
     }
 
     /**
-     * 그 매출이 묶인 발송 건이 <b>이미 나갔나</b>(발송완료). 주문 수정 거부 판정에 쓴다.
+     * 그 매출이 묶인 발송 건의 <b>진행상태</b>. 주문 수정 거부 판정에 쓴다.
      *
-     * <p>발송 건이 아직 없으면 {@code false} — 작업요청서를 만들지 않는 매출
-     * (매출만·특강·창고없음)이 여기 걸려 수정이 막히면 안 된다.
+     * <p>발송 건이 아직 없으면 <b>비어 있는 값</b> — 작업요청서를 만들지 않는 매출
+     * (매출만·특강·창고없음)이 여기 걸려 수정이 막히면 안 된다. 호출부가
+     * "없으면 허용"으로 다룬다.
+     *
+     * <p>★판정은 {@link Shipment#progressState()} 하나가 한다 — 여기서 날짜를 다시
+     * 읽으면 화면이 보여주는 상태와 수정 가능 여부가 갈린다.
      */
     @Transactional(readOnly = true)
-    public boolean isShipped(Sale sale) {
+    public java.util.Optional<com.daesung.sales.dsre.gateway.OrderState> progressStateOf(Sale sale) {
         String tradeClass = (sale.getTradeClass() != null) ? sale.getTradeClass()
                 : sale.getProduct().getSalesDivision();
         return shipmentRepository.findKey(sale.getSalesDate(), sale.getPartner().getId(),
                         sale.getSchoolCode(), tradeClass, sale.getEntryNo())
-                .map(sh -> sh.getSentDate() != null)
-                .orElse(false);
+                .map(Shipment::progressState);
     }
 
     /**

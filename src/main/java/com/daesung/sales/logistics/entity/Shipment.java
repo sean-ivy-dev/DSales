@@ -180,14 +180,26 @@ public class Shipment extends BaseEntity {
      *   삭제됨            → 삭제(CANCELED)      레거시 sendData.isDelete 가 여기로 왔다
      *   발송일 있음        → 발송완료(SHIPPED)
      *   출력됨            → 발송준비중(READY_TO_SHIP)   거래명세서를 뽑은 시점
-     *   그 밖            → 상품준비중(PREPARING)
+     *   접수 단계 적혀 있음 → 그 값(상품검수·상품준비중)
+     *   그 밖            → <b>접수완료(RECEIVED)</b>
      * </pre>
      *
      * <p>★<b>정정(2026-11-02)</b>: 예전엔 "접수완료·상품검수는 여기서 나오지 않는다 —
      * 그 둘은 DSRE2 소관"이었다. 10/27 명세 §1이 <b>새 특약점 주문을 매출 주문으로
      * 저장</b>하기로 바꿔, 그 접수 단계가 <b>우리 몫</b>이 됐다({@link #intakeState}).
-     * 날짜가 아직 아무것도 없는 구간에서만 그 값이 쓰이고, 비어 있으면 종전처럼
-     * 상품준비중이다 — 이관분은 전부 비어 있어 영향이 없다.
+     *
+     * <h3>★★기본값이 상품준비중 → 접수완료로 바뀌었다(2026-11-16, 발주처 (가)안)</h3>
+     * 그전에는 <b>매출등록 주문이 저장하는 순간 「상품준비중」</b>이었다 —
+     * 접수완료를 거치지 않아서, 발주처가 요구한 "출고 담당자가 상품준비중으로 넘기기
+     * 전까지 고칠 수 있어야 한다"를 걸 자리가 없었다(그 상태의 주문이 특약점 신청 말고는
+     * 아예 없었다). 확인요청 2026-11-13 → 발주처가 (가)안을 골랐다.
+     *
+     * <p>‼️<b>이관분·옛 주문의 보이는 상태가 바뀐다.</b> 날짜도 접수 단계도 없는 발송
+     * <b>11,466건</b>(운영 실측 2026-11-16)이 「상품준비중」에서 「접수완료」로 보인다.
+     * 발주처에 건수를 보고하고 받아들인 변화다. <b>백필하지 않는다</b> — 그 건들을
+     * 상품준비중으로 굳히면 (가)안이 옛 주문에만 적용되지 않는 반쪽이 된다.
+     *
+     * <p>‼️<b>상품준비중은 이제 파생값이 아니라 저장값이다</b>({@link #applyIntakeState}).
      *
      * <p>‼️'완료'(completedAt)는 판정에 쓰지 않는다. 이관분 46,218건이 가짜 1900-01-01 로
      * 채워져 사실상 전건 참이었고(V97 에서 비웠다), 레거시에서 실제로 쓰인 건 13건뿐이다.
@@ -209,17 +221,24 @@ public class Shipment extends BaseEntity {
         if (intakeState != null) {
             return intakeState;
         }
-        return com.daesung.sales.dsre.gateway.OrderState.PREPARING;
+        // ★기본값 = 접수완료(발주처 (가)안 2026-11-16). 등록 직후가 여기이고,
+        //   담당자·물류가 「상품준비중」으로 넘기면 그때 컬럼에 적힌다.
+        return com.daesung.sales.dsre.gateway.OrderState.RECEIVED;
     }
 
     /**
-     * 접수 단계를 지정한다. {@code null} 또는 상품준비중이면 <b>컬럼을 비워</b>
-     * 날짜 파생으로 되돌린다 — 상품준비중은 파생의 기본값이라 따로 저장할 필요가 없고,
+     * 접수 단계를 지정한다. {@code null} 또는 <b>접수완료</b>면 <b>컬럼을 비워</b>
+     * 파생 기본값으로 되돌린다 — 접수완료가 파생의 기본값이라 따로 저장할 필요가 없고,
      * 저장해 두면 나중에 파생 규칙이 바뀌어도 이 행만 옛 규칙에 묶인다.
+     *
+     * <p>‼️<b>정정(2026-11-16)</b>: 비우는 대상이 <b>상품준비중에서 접수완료로 바뀌었다</b>.
+     * (가)안으로 기본값이 접수완료가 됐으니, 예전 규칙을 그대로 두면
+     * <b>「상품준비중」으로 넘기는 조작이 컬럼을 비워 접수완료로 되돌아간다</b> —
+     * 담당자가 눌러도 아무 일이 없고, 작업요청서에도 올라오지 않는다.
      */
     public void applyIntakeState(com.daesung.sales.dsre.gateway.OrderState state) {
         this.intakeState = (state == null
-                || state == com.daesung.sales.dsre.gateway.OrderState.PREPARING) ? null : state;
+                || state == com.daesung.sales.dsre.gateway.OrderState.RECEIVED) ? null : state;
     }
 
     public static Shipment of(String tradeClass, LocalDate tradeDate, Partner partner,

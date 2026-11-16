@@ -841,7 +841,10 @@ public class SaleService {
      * <ul>
      *   <li>마감된 달 — 바꾼 뒤 날짜와 원래 날짜 <b>둘 다</b> 본다. 한쪽만 보면
      *       마감월 주문을 열린 달로 옮기는 것으로 빠져나갈 수 있다.</li>
-     *   <li><b>발송완료된 주문</b> — 물건이 이미 나갔다. 줄을 바꾸면 나간 것과 장부가 갈린다.</li>
+     *   <li><b>「접수완료」가 아닌 주문</b> — 물류가 이미 넘겨받았다(발주처 (가)안
+     *       2026-11-16: "출고 담당자가 상품준비중으로 넘기기 전까지 고칠 수 있어야 한다.
+     *       상품준비중 이후에는 수정되지 않게"). 되돌려서 고치려면 주문조회의
+     *       '선택 건 상태변경'으로 접수완료로 내린 뒤 고친다.</li>
      * </ul>
      */
     @Transactional
@@ -852,7 +855,7 @@ public class SaleService {
         periodLockService.assertNotLocked(first.getSalesDate());   // 원래 달
         periodLockService.assertNotLocked(req.salesDate());        // 바꾼 뒤 달
 
-        assertNotShipped(sales);
+        assertEditable(sales);
 
         Integer tradeSeq = first.getTradeSeq();
         for (Sale sale : sales) {
@@ -880,17 +883,37 @@ public class SaleService {
     }
 
     /**
-     * 발송완료된 주문이면 거부한다. 발송 건은 (일자·거래처·학교·분류·주문)으로 묶이므로
-     * 한 주문이 학교·분류 때문에 여러 건으로 갈릴 수 있다 — <b>하나라도 나갔으면</b> 막는다.
+     * <b>「접수완료」일 때만</b> 수정을 허용한다(발주처 (가)안 2026-11-16).
+     *
+     * <p>발송 건은 (일자·거래처·학교·분류·주문)으로 묶이므로 한 주문이 학교·분류 때문에
+     * 여러 건으로 갈릴 수 있다 — <b>하나라도 넘어갔으면</b> 막는다. 일부만 고치면
+     * 같은 주문의 갈린 건들이 서로 다른 내용을 담는다.
+     *
+     * <p>★<b>발송 건이 없는 매출은 통과</b>시킨다(매출만·특강·창고없음).
+     * 작업요청서를 만들지 않는 매출이라 물류가 넘겨받을 것도 없다.
+     *
+     * <p>‼️<b>그전엔 발송완료만 막았다.</b> 상품준비중·발송준비중 주문도 고칠 수 있어서
+     * 물류가 이미 집고 있는 건이 바뀌었다 — 발주처 지적 그대로다("지금은 … 상품준비중
+     * 이후에도 수정된다"). 되돌릴 길은 남겨 둔다: 주문조회에서 접수완료로 내리면 고칠 수 있고,
+     * 그렇게 내린 주문은 작업요청서에서 빠진다(물류가 두 번 집지 않는다).
      */
-    private void assertNotShipped(List<Sale> sales) {
+    private void assertEditable(List<Sale> sales) {
         for (Sale sale : sales) {
-            if (shipmentService.isShipped(sale)) {
+            com.daesung.sales.dsre.gateway.OrderState state =
+                    shipmentService.progressStateOf(sale).orElse(null);
+            if (state == null || state == com.daesung.sales.dsre.gateway.OrderState.RECEIVED) {
+                continue;
+            }
+            if (state == com.daesung.sales.dsre.gateway.OrderState.SHIPPED) {
                 throw new BusinessException(ErrorCode.INVALID_INPUT,
                         "이미 발송완료된 주문입니다. 수정할 수 없습니다 — "
                                 + "물건이 나간 뒤라 줄을 바꾸면 나간 것과 장부가 갈립니다. "
                                 + "반품 또는 매출 취소로 처리하세요.");
             }
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "접수완료 상태일 때만 수정할 수 있습니다. 현재 상태=" + state.label() + " — "
+                            + "주문조회의 '선택 건 상태변경'으로 접수완료로 되돌린 뒤 고치거나, "
+                            + "반품 또는 매출 취소로 처리하세요.");
         }
     }
 

@@ -141,6 +141,17 @@ class DealerOrderIntakeIntegrationTest extends IntegrationTestSupport {
         assertThat(stockOf()).as("30부 차감").isEqualTo(before - 30);
     }
 
+    /** 그 거래처 주문이 작업요청서 목록에 보이나. */
+    private boolean inWorkOrders(String partnerCode) {
+        for (JsonNode w : data(get("/logistics/work-orders?fromDate=" + DATE + "&toDate=" + DATE))
+                .path("content")) {
+            if (partnerCode.equals(w.path("partnerCode").asText())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @Test
     @DisplayName("★접수완료 상태로 시작한다 — A 에서만 수정·삭제한다는 규칙(§2-3)의 전제")
     void 접수완료로_시작() {
@@ -148,16 +159,6 @@ class DealerOrderIntakeIntegrationTest extends IntegrationTestSupport {
         assertThat(r.path("success").asBoolean()).as("%s", r).isTrue();
 
         String entryNo = data(r).path("entryNo").asText();
-
-        // ★작업요청서로 물류에 전달된다(§1 "작업요청서로 물류 전달").
-        boolean delivered = false;
-        for (JsonNode w : data(get("/logistics/work-orders?fromDate=" + DATE + "&toDate=" + DATE))
-                .path("content")) {
-            if (PARTNER_CODE.equals(w.path("partnerCode").asText())) {
-                delivered = true;
-            }
-        }
-        assertThat(delivered).as("작업요청서가 생긴다").isTrue();
 
         // ★진행상태는 **저장값**으로 확인한다.
         //   ‼️지금은 이 상태를 내보내는 API 가 없다 — 주문조회가 아직 DSRE 신청을 읽기
@@ -168,6 +169,18 @@ class DealerOrderIntakeIntegrationTest extends IntegrationTestSupport {
         for (Shipment sh : shipments) {
             assertThat(sh.progressState()).as("접수완료(A)로 들어온다").isEqualTo(OrderState.RECEIVED);
         }
+
+        // ★★(가)안(2026-11-16) — 접수완료 주문은 **아직 작업요청서에 안 나온다.**
+        //   발주처: "작업요청서에는 접수완료 주문이 나오지 않고, 상품준비중으로 넘긴
+        //   주문부터 나오게." 특약점 신청도 같은 규칙이다(§1 "작업요청서로 물류 전달"은
+        //   발송 건이 생긴다는 뜻이고, 목록에 보이는 시점은 인계 뒤다).
+        //   ‼️이 둘을 한 테스트에서 못박아 둔다 — 한쪽만 고치면 신청이 물류에 영원히
+        //     안 보이거나(인계 규칙 유실), 접수완료 건이 섞여 나온다.
+        assertThat(inWorkOrders(PARTNER_CODE)).as("접수완료라 아직 안 보인다").isFalse();
+
+        assertThat(handOverToLogistics(DATE, DATE, null))
+                .as("상품준비중으로 넘긴다").isPositive();
+        assertThat(inWorkOrders(PARTNER_CODE)).as("넘기면 작업요청서에 보인다").isTrue();
     }
 
     @Test
@@ -213,6 +226,8 @@ class DealerOrderIntakeIntegrationTest extends IntegrationTestSupport {
         assertThat(r.path("success").asBoolean()).as("%s", r).isTrue();
 
         String entryNo = data(r).path("entryNo").asText();
+        // ★(가)안 — 접수완료는 작업요청서에 안 나온다. 넘긴 뒤에 본다.
+        handOverToLogistics(DATE, DATE, null);
         JsonNode wo = null;
         for (JsonNode w : data(get("/logistics/work-orders?fromDate=" + DATE + "&toDate=" + DATE))
                 .path("content")) {
@@ -257,6 +272,8 @@ class DealerOrderIntakeIntegrationTest extends IntegrationTestSupport {
         assertThat(r.path("success").asBoolean()).as("%s", r).isTrue();
 
         String entryNo = data(r).path("entryNo").asText();
+        // ★(가)안 — 접수완료는 작업요청서에 안 나온다. 넘긴 뒤에 본다.
+        handOverToLogistics(DATE, DATE, null);
         JsonNode wo = null;
         for (JsonNode w : data(get("/logistics/work-orders?fromDate=" + DATE + "&toDate=" + DATE))
                 .path("content")) {

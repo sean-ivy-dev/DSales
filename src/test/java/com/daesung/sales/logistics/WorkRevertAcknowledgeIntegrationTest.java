@@ -53,6 +53,10 @@ class WorkRevertAcknowledgeIntegrationTest extends IntegrationTestSupport {
                 "warehouseId", wh,
                 "items", List.of(Map.of("productId", book, "shipmentType", "NORMAL_SHIP", "qty", 30,
                         "schoolCode", "RV1" + SFX, "schoolName", "되돌리기고"))));
+
+        // ★(가)안(2026-11-16) — 등록 직후는 「접수완료」라 작업요청서에 안 나온다.
+        //   담당자가 상품준비중으로 넘긴 주문부터 나온다(발주처 확정).
+        handOverToLogistics(YEAR + "-01-01", YEAR + "-12-31", partner);
     }
 
     /**

@@ -59,6 +59,9 @@ class DeliveryTypeAutoDecideIntegrationTest extends IntegrationTestSupport {
     }
 
     private Long findShipment(String schoolCode) {
+        // ★(가)안(2026-11-16) — 등록 직후는 「접수완료」라 작업요청서에 안 나온다.
+        //   조회 직전에 상품준비중으로 넘긴다(운영에서 담당자가 하는 조작).
+        handOverToLogistics("2034-06-01", "2034-06-30", partner);
         for (JsonNode o : data(get("/logistics/work-orders" + RANGE + "&partnerId=" + partner))
                 .path("content")) {
             if (schoolCode.equals(o.path("schoolCode").asText())) {

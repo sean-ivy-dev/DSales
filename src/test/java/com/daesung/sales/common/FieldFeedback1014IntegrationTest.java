@@ -313,6 +313,10 @@ class FieldFeedback1014IntegrationTest extends IntegrationTestSupport {
                 "warehouseId", warehouse, "items", List.of(line(11))))
                 .path("success").asBoolean()).isTrue();
 
+        // ★(가)안(2026-11-16) — 등록 직후는 「접수완료」라 작업요청서에 안 나온다.
+        //   담당자가 상품준비중으로 넘긴 주문부터 나온다(발주처 확정).
+        handOverToLogistics("2000-01-01", "2135-12-31", p);
+
         // 요청 기간을 **아주 넓게** 준다(화면이 기간을 비우면 이렇게 부른다).
         // 줄 조회는 발송 건이 걸쳐 있는 날짜로 좁혀지지만, 내용은 빠지지 않아야 한다.
         JsonNode rows = data(get("/logistics/work-orders"

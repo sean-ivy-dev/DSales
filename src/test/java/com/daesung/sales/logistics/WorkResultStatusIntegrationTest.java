@@ -116,7 +116,9 @@ class WorkResultStatusIntegrationTest extends IntegrationTestSupport {
     void 상태_판정() {
         JsonNode rows = data(get("/logistics/work-results" + RANGE)).path("content");
 
-        assertThat(statusOf(rows, prepPartner, "WSP거래처")).isEqualTo("PREPARING");
+        // ★(가)안(2026-11-16) — 아무 조작도 안 한 건은 「상품준비중」이 아니라 **접수완료**다.
+        //   ‼️작업결과는 접수완료를 빼지 않는다(작업요청서만 뺀다) — 그래서 여기 보인다.
+        assertThat(statusOf(rows, prepPartner, "WSP거래처")).isEqualTo("RECEIVED");
         assertThat(statusOf(rows, readyPartner, "WSR거래처")).isEqualTo("READY_TO_SHIP");
         assertThat(statusOf(rows, shippedPartner, "WSD거래처")).isEqualTo("SHIPPED");
 

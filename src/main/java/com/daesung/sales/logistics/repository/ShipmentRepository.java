@@ -206,6 +206,7 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
                     OR (:acknowledged = 1 AND s.acknowledged_at IS NOT NULL)
                     OR (:acknowledged = 0 AND s.acknowledged_at IS NULL))
                AND (:deliveryType IS NULL OR s.delivery_type = :deliveryType)
+            """ + NOT_RECEIVED + """
              ORDER BY s.trade_date DESC, p.code, s.school_code
             """, nativeQuery = true)
     List<Shipment> findAllIncludingDeleted(@Param("from") LocalDate from,
@@ -214,7 +215,8 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
                                            @Param("partnerId") Long partnerId,
                                            @Param("printed") Integer printed,
                                            @Param("acknowledged") Integer acknowledged,
-                                           @Param("deliveryType") String deliveryType);
+                                           @Param("deliveryType") String deliveryType,
+                                           @Param("excludeReceived") Integer excludeReceived);
 
     /**
      * 위와 같은 조건의 <b>페이지</b>. 작업요청서 목록이 쓴다.
@@ -240,6 +242,7 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
                     OR (:acknowledged = 1 AND s.acknowledged_at IS NOT NULL)
                     OR (:acknowledged = 0 AND s.acknowledged_at IS NULL))
                AND (:deliveryType IS NULL OR s.delivery_type = :deliveryType)
+            """ + NOT_RECEIVED + """
              ORDER BY s.trade_date DESC, p.code, s.school_code, s.id
             """,
             countQuery = """
@@ -255,7 +258,7 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
                     OR (:acknowledged = 1 AND s.acknowledged_at IS NOT NULL)
                     OR (:acknowledged = 0 AND s.acknowledged_at IS NULL))
                AND (:deliveryType IS NULL OR s.delivery_type = :deliveryType)
-            """, nativeQuery = true)
+            """ + NOT_RECEIVED, nativeQuery = true)
     org.springframework.data.domain.Page<Shipment> findPageIncludingDeleted(
             @Param("from") LocalDate from,
             @Param("to") LocalDate to,
@@ -264,6 +267,7 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             @Param("printed") Integer printed,
             @Param("acknowledged") Integer acknowledged,
             @Param("deliveryType") String deliveryType,
+            @Param("excludeReceived") Integer excludeReceived,
             org.springframework.data.domain.Pageable pageable);
 
     /** 삭제된 건 포함 단건 조회 — 삭제 대상을 찾을 때 쓴다(@SQLRestriction 우회). */
@@ -282,10 +286,30 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             CASE WHEN s.deleted_at IS NOT NULL      THEN 99
                  WHEN s.sent_date  IS NOT NULL      THEN 5
                  WHEN s.printed_at IS NOT NULL      THEN 4
-                 WHEN s.intake_state = 'INSPECTING' THEN 2
-                 WHEN s.intake_state = 'RECEIVED'   THEN 1
-                 ELSE 3 END
+                 WHEN s.intake_state = 'CANCELED'      THEN 99
+                 WHEN s.intake_state = 'SHIPPED'       THEN 5
+                 WHEN s.intake_state = 'READY_TO_SHIP' THEN 4
+                 WHEN s.intake_state = 'PREPARING'     THEN 3
+                 WHEN s.intake_state = 'INSPECTING'    THEN 2
+                 ELSE 1 END
             """;
+
+    /**
+     * 작업요청서에서 <b>접수완료 건을 뺄 때</b> 쓰는 조건 — 랭크 1 이 아닌 것.
+     *
+     * <p>근거: 발주처 회신 2026-11-16 — "작업요청서에는 <b>상품준비중부터</b> 올라오게.
+     * 접수완료로 되돌린 주문은 목록에서 빠지게." 물류가 아직 넘겨받지 않은 주문을
+     * 작업 지시로 보면 안 된다는 뜻이다.
+     *
+     * <p>‼️<b>SQL 로 걸러야 한다.</b> 작업요청서 목록은 DB 에서 페이징하므로
+     * Java 에서 걸러내면 <b>총 건수·페이지 수가 틀어진다</b>(페이지마다 걸러진 수가 달라
+     * 마지막 페이지가 비거나 건수가 안 맞는다).
+     *
+     * <p>★{@code :excludeReceived} 가 1 일 때만 적용한다 — 주문조회(§2-1)는
+     * <b>접수완료를 보여줘야 하는 화면</b>이다(거기서 고친다). 같은 조회를 두 화면이 쓴다.
+     */
+    String NOT_RECEIVED = " AND (CAST(:excludeReceived AS SIGNED) IS NULL"
+            + " OR :excludeReceived = 0 OR (" + ORDER_STATE_RANK + ") <> 1) ";
 
     /** 주문 식별 키 식(SQL). {@code OrderProgress.orderKey} 와 같아야 한다. */
     String ORDER_KEY = "COALESCE(s.entry_no, CONCAT('#', s.id))";

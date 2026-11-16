@@ -299,4 +299,37 @@ public abstract class IntegrationTestSupport {
             throw new RuntimeException("응답 파싱 실패: " + resp.getBody(), e);
         }
     }
+
+    /**
+     * 등록한 주문을 <b>「상품준비중」으로 넘긴다</b> — 물류 인계.
+     *
+     * <h3>왜 테스트에 이 한 줄이 필요해졌나(2026-11-16, 발주처 (가)안)</h3>
+     * 그전에는 매출등록이 저장되는 순간 「상품준비중」이어서 <b>작업요청서에 바로 떴다</b>.
+     * (가)안으로 등록 직후가 「접수완료」가 됐고, 발주처가 <b>"작업요청서에는 접수완료
+     * 주문이 나오지 않고, 상품준비중으로 넘긴 주문부터 나오게"</b>를 함께 확정했다.
+     * → 작업요청서를 보는 테스트는 <b>등록 뒤 이 인계를 한 번 거쳐야</b> 한다.
+     * 운영에서 담당자가 하는 조작(주문조회 → 선택 건 상태변경)과 같은 것이고,
+     * <b>실제 API 를 그대로 탄다</b> — 엔티티를 직접 고치면 그 경로가 깨져도 모른다.
+     *
+     * @param partnerId 거래처(null 이면 기간 내 전부). 테스트 격리를 위해 되도록 지정할 것
+     * @return 넘어간 주문 수
+     */
+    protected int handOverToLogistics(String fromDate, String toDate, Long partnerId) {
+        java.util.List<String> nos = new java.util.ArrayList<>();
+        String q = "/orders?fromDate=" + fromDate + "&toDate=" + toDate
+                + ((partnerId == null) ? "" : "&partnerId=" + partnerId)
+                + "&state=RECEIVED&size=500";
+        for (JsonNode n : get(q).path("data").path("content")) {
+            String no = n.path("orderNo").asText(null);
+            if (no != null && !no.isBlank()) {
+                nos.add(no);   // ★'#발송id' 키도 상태변경은 된다(삭제만 거부한다)
+            }
+        }
+        if (nos.isEmpty()) {
+            return 0;
+        }
+        JsonNode res = post("/orders/progress-state", java.util.Map.of(
+                "orderNos", nos, "toState", "PREPARING", "reason", "테스트: 물류 인계"));
+        return res.path("data").path("changed").asInt();
+    }
 }

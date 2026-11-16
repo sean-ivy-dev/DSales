@@ -66,6 +66,10 @@ class MultiTrackingIntegrationTest extends IntegrationTestSupport {
                 "items", List.of(Map.of("productId", book, "shipmentType", "NORMAL_SHIP",
                         "qty", 30, "unitPrice", 10000, "supplyRate", 70))));
 
+        // ★(가)안(2026-11-16) — 등록 직후는 「접수완료」라 작업요청서에 안 나온다.
+        //   담당자가 상품준비중으로 넘긴 주문부터 나온다(발주처 확정).
+        handOverToLogistics(DAY, DAY, partner);
+
         shipmentId = data(get("/logistics/work-orders?fromDate=" + DAY + "&toDate=" + DAY
                 + "&partnerId=" + partner)).path("content").get(0).path("id").asLong();
         // 박스별 송장은 발송구분이 '택배'인 건에만 들어간다(11/04 §3) — 담당자정보를

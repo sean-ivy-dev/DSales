@@ -84,9 +84,14 @@ class OrderDeleteIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("★접수완료가 아니면 거부한다 — 수기 등록은 상품준비중에서 시작한다")
+    @DisplayName("★접수완료가 아니면 거부한다 — 상품준비중으로 넘긴 주문은 못 지운다")
     void 접수완료아니면_거부() {
-        String no = register();   // 아무것도 안 하면 상품준비중
+        String no = register();
+        // ★(가)안(2026-11-16) — 등록 직후는 **접수완료**다(그전엔 상품준비중이었다).
+        //   그래서 거부를 보려면 **상품준비중으로 넘긴 뒤** 지워 봐야 한다.
+        assertThat(post("/orders/progress-state", Map.of(
+                "orderNos", List.of(no), "toState", "PREPARING", "reason", "물류 인계"))
+                .path("success").asBoolean()).isTrue();
 
         JsonNode r = del("/orders/entries/" + no);
         assertThat(r.path("success").asBoolean()).isFalse();

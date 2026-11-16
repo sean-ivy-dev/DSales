@@ -26,7 +26,15 @@ public final class OrderProgress {
     private OrderProgress() {
     }
 
-    /** 진행도. 작을수록 덜 진행된 것. 삭제는 99 — 살아 있는 발송이 하나라도 있으면 그쪽이 이긴다. */
+    /**
+     * 진행도. 작을수록 덜 진행된 것. 삭제는 99 — 살아 있는 발송이 하나라도 있으면 그쪽이 이긴다.
+     *
+     * <p>‼️{@code null} 은 <b>접수완료로 보지 않는다</b>. 접수완료는 "수정·삭제해도 된다"는
+     * 뜻이라({@code SalesOrderStateService.delete}·{@code SaleService.assertEditable}),
+     * 상태를 모르는 것을 거기에 넣으면 <b>모른다는 사실이 허가로 바뀐다</b>.
+     * 상품준비중으로 둔다 — {@link Shipment#progressState()} 는 null 을 내지 않으므로
+     * 이 분기는 실제로 닿지 않는 방어다.
+     */
     public static int rankOf(OrderState state) {
         if (state == null) {
             return rankOf(OrderState.PREPARING);
@@ -51,7 +59,12 @@ public final class OrderProgress {
         return OrderState.PREPARING;
     }
 
-    /** 주문(발송 묶음)의 상태 = 가장 덜 진행된 발송의 상태. */
+    /**
+     * 주문(발송 묶음)의 상태 = 가장 덜 진행된 발송의 상태.
+     *
+     * <p>‼️<b>빈 묶음은 접수완료가 아니다</b> — 위 {@link #rankOf} 와 같은 이유로
+     * 상품준비중을 돌려준다. 호출부는 비었는지 먼저 확인하고 사유를 말해야 한다.
+     */
     public static OrderState groupState(Collection<Shipment> shipments) {
         int min = Integer.MAX_VALUE;
         for (Shipment s : shipments) {

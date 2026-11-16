@@ -136,6 +136,9 @@ class ConsignSchoolIntegrationTest extends IntegrationTestSupport {
         String school = "CSW" + SFX;
         school(school, "작업요청서학교");
         consignOut(school, 40);
+        // ★(가)안(2026-11-16) — 등록 직후는 「접수완료」라 작업요청서에 안 나온다.
+        //   담당자가 상품준비중으로 넘긴 주문부터 나온다(발주처 확정).
+        handOverToLogistics("2106-01-01", "2106-12-31", partner);
 
         JsonNode d = data(get("/logistics/work-orders" + RANGE + "&partnerId=" + partner)).path("content");
         JsonNode rows = d.isArray() ? d : d.path("content");

@@ -56,6 +56,10 @@ class DeliveryTrackingIntegrationTest extends IntegrationTestSupport {
                         Map.of("productId", mock, "shipmentType", "NORMAL_SHIP", "qty", 5,
                                 "schoolCode", "20001", "schoolName", "발송고등학교"))));
 
+        // ★(가)안(2026-11-16) — 등록 직후는 「접수완료」라 작업요청서에 안 나온다.
+        //   담당자가 상품준비중으로 넘긴 주문부터 나온다(발주처 확정).
+        handOverToLogistics("2033-05-01", "2033-05-31", partner);
+
         JsonNode orders = data(get("/logistics/work-orders" + RANGE)).path("content");
         assertThat(orders).hasSize(2);
         courierShipment = orders.get(0).path("id").asLong();
@@ -358,6 +362,8 @@ class DeliveryTrackingIntegrationTest extends IntegrationTestSupport {
                 "fromWarehouseId", main, "toWarehouseId", consign,
                 "items", List.of(Map.of("productId", book, "qty", 10,
                         "unitPrice", 10000, "supplyRate", 70))));
+        // ★(가)안(2026-11-16) — 접수완료는 작업요청서에 안 나온다. 넘긴 뒤에 본다.
+        handOverToLogistics("2033-05-01", "2033-05-31", partner);
         JsonNode orders = data(get("/logistics/work-orders" + RANGE + "&partnerId=" + partner)).path("content");
         assertThat(orders.get(0).hasNonNull("deliveryType"))
                 .as("위탁출고 발송 건은 발송구분이 정말 비어 있다(전제 확인): %s", orders.get(0)).isFalse();

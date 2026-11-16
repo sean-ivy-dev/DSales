@@ -126,9 +126,10 @@ class SalesOrderQueryIntegrationTest extends IntegrationTestSupport {
         assertThat(mine.path("totalAmount").asLong()).as("10,000×70%×10").isEqualTo(70_000L);
         assertThat(mine.path("lines")).hasSize(1);
         assertThat(mine.path("tradeSeq").asInt()).isPositive();
-        // 수기 등록은 접수 단계를 지나 상품준비중에서 시작한다(특약점 주문만 접수완료).
-        assertThat(mine.path("progressState").asText()).isEqualTo("PREPARING");
-        assertThat(mine.path("progressStateName").asText()).isEqualTo("상품준비중");
+        // ★(가)안(2026-11-16) — 수기 등록도 **접수완료에서 시작**한다(그전엔 상품준비중).
+        //   발주처: "특약점 사이트 주문과 출고담당자가 등록하는 주문 모두 등록되면 접수완료".
+        assertThat(mine.path("progressState").asText()).isEqualTo("RECEIVED");
+        assertThat(mine.path("progressStateName").asText()).isEqualTo("접수완료");
     }
 
     @Test
@@ -154,8 +155,8 @@ class SalesOrderQueryIntegrationTest extends IntegrationTestSupport {
     @DisplayName("★★진행상태 필터 — 여섯 상태를 실제로 만들어, SQL 랭크식과 Java 판정이 일치하는지 본다")
     void 상태필터가_판정과_일치() {
         // 여섯 상태를 **실제로** 만든다. 하나라도 안 밟으면 랭크 식이 어긋나도 테스트가 통과한다.
-        String preparing = register(book);                 // 아무것도 안 하면 상품준비중
-        String received = registerWithIntake(OrderState.RECEIVED);
+        String received = register(book);                  // ★(가)안 — 아무것도 안 하면 접수완료
+        String preparing = registerWithIntake(OrderState.PREPARING);
         String inspecting = registerWithIntake(OrderState.INSPECTING);
 
         String readyNo = register(book);                   // 출력하면 발송준비중

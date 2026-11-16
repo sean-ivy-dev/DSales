@@ -119,6 +119,10 @@ class TradeSeqIntegrationTest extends IntegrationTestSupport {
             sell(partner, date, "SAME" + SFX);
         }
 
+        // ★(가)안(2026-11-16) — 등록 직후는 「접수완료」라 작업요청서에 안 나온다.
+        //   담당자가 상품준비중으로 넘긴 주문부터 나온다(발주처 확정).
+        handOverToLogistics(date, date, partner);
+
         java.util.List<Integer> seqs = new java.util.ArrayList<>();
         String range = "?fromDate=" + date + "&toDate=" + date + "&partnerId=" + partner;
         for (JsonNode row : data(get("/logistics/work-orders" + range)).path("content")) {
@@ -140,6 +144,10 @@ class TradeSeqIntegrationTest extends IntegrationTestSupport {
                                 "schoolCode", "SPLITA" + SFX, "schoolName", "갈림A"),
                         Map.of("productId", book, "shipmentType", "NORMAL_SHIP", "qty", 1,
                                 "schoolCode", "SPLITB" + SFX, "schoolName", "갈림B"))));
+
+        // ★(가)안(2026-11-16) — 등록 직후는 「접수완료」라 작업요청서에 안 나온다.
+        //   담당자가 상품준비중으로 넘긴 주문부터 나온다(발주처 확정).
+        handOverToLogistics(date, date, partner);
 
         java.util.List<Integer> seqs = new java.util.ArrayList<>();
         String range = "?fromDate=" + date + "&toDate=" + date + "&partnerId=" + partner;

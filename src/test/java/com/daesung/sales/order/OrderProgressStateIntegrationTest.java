@@ -108,10 +108,9 @@ class OrderProgressStateIntegrationTest extends IntegrationTestSupport {
     @DisplayName("★세 상태 사이를 오간다 — 접수완료→상품검수→상품준비중, 되돌리기도 된다")
     void 접수단계_전이() {
         String no = register();
-        assertThat(stateOf(no)).as("수기 등록은 상품준비중에서 시작").isEqualTo("PREPARING");
-
-        assertThat(change(List.of(no), "RECEIVED").path("success").asBoolean()).isTrue();
-        assertThat(stateOf(no)).isEqualTo("RECEIVED");
+        // ★(가)안(2026-11-16) — 수기 등록도 **접수완료에서 시작**한다.
+        //   그전엔 상품준비중에서 시작해 "접수완료 주문을 고칠 방법이 없다"는 지적이 나왔다.
+        assertThat(stateOf(no)).as("등록 직후는 접수완료").isEqualTo("RECEIVED");
 
         assertThat(change(List.of(no), "INSPECTING").path("success").asBoolean()).isTrue();
         assertThat(stateOf(no)).isEqualTo("INSPECTING");
@@ -124,7 +123,7 @@ class OrderProgressStateIntegrationTest extends IntegrationTestSupport {
     @DisplayName("★접수완료 → 상품준비중 바로 가기 — 평상시 흐름(상품검수는 거의 안 쓴다)")
     void 한칸씩이_아니다() {
         String no = register();
-        change(List.of(no), "RECEIVED");
+        assertThat(stateOf(no)).isEqualTo("RECEIVED");   // 등록 직후
 
         JsonNode r = change(List.of(no), "PREPARING");
         assertThat(r.path("success").asBoolean()).as("%s", r).isTrue();
@@ -143,7 +142,7 @@ class OrderProgressStateIntegrationTest extends IntegrationTestSupport {
             assertThat(r.path("error").path("message").asText())
                     .contains("접수완료·상품검수·상품준비중");
         }
-        assertThat(stateOf(no)).as("상태가 그대로").isEqualTo("PREPARING");
+        assertThat(stateOf(no)).as("상태가 그대로").isEqualTo("RECEIVED");
     }
 
     @Test
@@ -190,7 +189,8 @@ class OrderProgressStateIntegrationTest extends IntegrationTestSupport {
     void 같은상태는_건너뜀() {
         String no = register();
 
-        JsonNode r = change(List.of(no), "PREPARING");
+        // (가)안 뒤 등록 직후는 접수완료 — 같은 값을 다시 주는 것이 '같은 상태'다.
+        JsonNode r = change(List.of(no), "RECEIVED");
         assertThat(data(r).path("changed").asInt()).isZero();
         assertThat(data(r).path("results").get(0).path("message").asText()).contains("이미");
     }
@@ -199,7 +199,8 @@ class OrderProgressStateIntegrationTest extends IntegrationTestSupport {
     @DisplayName("★이력이 남는다 — 되돌린 사실이 어디에도 없으면 감사에서 설명할 수 없다")
     void 이력이_남는다() {
         String no = register();
-        change(List.of(no), "RECEIVED");
+        // 등록 직후가 접수완료이므로, 이력이 남을 **다른 상태**로 옮긴다.
+        change(List.of(no), "PREPARING");
 
         List<Long> ids = new ArrayList<>();
         for (Shipment s : shipmentRepository.findByEntryNo(no)) {
@@ -211,7 +212,7 @@ class OrderProgressStateIntegrationTest extends IntegrationTestSupport {
         boolean found = false;
         for (JsonNode h : hist.path("content")) {
             if ("progressState".equals(h.path("field").asText())
-                    && "RECEIVED".equals(h.path("toStatus").asText())) {
+                    && "PREPARING".equals(h.path("toStatus").asText())) {
                 found = true;
             }
         }

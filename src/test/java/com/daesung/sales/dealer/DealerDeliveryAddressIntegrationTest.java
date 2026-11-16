@@ -109,6 +109,8 @@ class DealerDeliveryAddressIntegrationTest extends IntegrationTestSupport {
         assertThat(row.path("address").asText()).isEqualTo("서울 강남구 테헤란로 1 3층");
 
         // 작업요청서(물류가 이 주소로 보낸다)
+        // ★(가)안(2026-11-16) — 접수완료는 작업요청서에 안 나온다. 넘긴 뒤에 본다.
+        handOverToLogistics(DATE, DATE, null);
         JsonNode wo = null;
         for (JsonNode w : data(get("/logistics/work-orders?fromDate=" + DATE + "&toDate=" + DATE))
                 .path("content")) {

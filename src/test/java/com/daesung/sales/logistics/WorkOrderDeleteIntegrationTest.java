@@ -69,6 +69,10 @@ class WorkOrderDeleteIntegrationTest extends IntegrationTestSupport {
                             "unitPrice", 10000, "supplyRate", 70, "qty", 10,
                             "schoolCode", sch, "schoolName", "삭제검증고" + sch))));
         }
+
+        // ★(가)안(2026-11-16) — 등록 직후는 「접수완료」라 작업요청서에 안 나온다.
+        //   담당자가 상품준비중으로 넘긴 주문부터 나온다(발주처 확정).
+        handOverToLogistics("2098-01-01", "2098-12-31", partner);
     }
 
     private JsonNode row(String schoolCode) {
