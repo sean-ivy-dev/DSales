@@ -141,11 +141,18 @@ class DealerOrderIntakeIntegrationTest extends IntegrationTestSupport {
         assertThat(stockOf()).as("30부 차감").isEqualTo(before - 30);
     }
 
-    /** 그 거래처 주문이 작업요청서 목록에 보이나. */
-    private boolean inWorkOrders(String partnerCode) {
+    /**
+     * <b>그 주문</b>이 작업요청서 목록에 보이나.
+     *
+     * <p>‼️거래처코드로 보면 안 된다 — 이 클래스의 다른 테스트가 <b>같은 날 같은 거래처</b>로
+     * 주문을 만들고 상품준비중으로 넘긴다. 그러면 "안 보여야 한다"가 남의 주문 때문에
+     * 참이 되고(또는 거짓이 되고) <b>단정이 아무것도 지키지 못한다</b>.
+     * 실제로 단독 실행은 통과, 전체 실행에서 깨졌다.
+     */
+    private boolean inWorkOrders(String entryNo) {
         for (JsonNode w : data(get("/logistics/work-orders?fromDate=" + DATE + "&toDate=" + DATE))
                 .path("content")) {
-            if (partnerCode.equals(w.path("partnerCode").asText())) {
+            if (entryNo.equals(w.path("entryNo").asText())) {
                 return true;
             }
         }
@@ -176,11 +183,25 @@ class DealerOrderIntakeIntegrationTest extends IntegrationTestSupport {
         //   발송 건이 생긴다는 뜻이고, 목록에 보이는 시점은 인계 뒤다).
         //   ‼️이 둘을 한 테스트에서 못박아 둔다 — 한쪽만 고치면 신청이 물류에 영원히
         //     안 보이거나(인계 규칙 유실), 접수완료 건이 섞여 나온다.
-        assertThat(inWorkOrders(PARTNER_CODE)).as("접수완료라 아직 안 보인다").isFalse();
+        assertThat(inWorkOrders(entryNo)).as("접수완료라 아직 안 보인다").isFalse();
 
-        assertThat(handOverToLogistics(DATE, DATE, null))
-                .as("상품준비중으로 넘긴다").isPositive();
-        assertThat(inWorkOrders(PARTNER_CODE)).as("넘기면 작업요청서에 보인다").isTrue();
+        // ‼️**상품검수도 안 보인다**(PM 전달 2차 2026-11-16 — "작업요청서는 상품준비중부터").
+        //   처음엔 접수완료만 뺐는데 규칙이 어긋났다. 운영에 상품검수 건이 0건이라
+        //   숫자로는 안 드러나므로, **그 상태를 처음 쓰는 날 조용히 틀리지 않게** 여기서 못박는다.
+        //   ‼️`changed` 까지 본다 — 상태변경은 **건너뛰어도 200**(건별 결과로 알린다)이라,
+        //     success 만 보면 상태가 안 바뀐 채 "안 보인다"가 참이 되어 아무것도 못 지킨다.
+        assertThat(data(post("/orders/progress-state", java.util.Map.of(
+                "orderNos", java.util.List.of(entryNo), "toState", "INSPECTING", "reason", "검수")))
+                .path("changed").asInt()).as("상품검수로 실제로 바뀌어야 한다").isEqualTo(1);
+        assertThat(inWorkOrders(entryNo)).as("상품검수도 작업요청서엔 안 보인다").isFalse();
+
+        // ‼️`handOverToLogistics` 는 **접수완료만** 찾아 넘긴다 — 지금 이 주문은 상품검수라
+        //   그 헬퍼로는 안 움직인다. **이 주문을 지목해** 넘겨야 뒤 단정이 다른 주문 때문에
+        //   참이 되는 일이 없다(같은 날 다른 테스트의 주문이 섞인다).
+        assertThat(data(post("/orders/progress-state", java.util.Map.of(
+                "orderNos", java.util.List.of(entryNo), "toState", "PREPARING", "reason", "물류 인계")))
+                .path("changed").asInt()).isEqualTo(1);
+        assertThat(inWorkOrders(entryNo)).as("넘기면 작업요청서에 보인다").isTrue();
     }
 
     @Test

@@ -34,16 +34,19 @@ import org.springframework.transaction.annotation.Transactional;
 public class WorkService {
 
     /**
-     * 작업요청서 목록에서 <b>「접수완료」 건을 뺀다</b>(발주처 (가)안 2026-11-16).
+     * 작업요청서 목록에서 <b>접수 단계 건을 뺀다</b> — 접수완료·상품검수(발주처 (가)안 2026-11-16).
      *
-     * <p>"작업요청서에는 상품준비중부터 올라오게. 접수완료로 되돌린 주문은 목록에서 빠지게."
+     * <p>"작업요청서에는 <b>상품준비중부터</b> 올라오게. 접수완료로 되돌린 주문은 목록에서 빠지게."
      * 물류가 아직 넘겨받지 않은 주문은 작업 지시가 아니다.
      *
-     * <p>‼️<b>주문조회(§2-1)는 그대로 접수완료를 보여준다</b> — 줄 조립은 같은
+     * <p>‼️<b>상품검수도 빠진다</b>(PM 전달 2차 2026-11-16 — "상품검수도 작업요청서에
+     * 나오지 않습니다. 작업요청서는 상품준비중부터"). 처음엔 접수완료만 뺐는데 규칙이 어긋났다.
+     *
+     * <p>‼️<b>주문조회(§2-1)는 그대로 접수 단계를 보여준다</b> — 줄 조립은 같은
      * {@link #buildWorkOrders} 를 쓰지만, <b>발송 건을 고르는 조회는 다르다</b>
-     * ({@code SalesOrderQueryService}). 거기서 접수완료 주문을 고쳐야 하므로 보여야 한다.
+     * ({@code SalesOrderQueryService}). 거기서 그 주문을 고쳐야 하므로 보여야 한다.
      */
-    private static final int EXCLUDE_RECEIVED = 1;
+    private static final int EXCLUDE_INTAKE = 1;
 
     private final ShipmentRepository shipmentRepository;
     private final com.daesung.sales.consignment.repository.ConsignmentOutRepository consignmentOutRepository;
@@ -247,7 +250,7 @@ public class WorkService {
                 && wanted.contains(com.daesung.sales.dsre.gateway.OrderState.CANCELED);
 
         List<Shipment> found = wantCanceled
-                // ★작업결과는 **접수완료를 따로 빼지 않는다**(excludeReceived=0) —
+                // ★작업결과는 **접수 단계를 따로 빼지 않는다**(excludeIntake=0) —
                 //   여기엔 이미 진행상태 필터(`statuses`)가 있어 담당자가 고른 대로 나오고,
                 //   (가)안이 바꾼 것은 **작업요청서**(작업 지시) 쪽이다.
                 ? shipmentRepository.findAllIncludingDeleted(from, to, tradeClass, partnerId,
@@ -328,7 +331,7 @@ public class WorkService {
             org.springframework.data.domain.Pageable pageable) {
         var page = shipmentRepository.findPageIncludingDeleted(from, to, tradeClass, partnerId,
                 toFlag(printed), toFlag(acknowledged),
-                deliveryType == null ? null : deliveryType.name(), EXCLUDE_RECEIVED, pageable);
+                deliveryType == null ? null : deliveryType.name(), EXCLUDE_INTAKE, pageable);
         List<WorkOrderResponse> rows = buildWorkOrders(page.getContent(), from, to);
         return new org.springframework.data.domain.PageImpl<>(rows, pageable, page.getTotalElements());
     }
@@ -349,7 +352,7 @@ public class WorkService {
         //     발송이 없으면 읽을 이유가 없다.
         List<Shipment> shipments = shipmentRepository.findAllIncludingDeleted(from, to, tradeClass,
                 partnerId, toFlag(printed), toFlag(acknowledged),
-                deliveryType == null ? null : deliveryType.name(), EXCLUDE_RECEIVED);
+                deliveryType == null ? null : deliveryType.name(), EXCLUDE_INTAKE);
         return buildWorkOrders(shipments, from, to);
     }
 
