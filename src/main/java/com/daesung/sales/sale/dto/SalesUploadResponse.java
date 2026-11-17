@@ -33,7 +33,17 @@ public record SalesUploadResponse(int imported, int failed, int warned, List<Lin
             int qty,
             long supplyAmount,
             @Schema(description = "오류 사유(ERROR) 또는 경고 문구(IMPORTED_WITH_WARNING)")
-            String message
+            String message,
+
+            @Schema(description = """
+                    **재고 경고**(차단 아님) — 이 줄로 재고가 음수가 되면 담긴다
+                    (프론트 요청 2026-11-17 §6. 전엔 응답에 칸이 없어 화면이 알 수 없었다).
+
+                    ‼️`result`·`warned` 는 **건드리지 않는다** — 그 둘은 「금액이 계산과 다르다」는
+                    뜻으로 쓰이고 있다. 재고 경고로 `IMPORTED_WITH_WARNING` 을 만들면
+                    **입고 전 출고가 전부 노랗게** 보이고(그게 정상 운영이다) 그 뜻이 흐려진다.
+                    화면은 이 칸을 따로 보고 표시하면 된다.""")
+            java.util.List<com.daesung.sales.inventory.dto.StockWarning> stockWarnings
     ) {
     }
 }

@@ -675,7 +675,9 @@ public class SaleService {
                 (req.procType() != null) ? req.procType() : sale.getProcType(),
                 (req.packType() != null) ? req.packType() : sale.getPackType());
 
-        return finishUpdate(sale, req, id, oldQty, newQty, before);
+        // ★재고 경고를 응답에 싣는다(프론트 요청 2026-11-17 §6) — 수량을 늘리거나
+        //   반품 줄을 되돌리면 재고가 줄어 음수가 될 수 있는데, 지금은 화면이 알 수 없었다.
+        return (finishUpdate(sale, req, id, oldQty, newQty, before)).withWarnings(stockWarningCollector.drain());
     }
 
     /**
@@ -752,7 +754,9 @@ public class SaleService {
         //   작업요청서 지시 목록은 **취소분도 빼고** 세므로, 한 주문이 통째로 취소되면
         //   똑같이 0줄짜리 지시가 남아 물류가 쌀 것 없는 건을 본다.
         shipmentService.deleteIfEmptied(sale);
-        return response;
+        // ★재고 경고를 응답에 싣는다(프론트 요청 2026-11-17 §6) — 수량을 늘리거나
+        //   반품 줄을 되돌리면 재고가 줄어 음수가 될 수 있는데, 지금은 화면이 알 수 없었다.
+        return (response).withWarnings(stockWarningCollector.drain());
     }
 
     /**
@@ -783,6 +787,21 @@ public class SaleService {
      * 도서 0줄짜리 지시가 알림 배지에 그대로 잡혔다. 발송완료된 건은 건드리지 않는다 —
      * 이미 나간 사실은 매출을 지운다고 없어지지 않는다({@code ShipmentService.deleteIfEmptied}).
      */
+    /**
+     * 삭제하고 <b>재고 경고를 돌려준다</b>(프론트 요청 2026-11-17 §6).
+     *
+     * <p>‼️반품 줄을 지우면 <b>재고가 줄어든다</b>(반품으로 들어온 수량을 되돌리므로).
+     * 그때 음수가 되는데 지금까지 응답에 경고 칸이 없어 <b>화면이 알 수 없었다.</b>
+     *
+     * <p>{@link #delete(Long, String)} 를 그대로 호출한다 — 삭제 규칙을 여기서 다시 쓰지 않는다.
+     */
+    @Transactional
+    public List<com.daesung.sales.inventory.dto.StockWarning> deleteWithWarnings(
+            Long id, String reason) {
+        delete(id, reason);
+        return stockWarningCollector.drain();
+    }
+
     @Transactional
     public void delete(Long id, String reason) {
         // ★단건 삭제도 같은 기준이다. 여기를 열어 두면 줄을 하나씩 지워

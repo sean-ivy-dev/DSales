@@ -60,6 +60,7 @@ public class SalesUploadService {
     private final com.daesung.sales.product.service.PartnerSupplyRateService partnerSupplyRateService;
     private final SequenceService sequenceService;
     private final EntryNumberService entryNumberService;
+    private final com.daesung.sales.inventory.service.StockWarningCollector stockWarningCollector;
     private final PeriodLockService periodLockService;
 
     private record Kind(ShipmentType shipmentType, SalesCategory category) {}
@@ -185,19 +186,25 @@ public class SalesUploadService {
                     //   ("알럿만 주고 등록은 허용한다"). 저장값은 위에서 이미 파일 값으로 정했다.
                     //   ‼️두 번 고친 자리다 — ①처음엔 파일 금액을 **안 읽고 조용히 덮어썼고**,
                     //     ②경고를 붙인 뒤에도 **저장값은 계산값**이라 그 "예외"가 결국 버려졌다.
+                    // ★재고 경고는 **별도 칸**에 싣는다(프론트 요청 2026-11-17 §6).
+                    //   ‼️`result`·`warned` 는 「금액이 계산과 다르다」는 뜻이라 건드리지 않는다 —
+                    //     재고 경고로 그걸 올리면 **입고 전 출고가 전부 노랗게** 보이고(정상 운영이다)
+                    //     기존 뜻이 흐려진다. 실제로 기존 테스트 3건이 그렇게 깨졌다.
+                    //   ‼️줄마다 꺼낸다(drain) — 안 비우면 다음 줄에 앞 줄 경고가 따라붙는다.
+                    var stockWarns = stockWarningCollector.drain();
                     String warn = amountWarning(row, amt.supplyAmount());
                     if (warn == null) {
                         lines.add(new SalesUploadResponse.Line(rowNo, "IMPORTED", salesNo,
-                                custCode, label(catCode, bookCode), qty, saved, null));
+                                custCode, label(catCode, bookCode), qty, saved, null, stockWarns));
                     } else {
                         warned++;
                         lines.add(new SalesUploadResponse.Line(rowNo, "IMPORTED_WITH_WARNING", salesNo,
-                                custCode, label(catCode, bookCode), qty, saved, warn));
+                                custCode, label(catCode, bookCode), qty, saved, warn, stockWarns));
                     }
                 } catch (BusinessException e) {
                     failed++;
                     lines.add(new SalesUploadResponse.Line(rowNo, "ERROR", null,
-                            custCode, label(catCode, bookCode), qty, 0, e.getMessage()));
+                            custCode, label(catCode, bookCode), qty, 0, e.getMessage(), List.of()));
                 }
             }
         } catch (IOException e) {

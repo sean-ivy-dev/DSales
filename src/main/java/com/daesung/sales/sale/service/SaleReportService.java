@@ -783,6 +783,12 @@ public class SaleReportService {
         return saleRepository.statementSchools(partnerId, from, to, cats);
     }
 
+    /**
+     * 「학교 없는 매출만」을 고르는 특수 학교코드(프론트 요청 2026-11-17 §6).
+     * 거래명세서를 학교별로 나누면 학교가 없는 매출이 어느 장에도 안 실린다 — 그 줄만 모을 때 쓴다.
+     */
+    public static final String NO_SCHOOL = "__NO_SCHOOL__";
+
     public TransactionStatementResponse transactionStatement(Long partnerId, LocalDate from, LocalDate to,
                                                              SalesCategory category) {
         return transactionStatement(partnerId, from, to, category, null);
@@ -805,7 +811,17 @@ public class SaleReportService {
         List<Sale> sales = saleRepository.statementLines(partnerId, from, to, cats);
         if (schoolCode != null && !schoolCode.isBlank()) {
             String want = schoolCode.trim();
-            sales = sales.stream().filter(x -> want.equals(x.getSchoolCode())).toList();
+            // ★「학교 없는 매출만」(프론트 요청 2026-11-17 §6) — 학교별로 명세서를 나누면
+            //   학교가 없는 매출이 **어느 장에도 실리지 않는다**. 그 줄만 고를 길이 필요하다.
+            //   ‼️특수값으로 둔 이유: 학교코드에 빈 문자열을 주면 "조건 없음"과 구분이 안 된다
+            //     (지금도 비어 있으면 전체를 한 장에 싣는다). 그래서 명시적인 토큰을 쓴다.
+            if (NO_SCHOOL.equals(want)) {
+                sales = sales.stream()
+                        .filter(x -> x.getSchoolCode() == null || x.getSchoolCode().isBlank())
+                        .toList();
+            } else {
+                sales = sales.stream().filter(x -> want.equals(x.getSchoolCode())).toList();
+            }
         }
 
         List<TransactionStatementResponse.Line> priced = new ArrayList<>();

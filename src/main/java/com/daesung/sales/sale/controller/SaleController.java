@@ -493,10 +493,14 @@ public class SaleController {
     // ‼️경로변수를 숫자로 제한한다. 안 그러면 이 매핑이 `/sales/summary`·`/sales/statement` 같은
     //   조회 경로까지 삼켜, "메서드만 틀린" 요청이 405가 아니라 400(숫자 변환 실패)이 된다.
     @DeleteMapping("/{id:\\d+}")
-    public ApiResponse<Void> delete(@PathVariable Long id,
-                                    @Valid @RequestBody(required = false) com.daesung.sales.logistics.dto.ReasonRequest req) {
-        saleService.delete(id, com.daesung.sales.logistics.dto.ReasonRequest.reasonOf(req));
-        return ApiResponse.success(null);
+    public ApiResponse<java.util.List<com.daesung.sales.inventory.dto.StockWarning>> delete(
+            @PathVariable Long id,
+            @Valid @RequestBody(required = false) com.daesung.sales.logistics.dto.ReasonRequest req) {
+        // ★응답에 **재고 경고**를 담는다(프론트 요청 2026-11-17 §6) — 반품 줄을 지우면
+        //   재고가 줄어 음수가 될 수 있는데 지금까지 화면이 알 수 없었다.
+        //   ‼️전엔 `data: null` 이었다. 경고가 없으면 **빈 배열**이 나간다(화면 분기 불필요).
+        return ApiResponse.success(saleService.deleteWithWarnings(
+                id, com.daesung.sales.logistics.dto.ReasonRequest.reasonOf(req)));
     }
 
     @Operation(summary = "매출 여러 건 삭제(마감 前)",
@@ -847,7 +851,12 @@ public class SaleController {
                     학교/학원코드 — **그 학교 건만** 싣는다. 실물 양식의 「학교(원)」 칸은 값이 하나라
                     명세서는 (거래처 × 학교) 단위로 발행된다.
                     ‼️안 주면 기간의 모든 학교가 한 장에 섞이고 이름은 첫 학교만 찍힌다 —
-                    발행 대상은 `GET /sales/transaction-statement/schools` 로 먼저 뽑을 것.""")
+                    발행 대상은 `GET /sales/transaction-statement/schools` 로 먼저 뽑을 것.
+
+                    ### ★`__NO_SCHOOL__` — 「학교 없는 매출만」
+                    학교별로 명세서를 나누면 **학교가 없는 매출이 어느 장에도 안 실린다**
+                    (프론트 요청 2026-11-17 §6). 그 줄만 모으려면 이 값을 준다.
+                    ‼️빈 문자열로는 안 된다 — 「조건 없음」과 구분되지 않는다.""")
             @RequestParam(required = false) String schoolCode,
             @Parameter(description = "회계구분(미지정=매출+무가, RETURN=반품명세서)") @RequestParam(required = false)
             SalesCategory category) {

@@ -116,7 +116,15 @@ public record SaleResponse(
                 공급가액을 담당자가 **직접 입력**했나(B-3).
                 true 면 계산값이 아니라 손으로 맞춘 금액이다.""")
         boolean amountOverridden,
-        String memo
+        String memo,
+
+        @Schema(description = """
+                **재고 경고**(차단 아님). 이 호출로 재고가 음수가 되면 담긴다.
+                조회에서는 비어 있고 <b>수정·삭제·취소 응답에만</b> 채워진다
+                (프론트 요청 2026-11-17 §6 — 「경고를 싣지 않는 세 경로」).
+
+                ‼️음수 재고는 **막지 않는다**(발주처 2026-08-31). 경고만 보여 주면 된다.""")
+        java.util.List<com.daesung.sales.inventory.dto.StockWarning> warnings
 ) {
     /**
      * @param division 이 매출 상품의 세부구분 마스터(null=미지정). 대분류는 여기서 파생된다 —
@@ -204,10 +212,44 @@ public record SaleResponse(
                 com.daesung.sales.sale.entity.OrderChannel.orDefault(s.getChannel()).label(),
                 s.getEntryNo(), s.getEntrySeq(), s.getTradeSeq(), s.getOnlySales(),
                 s.isAmountOverridden(),
-                s.getMemo());
+                s.getMemo(),
+                // ★조회에는 재고 경고가 없다 — 수정·삭제·취소 응답에서 withWarnings 로 붙인다.
+                null);
     }
 
     private static Long negate(Long v) {
         return (v == null) ? null : -v;
+    }
+
+    /**
+     * 재고 경고를 붙인다. <b>조회 경로는 손대지 않으려고</b> 이 메서드를 둔다 —
+     * {@code from(...)} 호출부가 수십 곳이라 인자를 늘리면 전부 바뀐다.
+     *
+     * <p>★레코드는 불변이라 사본을 만드는데, 필드가 51개여서 손으로 나열하면
+     * 순서 하나 틀려도 조용히 엉뚱한 값이 들어간다. 그래서 <b>컴팩트 생성자에서
+     * 기본값(null)을 주고</b>, 여기서는 {@code warnings} 만 바꾼 사본을 만든다.
+     */
+    public SaleResponse withWarnings(
+            java.util.List<com.daesung.sales.inventory.dto.StockWarning> w) {
+        if (w == null || w.isEmpty()) {
+            return this;
+        }
+        return new SaleResponse(this, w);
+    }
+
+    /** {@link #withWarnings} 전용 — 경고만 바꾼 사본. 나열 실수를 막는다. */
+    private SaleResponse(SaleResponse o,
+                         java.util.List<com.daesung.sales.inventory.dto.StockWarning> w) {
+        this(o.id(), o.salesNo(), o.salesDate(), o.partnerId(), o.partnerCode(), o.partnerName(),
+                o.partnerCityName(), o.partnerName1(), o.region(), o.clientCategory(),
+                o.schoolCode(), o.schoolName(), o.schoolType(), o.schoolTypeName(), o.grade(),
+                o.catCode(), o.catName(), o.salesDivision(), o.salesDivisionName(),
+                o.majorCategory(), o.majorCategoryName(), o.productId(), o.productCode(),
+                o.productName(), o.bookRound(), o.salesType(), o.shipmentType(),
+                o.shipmentTypeName(), o.tradeClass(), o.tradeClassName(), o.salesCategory(),
+                o.unitPrice(), o.supplyRate(), o.discountAmount(), o.qty(), o.supplyAmount(),
+                o.tax(), o.totalAmount(), o.canceled(), o.warehouseId(), o.warehouseName(),
+                o.salesChannel(), o.orderChannel(), o.orderChannelName(), o.entryNo(),
+                o.entrySeq(), o.tradeSeq(), o.onlySales(), o.amountOverridden(), o.memo(), w);
     }
 }
