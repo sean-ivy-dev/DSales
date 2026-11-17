@@ -373,13 +373,48 @@ public class ShipmentService {
      *
      * @return 이번 호출로 실제 표시가 붙었으면 true(이미 출력된 건이면 false)
      */
+    /**
+     * 그 발송과 <b>같은 묶음</b>(형제)에 모두 적용한다 — 등록번호가 없고 네 칸이 같은 건들.
+     *
+     * <h3>‼️왜 묶음 전체인가(2026-11-17, 프론트 지적)</h3>
+     * 이관이 한 묶음을 발송 여럿으로 쪼개 넣었고 줄은 대표 1건에만 붙는다. 그래서
+     * <b>화면에 대표 한 줄만 보이는데</b> 출력·발송완료는 발송 1건 단위다.
+     * 대표만 넘기면 <b>형제가 발송준비중에 남고</b>, 주문조회는 「가장 덜 진행된 발송」을
+     * 보여주므로 그 주문이 영원히 발송준비중으로 보인다(운영 73건이 그 상태였다).
+     *
+     * <p>★<b>등록번호가 있는 발송은 형제가 자기 하나뿐</b>이라 종전과 똑같이 동작한다.
+     *
+     * <p>★<b>묶음 안에 이미 상태가 다른 것이 있어도 그대로 건다.</b> 각 메서드가
+     * "이미 그 상태면 false"를 돌려주므로 <b>덮어쓰지 않는다</b>(출력일은 최초만 남고
+     * 확인도 최초 처리자를 지킨다). 운영 실측으로 묶음 안이 다른 것은 2026년 13묶음뿐이고,
+     * <b>송장을 가진 형제는 0건</b>이다 — 잃을 기록이 없다.
+     *
+     * @return 하나라도 실제로 바뀌었으면 true
+     */
+    private boolean applyToSiblings(Long shipmentId, java.util.function.Predicate<Shipment> action) {
+        List<Shipment> group = shipmentRepository.findSiblings(shipmentId);
+        if (group.isEmpty()) {
+            // 등록번호가 있는 발송은 형제 조회에 걸리지 않는다 — 자기만 처리한다.
+            return action.test(getOrThrow(shipmentId));
+        }
+        boolean any = false;
+        for (Shipment s : group) {
+            any |= action.test(s);
+        }
+        return any;
+    }
+
     @Transactional
     public boolean markPrinted(Long shipmentId) {
-        boolean changed = getOrThrow(shipmentId).markPrinted(LocalDateTime.now());
-        if (changed) {
-            statusHistoryService.record(StatusEntityType.SHIPMENT, shipmentId,
-                    FIELD_PRINTED, false, true, null);
-        }
+        // ★형제까지 함께 — 묶음에서 대표만 출력되면 나머지가 미출력으로 남는다.
+        boolean changed = applyToSiblings(shipmentId, s -> {
+            boolean c = s.markPrinted(LocalDateTime.now());
+            if (c) {
+                statusHistoryService.record(StatusEntityType.SHIPMENT, s.getId(),
+                        FIELD_PRINTED, false, true, null);
+            }
+            return c;
+        });
         return changed;
     }
 
@@ -396,12 +431,14 @@ public class ShipmentService {
      */
     @Transactional
     public boolean revertPrinted(Long shipmentId, String reason) {
-        boolean changed = getOrThrow(shipmentId).revertPrinted();
-        if (changed) {
-            statusHistoryService.record(StatusEntityType.SHIPMENT, shipmentId,
-                    FIELD_PRINTED, true, false, orNoReason(reason));
-        }
-        return changed;
+        return applyToSiblings(shipmentId, s -> {
+            boolean c = s.revertPrinted();
+            if (c) {
+                statusHistoryService.record(StatusEntityType.SHIPMENT, s.getId(),
+                        FIELD_PRINTED, true, false, orNoReason(reason));
+            }
+            return c;
+        });
     }
 
     /**
@@ -413,13 +450,14 @@ public class ShipmentService {
      */
     @Transactional
     public boolean acknowledge(Long shipmentId) {
-        boolean changed = getOrThrow(shipmentId)
-                .acknowledge(currentAuditor.username(), LocalDateTime.now());
-        if (changed) {
-            statusHistoryService.record(StatusEntityType.SHIPMENT, shipmentId,
-                    FIELD_ACKNOWLEDGED, false, true, null);
-        }
-        return changed;
+        return applyToSiblings(shipmentId, s -> {
+            boolean c = s.acknowledge(currentAuditor.username(), LocalDateTime.now());
+            if (c) {
+                statusHistoryService.record(StatusEntityType.SHIPMENT, s.getId(),
+                        FIELD_ACKNOWLEDGED, false, true, null);
+            }
+            return c;
+        });
     }
 
     /**
@@ -463,6 +501,22 @@ public class ShipmentService {
             assertTrackingAllowed(s);
         }
         s.updateTracking(labelOf(req.courierName()), req.trackingNo());
+
+        // ★★발송일만 **형제에게도** 찍는다(2026-11-17, 프론트 지적).
+        //   ‼️박스수·송장·수령인·발송구분은 **대상 발송에만** 둔다 — 송장은 묶음에 하나이고,
+        //     형제에 같은 송장을 복사하면 없는 운송장이 생긴다. 발송일만 묶음 공통이다.
+        //   안 하면 대표만 발송완료가 되고 형제는 발송준비중에 남아,
+        //   주문조회가 그 주문을 계속 발송준비중으로 보여준다(운영 73건이 그 상태였다).
+        if (req.sentDate() != null) {
+            for (Shipment sib : shipmentRepository.findSiblings(shipmentId)) {
+                if (!sib.getId().equals(shipmentId) && sib.getSentDate() == null) {
+                    sib.updateShipping(null, req.sentDate(), null);
+                    statusHistoryService.record(StatusEntityType.SHIPMENT, sib.getId(),
+                            "sentDate", null, String.valueOf(req.sentDate()),
+                            "같은 묶음 대표(" + shipmentId + ") 발송 처리에 따라 함께 반영");
+                }
+            }
+        }
         // 발송일이 들어오면 = 발송 처리. 묶인 신청의 DSRE 상태도 발송완료로(2026-10-23).
         return (req.sentDate() == null) ? List.of() : shipToDsre(s, req.sentDate());
     }

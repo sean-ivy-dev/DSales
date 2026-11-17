@@ -132,6 +132,67 @@ class MigratedShipmentDuplicateIntegrationTest extends IntegrationTestSupport {
         assertThat(qtySum).as("‼️합계가 60 이면 중복이다").isEqualTo(20);
     }
 
+    @Test
+    @DisplayName("★★발송완료를 대표에만 걸어도 **형제까지 함께** 넘어간다 — 안 그러면 영원히 발송준비중")
+    void 발송완료가_형제까지() {
+        handOverToLogistics(DAY, DAY, partner);
+        JsonNode rows = data(get("/logistics/work-orders?fromDate=" + DAY + "&toDate=" + DAY
+                + "&partnerId=" + partner + "&size=50")).path("content");
+        long rep = -1;
+        for (JsonNode r : rows) {
+            if (r.path("lines").size() > 0) {
+                rep = r.path("id").asLong();   // 줄이 붙은 것이 대표다
+            }
+        }
+        assertThat(rep).as("대표 발송을 찾아야 한다").isPositive();
+
+        assertThat(put("/logistics/work-orders/" + rep + "/shipping",
+                Map.of("boxCount", 1, "sentDate", DAY)).path("success").asBoolean()).isTrue();
+
+        // ‼️형제까지 발송일이 찍혀야 한다. 대표만 찍히면 주문조회가 「가장 덜 진행된 발송」을
+        //   보여주므로 그 주문이 **계속 발송준비중**으로 남는다(운영 73건이 그 상태였다).
+        for (var sh : shipmentRepository.findAll()) {
+            if (sh.getDeletedAt() == null && DAY.equals(String.valueOf(sh.getTradeDate()))
+                    && partner.equals(sh.getPartner().getId())) {
+                assertThat(sh.getSentDate())
+                        .as("발송 %d 에도 발송일이 찍혀야 한다", sh.getId()).isNotNull();
+            }
+        }
+
+        JsonNode mine = null;
+        for (JsonNode r : data(get("/orders?fromDate=" + DAY + "&toDate=" + DAY
+                + "&partnerId=" + partner + "&size=50")).path("content")) {
+            mine = r;
+        }
+        assertThat(mine.path("progressState").asText())
+                .as("주문도 발송완료로 보여야 한다: %s", mine).isEqualTo("SHIPPED");
+
+        // ★송장·박스는 **대표에만** 둔다 — 형제에 같은 송장을 복사하면 없는 운송장이 생긴다.
+        long withBox = shipmentRepository.findAll().stream()
+                .filter(x -> x.getDeletedAt() == null)
+                .filter(x -> DAY.equals(String.valueOf(x.getTradeDate())))
+                .filter(x -> partner.equals(x.getPartner().getId()))
+                .filter(x -> x.getBoxCount() > 0)
+                .count();
+        assertThat(withBox).as("박스수는 대표 1건에만").isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("★주문번호 칸에 내부 id 를 그대로 보여주지 않는다 — orderLabel 로 `#발송id`")
+    void 표시용_주문번호() {
+        JsonNode mine = null;
+        for (JsonNode r : data(get("/orders?fromDate=" + DAY + "&toDate=" + DAY
+                + "&partnerId=" + partner + "&size=50")).path("content")) {
+            mine = r;
+        }
+        assertThat(mine).isNotNull();
+        // 키는 네 칸(호출에 쓴다)
+        assertThat(mine.path("orderNo").asText()).contains("|");
+        // 표시는 `#발송id` — 거래처 내부 id 가 보이면 안 된다
+        assertThat(mine.path("orderLabel").asText())
+                .as("표시용: %s", mine).startsWith("#").doesNotContain("|");
+    }
+
     /**
      * 이관과 같은 모양 — 그 날 발송의 등록번호를 비우고, 같은 네 칸 키의 발송을 2건 더 넣는다.
      *

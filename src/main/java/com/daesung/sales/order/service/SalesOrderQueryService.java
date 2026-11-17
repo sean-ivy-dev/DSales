@@ -200,7 +200,11 @@ public class SalesOrderQueryService {
 
         OrderState state = OrderProgress.groupState(entities);
         var ch = com.daesung.sales.sale.entity.OrderChannel.orDefault(channel);
-        return new SalesOrderRow(key, tradeSeq, date,
+        // ★화면 표시용 번호 — 등록번호가 있으면 그것, 없으면 **대표 발송 번호**(`#id`).
+        //   키(`orderNo`)에는 거래처 내부 id 가 들어 있어 그대로 찍으면 담당자가 못 읽는다.
+        String label = key.startsWith("E-") ? key
+                : "#" + shipmentIds.stream().mapToLong(Long::longValue).min().orElse(0L);
+        return new SalesOrderRow(key, label, tradeSeq, date,
                 head.partnerCode(), head.partnerName(),
                 schoolCode, schoolName, tradeClass,
                 state.name(), state.label(),

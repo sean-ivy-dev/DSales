@@ -176,8 +176,18 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
      * <p>판정은 {@link #search} 의 {@code printed=false} 와 <b>같다</b>(printedAt is null).
      * 따로 세면 카드에는 3건인데 화면을 열면 5건인 상황이 생긴다.
      */
+    /**
+     * ‼️<b>묶음 단위로 센다</b>(2026-11-17) — 형제 발송을 각각 세면 배지가 부풀었다.
+     * 이관이 한 묶음을 발송 16~43건으로 쪼개 넣은 곳이 있고, 화면에는 **대표 한 줄만**
+     * 보이는데 배지가 16을 세면 담당자가 처리할 수 없는 숫자를 본다(프론트 지적 §1-①).
+     * 출력도 이제 묶음 전체에 걸리므로({@code ShipmentService.markPrinted})
+     * 묶음은 전부 출력되거나 전부 미출력이다 — 묶음 단위가 맞는 셈이다.
+     */
     @Query("""
-            select count(s) from Shipment s
+            select count(distinct coalesce(s.entryNo,
+                     concat(s.tradeDate, '|', s.partner.id, '|',
+                            coalesce(s.schoolCode, ''), '|', coalesce(s.tradeClass, ''))))
+              from Shipment s
              where s.tradeDate between :from and :to
                and s.printedAt is null
             """)
@@ -269,6 +279,37 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             @Param("deliveryType") String deliveryType,
             @Param("excludeIntake") Integer excludeIntake,
             org.springframework.data.domain.Pageable pageable);
+
+    /**
+     * <b>형제 발송</b> — 등록번호가 없고 (거래일·거래처·학교·분류)가 그 발송과 같은 건들.
+     * <b>자기 자신을 포함</b>한다.
+     *
+     * <h3>왜 필요한가(2026-11-17, 프론트 지적)</h3>
+     * 이관이 한 묶음을 발송 여럿으로 쪼개 넣었고, 줄은 <b>대표 1건에만</b> 붙인다.
+     * 그런데 작업요청서의 출력·발송완료·확인은 <b>발송 1건 단위</b>라,
+     * 물류가 대표만 발송완료로 넘기면 <b>형제는 발송준비중에 남는다.</b>
+     * 주문조회는 「가장 덜 진행된 발송」을 보여주므로 그 주문이 계속 발송준비중으로 보인다.
+     * → 상태 처리는 <b>묶음 전체에</b> 걸어야 한다.
+     *
+     * <p>★<b>등록번호가 있는 발송은 형제가 없다</b> — 자기 하나만 돌아온다.
+     * 정상 등록분은 묶음이 쪼개지지 않으므로 종전과 같이 동작한다.
+     *
+     * <p>삭제된 건은 제외한다 — 이미 걷힌 지시를 함께 움직일 이유가 없다.
+     */
+    @Query("""
+            select s from Shipment s
+             where s.tradeDate = (select x.tradeDate from Shipment x where x.id = :id)
+               and s.partner.id = (select x.partner.id from Shipment x where x.id = :id)
+               and ((select x.schoolCode from Shipment x where x.id = :id) is null
+                     and s.schoolCode is null
+                    or s.schoolCode = (select x.schoolCode from Shipment x where x.id = :id))
+               and ((select x.tradeClass from Shipment x where x.id = :id) is null
+                     and s.tradeClass is null
+                    or s.tradeClass = (select x.tradeClass from Shipment x where x.id = :id))
+               and (s.entryNo is null or s.entryNo = '')
+               and s.deletedAt is null
+            """)
+    List<Shipment> findSiblings(@Param("id") Long id);
 
     /** 삭제된 건 포함 단건 조회 — 삭제 대상을 찾을 때 쓴다(@SQLRestriction 우회). */
     @Query(value = "SELECT * FROM shipment WHERE id = :id", nativeQuery = true)
