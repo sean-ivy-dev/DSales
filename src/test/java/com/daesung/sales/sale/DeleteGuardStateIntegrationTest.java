@@ -146,7 +146,62 @@ class DeleteGuardStateIntegrationTest extends IntegrationTestSupport {
         assertThat(liveQty(day)).isZero();
     }
 
+    @Test
+    @DisplayName("★★발송완료 건의 **수량**은 못 고친다 — 재고가 없는 물건을 되돌리게 된다")
+    void 발송완료_수량수정_거부() {
+        String day = "2056-06-01";
+        register(day, 40);
+        moveTo(entryNoOf(day), day, "SENT");
+
+        long saleId = firstSaleId(day);
+        JsonNode r = patch("/sales/" + saleId, Map.of("qty", 10));
+        assertThat(r.path("success").asBoolean())
+                .as("‼️여기서 성공하면 재고 30부가 창고에 없는 채로 돌아온다: %s", r).isFalse();
+        assertThat(r.path("error").path("message").asText()).contains("발송완료");
+        assertThat(liveQty(day)).as("수량이 그대로여야 한다").isEqualTo(40);
+    }
+
+    @Test
+    @DisplayName("‼️금액·공급률은 발송완료 뒤에도 고칠 수 있다 — 바로잡는 길을 막지 않는다")
+    void 발송완료_금액수정_허용() {
+        String day = "2056-06-02";
+        register(day, 5);
+        moveTo(entryNoOf(day), day, "SENT");
+
+        long saleId = firstSaleId(day);
+        // ★재고를 건드리지 않는 칸이라 통과해야 한다. 여기서 막으면 발송 뒤 금액 오타를
+        //   고칠 길이 없어진다(프론트가 [수정]을 잠그지 않은 이유).
+        JsonNode r = patch("/sales/" + saleId, Map.of("supplyRate", 60, "memo", "공급률 정정"));
+        assertThat(r.path("success").asBoolean()).as("%s", r).isTrue();
+        assertThat(liveQty(day)).as("수량은 그대로").isEqualTo(5);
+    }
+
+    @Test
+    @DisplayName("같은 수량으로 다시 보내면 통과한다 — '바뀌지 않았으면' 막을 이유가 없다")
+    void 같은수량은_통과() {
+        String day = "2056-06-03";
+        register(day, 7);
+        moveTo(entryNoOf(day), day, "SENT");
+
+        long saleId = firstSaleId(day);
+        JsonNode r = patch("/sales/" + saleId, Map.of("qty", 7, "memo", "메모만 고침"));
+        assertThat(r.path("success").asBoolean()).as("%s", r).isTrue();
+        assertThat(liveQty(day)).isEqualTo(7);
+    }
+
     // ───────────────────────── 도우미
+
+    /** 그 날 등록한 주문의 등록번호. */
+    private String entryNoOf(String day) {
+        for (JsonNode n : data(get("/sales?fromDate=" + day + "&toDate=" + day
+                + "&partnerId=" + partner + "&size=10")).path("content")) {
+            String e = n.path("entryNo").asText(null);
+            if (e != null && !e.isBlank()) {
+                return e;
+            }
+        }
+        throw new AssertionError("등록번호를 못 찾았다: " + day);
+    }
 
     private Map<String, Object> item(int qty) {
         return Map.of("productId", book, "shipmentType", "NORMAL_SHIP", "qty", qty,

@@ -620,6 +620,16 @@ public class SaleService {
 
         int oldQty = sale.getQty();
         int newQty = (req.qty() != null) ? req.qty() : oldQty;
+        // ★★수량이 **실제로 바뀔 때만** 진행상태를 본다(2026-11-17).
+        //   수량은 재고가 움직이는 유일한 칸이다 — `finishUpdate` 가 차액만큼 재고를 보정한다.
+        //   ‼️발송완료 건에서 40부를 10부로 고치면 **재고 30부가 돌아오는데 창고엔 없다**
+        //     (이미 나갔다). 주문 통째 수정은 막아 뒀는데 **줄 하나만 고치는 길로는 됐다.**
+        //   ★금액·공급률·세액·할인액·메모·회차·성적처리·포장구분은 **그대로 열어 둔다** —
+        //     재고를 건드리지 않고, 발송 뒤에 금액 오타를 바로잡는 길이 막히면 안 된다
+        //     (프론트가 [수정]을 잠그지 않은 이유이기도 하다).
+        if (newQty != oldQty) {
+            assertEditable(sale, "수량을 수정");
+        }
         Integer unitPrice = (req.unitPrice() != null) ? req.unitPrice() : sale.getUnitPrice();
         Integer supplyRate = (req.supplyRate() != null) ? req.supplyRate() : sale.getSupplyRate();
         Integer discount = (req.discountAmount() != null) ? req.discountAmount() : sale.getDiscountAmount();
