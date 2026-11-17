@@ -844,22 +844,32 @@ public class ShipmentService {
     }
 
     /**
-     * 그 매출이 묶인 발송 건의 <b>진행상태</b>. 주문 수정 거부 판정에 쓴다.
+     * 그 매출이 묶일 수 있는 <b>살아 있는 발송 건들</b>. 수정·삭제 거부 판정에 쓴다.
      *
-     * <p>발송 건이 아직 없으면 <b>비어 있는 값</b> — 작업요청서를 만들지 않는 매출
-     * (매출만·특강·창고없음)이 여기 걸려 수정이 막히면 안 된다. 호출부가
-     * "없으면 허용"으로 다룬다.
+     * <p><b>비어 있으면 「발송 건이 없는 매출」</b>(매출만·특강·창고없음)이다 —
+     * 작업요청서를 만들지 않으므로 호출부가 그대로 허용한다.
      *
-     * <p>★판정은 {@link Shipment#progressState()} 하나가 한다 — 여기서 날짜를 다시
-     * 읽으면 화면이 보여주는 상태와 수정 가능 여부가 갈린다.
+     * <h3>‼️{@code findKey} 를 쓰지 않는 이유 — 가드가 뚫렸다</h3>
+     * {@code findKey} 는 <b>등록번호가 정확히 일치</b>해야 찾는데,
+     * <b>매출에는 등록번호가 있고 발송에는 없는</b> 짝이 운영에 흔하다
+     * (이관분이 그 모양 — 살아 있는 발송 34,517건 중 34,515건이 비어 있다).
+     * → 발송이 <b>발송준비중인데도</b> "발송 건 없음"으로 보고 <b>삭제를 허용</b>했다.
+     * 프론트가 운영에서 그 사례(#97598)를 찾아 알려 왔다(2026-11-17 §3).
+     * <b>빈 작업요청서 때와 같은 함정</b>이고({@link ShipmentRepository#findForCleanup})
+     * 그때 넓힌 조회를 가드에서는 쓰지 않았다.
+     *
+     * <p>★<b>넓게 보는 쪽이 안전하다.</b> 등록번호 없는 발송은 같은 (일자·거래처·학교·분류)
+     * 주문 여럿이 공유할 수 있어, 그중 하나라도 물류가 진행했으면 막아야 한다.
+     * "모른다"를 "허가"로 바꾸지 않는다.
+     *
+     * <p>삭제된 발송은 제외한다 — 이미 걷힌 지시가 삭제를 막을 이유가 없다.
      */
     @Transactional(readOnly = true)
-    public java.util.Optional<com.daesung.sales.dsre.gateway.OrderState> progressStateOf(Sale sale) {
+    public List<Shipment> shipmentsFor(Sale sale) {
         String tradeClass = (sale.getTradeClass() != null) ? sale.getTradeClass()
                 : sale.getProduct().getSalesDivision();
-        return shipmentRepository.findKey(sale.getSalesDate(), sale.getPartner().getId(),
-                        sale.getSchoolCode(), tradeClass, sale.getEntryNo())
-                .map(Shipment::progressState);
+        return shipmentRepository.findForCleanup(sale.getSalesDate(), sale.getPartner().getId(),
+                sale.getSchoolCode(), tradeClass, sale.getEntryNo());
     }
 
     /**

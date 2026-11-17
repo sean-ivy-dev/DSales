@@ -942,20 +942,41 @@ public class SaleService {
      * @param action 거부 문구에 들어갈 동작 이름("수정" / "삭제")
      */
     private void assertEditable(Sale sale, String action) {
-        com.daesung.sales.dsre.gateway.OrderState state =
-                shipmentService.progressStateOf(sale).orElse(null);
-        // ★발송 건이 없는 매출(매출만·특강·창고없음)은 통과 — 물류가 넘겨받을 것이 없다.
-        if (state == null || state == com.daesung.sales.dsre.gateway.OrderState.RECEIVED) {
+        // ★★「발송 건이 없는 매출」과 「발송 건을 못 찾음」을 **가른다**(프론트 요청 2026-11-17 §3).
+        //   비어 있으면 진짜로 발송이 없는 매출(매출만·특강·창고없음) → 통과.
+        //   ‼️예전엔 `findKey`(등록번호 정확일치)로 찾아서, **등록번호가 발송에만 없는 짝**이면
+        //     발송준비중인데도 "없음"으로 보고 삭제를 허용했다(운영 #97598).
+        //     이제 등록번호가 비어 있는 발송까지 함께 본다 — `shipmentsFor` 주석 참고.
+        List<com.daesung.sales.logistics.entity.Shipment> shipments =
+                shipmentService.shipmentsFor(sale);
+        if (shipments.isEmpty()) {
             return;
         }
-        if (state == com.daesung.sales.dsre.gateway.OrderState.SHIPPED) {
+        // 하나라도 접수완료가 아니면 막는다. 같은 키의 발송 여럿이 섞여 있으면
+        // **가장 진행된 것**이 이유로 나가야 담당자가 무엇 때문에 막혔는지 안다.
+        com.daesung.sales.dsre.gateway.OrderState blocking = null;
+        for (com.daesung.sales.logistics.entity.Shipment sh : shipments) {
+            com.daesung.sales.dsre.gateway.OrderState st = sh.progressState();
+            if (st == com.daesung.sales.dsre.gateway.OrderState.RECEIVED) {
+                continue;
+            }
+            if (blocking == null
+                    || com.daesung.sales.order.service.OrderProgress.rankOf(st)
+                            > com.daesung.sales.order.service.OrderProgress.rankOf(blocking)) {
+                blocking = st;
+            }
+        }
+        if (blocking == null) {
+            return;
+        }
+        if (blocking == com.daesung.sales.dsre.gateway.OrderState.SHIPPED) {
             throw new BusinessException(ErrorCode.INVALID_INPUT,
                     "이미 발송완료된 주문입니다. " + action + "할 수 없습니다 — "
                             + "물건이 나간 뒤라 줄을 바꾸면 나간 것과 장부가 갈립니다. "
                             + "반품 또는 매출 취소로 처리하세요.");
         }
         throw new BusinessException(ErrorCode.INVALID_INPUT,
-                "접수완료 상태일 때만 " + action + "할 수 있습니다. 현재 상태=" + state.label() + " — "
+                "접수완료 상태일 때만 " + action + "할 수 있습니다. 현재 상태=" + blocking.label() + " — "
                         + "주문조회의 '선택 건 상태변경'으로 접수완료로 되돌린 뒤 처리하거나, "
                         + "반품 또는 매출 취소로 처리하세요.");
     }
