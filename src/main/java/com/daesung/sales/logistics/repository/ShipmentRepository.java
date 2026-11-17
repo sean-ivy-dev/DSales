@@ -317,8 +317,31 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
     String NOT_INTAKE = " AND (CAST(:excludeIntake AS SIGNED) IS NULL"
             + " OR :excludeIntake = 0 OR (" + ORDER_STATE_RANK + ") >= 3) ";
 
-    /** 주문 식별 키 식(SQL). {@code OrderProgress.orderKey} 와 같아야 한다. */
-    String ORDER_KEY = "COALESCE(s.entry_no, CONCAT('#', s.id))";
+    /**
+     * 주문 식별 키 식(SQL). {@code OrderProgress.orderKey} 와 <b>같아야 한다.</b>
+     *
+     * <h3>‼️정정(2026-11-17) — 등록번호 없는 발송은 <b>네 칸 키</b>로 묶는다</h3>
+     * 예전엔 {@code CONCAT('#', s.id)} 로 <b>발송 건마다 다른 키</b>였다. 그런데
+     * <b>이관이 한 묶음을 발송 여럿으로 쪼개 넣었다</b> — 10/31 자사몰은 (학교 89001 ·
+     * 기타고사)가 전부 같은 발송 <b>16건</b>이고 거래순번만 1~16 인데, 그 날 매출 198줄은
+     * 거래순번이 <b>전부 1</b>이라 줄을 발송별로 가를 축이 없다.
+     * → 주문조회가 발송마다 198줄을 전부 붙여 <b>같은 값이 16번 더해졌다</b>
+     * (실제 4.66억이 17.3억으로 보였다. 프론트 지적 2026-11-17 §1).
+     *
+     * <p>★그래서 <b>(거래일 · 거래처 · 학교 · 분류)</b> 네 칸이 모두 같고 등록번호가 없는
+     * 발송은 <b>한 주문으로 본다</b>. 이관이 쪼갠 것을 되묶는 것이고,
+     * 「한 주문이 발송 여럿으로 갈려도 한 줄」(§3-6)이라는 원래 규칙에 맞는다.
+     *
+     * <p>‼️<b>예전 주석의 우려는 네 칸 키로 해소된다.</b> 그 주석은 "(거래처·거래일자·
+     * <b>거래순번</b>)으로 묶으면 무관한 옛 주문이 합쳐진다"였는데, 거래순번은 옛 행이
+     * 기본값에 멈춰 있어 그랬다. 여기는 거래순번을 쓰지 않고 <b>학교·분류</b>를 쓴다 —
+     * 네 칸이 모두 같은 건들은 원래 한 묶음이다.
+     *
+     * <p>‼️줄은 그 묶음에 <b>한 번만</b> 붙어야 한다({@code WorkService.buildWorkOrders} 의
+     * 대표 발송 규칙). 키만 합치고 줄 부착을 그대로 두면 <b>합친 줄에서 16번 더해진다.</b>
+     */
+    String ORDER_KEY = "COALESCE(s.entry_no, CONCAT(s.trade_date, '|', s.partner_id, '|',"
+            + " COALESCE(s.school_code, ''), '|', COALESCE(s.trade_class, '')))";
 
     /**
      * 주문조회(§2-1) <b>주문 단위</b> 키 페이지.

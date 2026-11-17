@@ -74,17 +74,30 @@ public final class OrderProgress {
     }
 
     /**
-     * 주문 식별 키. 등록번호가 있으면 그것, 없으면 발송 건 자신({@code #id})이다.
+     * 주문 식별 키. 등록번호가 있으면 그것, 없으면 <b>(거래일·거래처·학교·분류)</b> 네 칸이다.
      *
-     * <p>‼️등록번호는 V103 에서 생겼다 — 그 전 등록분·이관분은 비어 있다. 그때 비어 있는
-     * 것들을 (거래처·거래일자·거래순번)으로 묶으면 <b>서로 무관한 옛 주문이 한 줄로 합쳐진다</b>
-     * (옛 행은 거래순번이 기본값 1에서 멈춰 있다). 그래서 발송 건 단위로 둔다.
+     * <h3>‼️정정(2026-11-17) — 발송 건 단위({@code #id})에서 네 칸 키로 바꿨다</h3>
+     * 이관이 한 묶음을 발송 여럿으로 쪼개 넣어, 발송 단위로 두면 <b>같은 줄이 발송마다
+     * 중복으로 더해졌다</b>(10/31 자사몰 16건 → 금액 3.7배). 자세한 내용은
+     * {@code ShipmentRepository.ORDER_KEY} 주석.
      *
-     * <p>DB 쪽 식({@code COALESCE(s.entry_no, CONCAT('#', s.id))})과 같아야 한다 —
+     * <p>★예전 주석의 우려("(거래처·거래일자·<b>거래순번</b>)으로 묶으면 무관한 옛 주문이
+     * 합쳐진다")는 <b>거래순번</b>을 쓸 때의 이야기다. 여기는 거래순번을 쓰지 않고
+     * <b>학교·분류</b>를 쓴다 — 네 칸이 모두 같은 건들은 원래 한 묶음이다.
+     *
+     * <p>DB 쪽 식({@code ShipmentRepository.ORDER_KEY})과 같아야 한다 —
      * 어긋나면 페이징한 키로 발송 건을 못 찾아 목록이 빈다. 테스트가 지킨다.
      */
     public static String orderKey(Shipment s) {
         String entryNo = s.getEntryNo();
-        return (entryNo == null || entryNo.isBlank()) ? "#" + s.getId() : entryNo;
+        if (entryNo != null && !entryNo.isBlank()) {
+            return entryNo;
+        }
+        // ★등록번호가 없으면 **네 칸 키**(거래일·거래처·학교·분류).
+        //   ‼️`ShipmentRepository.ORDER_KEY`(SQL)와 **문자 하나까지 같아야** 한다 —
+        //     어긋나면 페이징한 키로 발송을 못 찾아 목록이 빈다.
+        return s.getTradeDate() + "|" + s.getPartner().getId() + "|"
+                + (s.getSchoolCode() == null ? "" : s.getSchoolCode()) + "|"
+                + (s.getTradeClass() == null ? "" : s.getTradeClass());
     }
 }

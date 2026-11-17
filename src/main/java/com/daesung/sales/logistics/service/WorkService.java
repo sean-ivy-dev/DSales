@@ -262,12 +262,24 @@ public class WorkService {
         java.util.Map<Long, com.daesung.sales.dsre.gateway.OrderState> dsreByShipment =
                 dsreStates(found);
 
+        // ★작업요청서와 **같은 규칙** — 같은 키를 공유하는 발송이 여럿이면 수량·창고·대분류를
+        //   대표(가장 작은 id)에만 붙인다. 안 그러면 이관이 쪼갠 발송 수만큼 수량이 중복된다
+        //   (`buildWorkOrders` 의 같은 주석 참고).
+        //   ‼️여기서 규칙을 다르게 두면 작업요청서와 작업결과의 수량이 서로 안 맞는다.
+        Map<String, Long> lineOwner = new LinkedHashMap<>();
+        for (Shipment s : found) {
+            lineOwner.merge(lookupKey(s), s.getId(), Math::min);
+        }
+
         List<WorkResultRow> rows = new ArrayList<>();
         for (Shipment s : found) {
             if (wanted != null && !wanted.contains(s.progressState())) {
                 continue;
             }
             String k = lookupKey(s);
+            if (!s.getId().equals(lineOwner.get(k))) {
+                k = "\u0000none";   // 대표가 아니면 어떤 집계에도 안 걸리는 키로 바꾼다
+            }
             List<ShipmentWarehouseAgg> whs = whByKey.getOrDefault(k, List.of());
 
             // 창고 필터. 창고가 기록되지 않은 발송(V40 이전 매출)은 필터를 걸면 판단할 수 없어 제외한다 —
@@ -429,10 +441,27 @@ public class WorkService {
             }
         }
 
+        // ★★같은 키를 공유하는 발송이 여럿이면 줄을 **대표(가장 작은 id)에만** 붙인다
+        //   (2026-11-17, 프론트 지적 §1).
+        //   ‼️이관이 한 묶음을 발송 여럿으로 쪼개 넣었고(10/31 자사몰 16건) 매출에는 가를
+        //     축이 없다(거래순번이 매출은 전부 1). 그래서 발송마다 줄을 붙이면 **같은 줄이
+        //     발송 수만큼 중복**되고, 수량·금액이 그만큼 부풀었다(실제 4.66억 → 17.3억).
+        //   ★대표를 "가장 작은 id"로 정하는 이유: 조회할 때마다 같은 발송이 대표가 되어야
+        //     화면이 흔들리지 않는다.
+        //   ‼️나머지 발송은 **줄 0**이 된다 — 작업요청서에 「쌀 것 없는 지시」로 보인다.
+        //     그게 사실이다(그 발송에 대응하는 줄을 특정할 수 없다). 합계를 맞추는 쪽을 택했다.
+        Map<String, Long> lineOwner = new LinkedHashMap<>();
+        for (Shipment s : shipments) {
+            lineOwner.merge(lookupKey(s), s.getId(), Math::min);
+        }
+
         List<WorkOrderResponse> out = new ArrayList<>();
         // ★삭제된 건도 함께 읽는다(레거시와 같다 — 취소선으로 보여주고 작업 대상에서만 뺀다).
         for (Shipment s : shipments) {
-            List<WorkOrderResponse.Line> lines = linesByKey.getOrDefault(lookupKey(s), List.of());
+            String key = lookupKey(s);
+            boolean owner = s.getId().equals(lineOwner.get(key));
+            List<WorkOrderResponse.Line> lines =
+                    owner ? linesByKey.getOrDefault(key, List.of()) : List.of();
             long total = lines.stream().mapToLong(WorkOrderResponse.Line::qty).sum();
             DeliveryType dt = s.getDeliveryType();
             boolean freight = dt == DeliveryType.FREIGHT;
@@ -444,7 +473,7 @@ public class WorkService {
                     s.getPartner().getCode(), s.getPartner().getName(),
                     s.getSchoolCode(), s.getSchoolName(),
                     s.getDeletedAt() != null,
-                    reqCdsByKey.getOrDefault(lookupKey(s), List.of()),
+                    owner ? reqCdsByKey.getOrDefault(key, List.of()) : List.of(),
                     s.getPrintedAt() != null,
                     s.getAcknowledgedAt() != null, s.getAcknowledgedBy(),
                     s.getBoxCount(), s.getSentDate(), s.getSendMemo(),
