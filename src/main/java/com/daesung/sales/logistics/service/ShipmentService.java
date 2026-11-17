@@ -922,8 +922,23 @@ public class ShipmentService {
     public List<Shipment> shipmentsFor(Sale sale) {
         String tradeClass = (sale.getTradeClass() != null) ? sale.getTradeClass()
                 : sale.getProduct().getSalesDivision();
+        // ★★매출에 등록번호가 있으면 **그 번호가 같은 발송만** 본다(정정 2026-11-17).
+        //   ‼️넓게(등록번호 빈 발송까지) 보면 **같은 네 칸의 이관 발송이 걸려**,
+        //     주문과 무관한 줄이 막힌다 — 이관 발송이 있는 날짜·거래처로 **거슬러 넣은
+        //     반품·「매출만」 줄의 수량 수정·삭제가 거부됐다**(프론트 지적 2026-11-17 §5).
+        //     발주처 §4③ "주문과 연결되지 않은 매출은 제한 제외"에 어긋난다.
+        //   ★등록번호가 **없는** 매출(이관분)은 종전처럼 넓게 본다 — 그쪽은 발송도 비어 있어
+        //     네 칸으로만 이어진다.
+        //   ‼️11/16 에 넓힌 것은 "매출엔 번호가 있고 발송엔 없는" 조합을 막으려던 **예방**이었는데,
+        //     운영 실측에서 그 조합은 **1건이고 그것이 바로 이 반품**이었다 —
+        //     막을 대상이 아니라 통과시켜야 할 대상이었다.
+        if (sale.getEntryNo() != null && !sale.getEntryNo().isBlank()) {
+            return shipmentRepository.findKey(sale.getSalesDate(), sale.getPartner().getId(),
+                            sale.getSchoolCode(), tradeClass, sale.getEntryNo())
+                    .map(List::of).orElseGet(List::of);
+        }
         return shipmentRepository.findForCleanup(sale.getSalesDate(), sale.getPartner().getId(),
-                sale.getSchoolCode(), tradeClass, sale.getEntryNo());
+                sale.getSchoolCode(), tradeClass, null);
     }
 
     /**

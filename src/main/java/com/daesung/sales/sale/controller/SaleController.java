@@ -499,6 +499,30 @@ public class SaleController {
         return ApiResponse.success(null);
     }
 
+    @Operation(summary = "매출 여러 건 삭제(마감 前)",
+            description = """
+                    통합 매출 조회에서 **고른 여러 건을 한 번에** 지운다(발주처 요청 2026-11-17 §2③).
+                    용도: 매출일괄등록으로 잘못 넣은 건을 한꺼번에 취소.
+
+                    ### ★하나라도 막히면 아무것도 지우지 않는다
+                    일부만 지워지면 「일괄등록 취소」가 **반쯤 남아** 더 나쁘다.
+                    검사를 먼저 전부 돌리고, 막힌 건이 없을 때만 지운다. **한 트랜잭션**이다.
+
+                    ### 응답
+                    · 전부 통과 → `deleted` = 요청 수 · `results` 빈 배열
+                    · 하나라도 막힘 → **`deleted` = 0** · `results` 에 **막힌 건만**(사유 포함)
+
+                    ‼️막힌 경우에도 **HTTP 200** 이다 — 화면이 목록을 받아 보여줘야 하므로
+                    오류로 주지 않는다(기존 일괄 API `POST /orders/progress-state` 와 같은 규칙).
+
+                    기준은 **단건 삭제와 똑같다** — 권한 · 마감 · 접수완료 · 위탁정산 거부.
+                    사유는 **비워 보낼 수 있다**(단건 삭제와 같다).""")
+    @PostMapping("/bulk-delete")
+    public ApiResponse<com.daesung.sales.sale.dto.SalesBulkDeleteResult> bulkDelete(
+            @Valid @RequestBody com.daesung.sales.sale.dto.SalesBulkDeleteRequest req) {
+        return ApiResponse.success(saleService.bulkDelete(req));
+    }
+
     @Operation(summary = "매출 수정(오입력 정정)",
             description = """
                     등록한 매출의 **수량·정가·공급률·세액·할인액·메모·회차·성적처리·포장구분**을 고친다.

@@ -628,7 +628,7 @@ public class SaleService {
         //     재고를 건드리지 않고, 발송 뒤에 금액 오타를 바로잡는 길이 막히면 안 된다
         //     (프론트가 [수정]을 잠그지 않은 이유이기도 하다).
         if (newQty != oldQty) {
-            assertEditable(sale, "수량을 수정");
+            assertQtyEditable(sale);
         }
         Integer unitPrice = (req.unitPrice() != null) ? req.unitPrice() : sale.getUnitPrice();
         Integer supplyRate = (req.supplyRate() != null) ? req.supplyRate() : sale.getSupplyRate();
@@ -863,6 +863,76 @@ public class SaleService {
     }
 
     /**
+     * 매출 <b>여러 건 삭제</b>(발주처 요청 2026-11-17 §2③ — 통합 매출 조회 우클릭 [삭제]).
+     *
+     * <h3>★하나라도 막히면 아무것도 지우지 않는다</h3>
+     * 일부만 지워지면 「매출일괄등록 취소」가 <b>반쯤 남아</b> 더 나쁘다
+     * (발주처 권장 · 프론트 찬성). 그래서 <b>검사를 먼저 전부</b> 돌리고,
+     * 막힌 건이 하나도 없을 때만 실제로 지운다.
+     *
+     * <p>★<b>한 트랜잭션</b>이다 — 중간에 실패하면 전부 되돌아간다.
+     *
+     * <p>★기준은 <b>단건 삭제와 똑같다</b>: 권한 · 마감({@code PERIOD_LOCKED}) ·
+     * 접수완료 가드 · 위탁정산 매출 거부. 여기서 따로 판정하지 않고
+     * {@link #delete(Long, String)} 가 쓰는 검사를 그대로 호출한다 —
+     * 두 경로가 갈리면 "한 건은 되는데 여러 건은 안 되는" 일이 생긴다.
+     *
+     * @return 막힌 건이 있으면 {@code deleted=0} 과 건별 사유. HTTP 는 200 이다
+     *         (기존 일괄 API 와 같은 규칙 — 오류로 주면 화면이 본문을 파싱해야 한다)
+     */
+    @Transactional
+    public com.daesung.sales.sale.dto.SalesBulkDeleteResult bulkDelete(
+            com.daesung.sales.sale.dto.SalesBulkDeleteRequest req) {
+        List<Long> ids = req.saleIds().stream().distinct().toList();
+        List<com.daesung.sales.sale.dto.SalesBulkDeleteResult.Item> blocked = new ArrayList<>();
+        List<Sale> targets = new ArrayList<>();
+
+        for (Long id : ids) {
+            Sale sale = saleRepository.findById(id).orElse(null);
+            if (sale == null) {
+                blocked.add(new com.daesung.sales.sale.dto.SalesBulkDeleteResult.Item(
+                        id, null, "그 매출이 없습니다(이미 지워졌을 수 있습니다)."));
+                continue;
+            }
+            try {
+                assertDeletable(sale);
+                targets.add(sale);
+            } catch (BusinessException e) {
+                blocked.add(new com.daesung.sales.sale.dto.SalesBulkDeleteResult.Item(
+                        id, sale.getSalesNo(), e.getMessage()));
+            }
+        }
+
+        // ‼️막힌 건이 있으면 **아무것도 지우지 않는다.**
+        if (!blocked.isEmpty()) {
+            return new com.daesung.sales.sale.dto.SalesBulkDeleteResult(
+                    ids.size(), 0, blocked.size(), blocked);
+        }
+        for (Sale sale : targets) {
+            delete(sale.getId(), req.reason());
+        }
+        return new com.daesung.sales.sale.dto.SalesBulkDeleteResult(
+                ids.size(), targets.size(), 0, List.of());
+    }
+
+    /**
+     * 단건 삭제가 거부하는 조건을 <b>지우기 전에</b> 확인한다 — 일괄 삭제의 사전 검사용.
+     *
+     * <p>‼️{@link #delete(Long, String)} 안의 검사와 <b>같은 것</b>을 봐야 한다.
+     * 여기서 빠뜨리면 사전 검사는 통과했는데 실제 삭제가 터져, 한 트랜잭션이
+     * 통째로 롤백되고 담당자는 이유를 모른다.
+     */
+    private void assertDeletable(Sale sale) {
+        periodLockService.assertNotLocked(sale.getSalesDate());
+        if (sale.getSalesType() == SalesType.CONSIGN_SALES) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "위탁정산으로 만들어진 매출은 삭제할 수 없습니다. 매출 취소로 처리하세요 — "
+                            + "그래야 위탁 미결원장이 함께 되돌아갑니다.");
+        }
+        assertEditable(sale, "삭제");
+    }
+
+    /**
      * 주문(등록 묶음) <b>통째 교체</b> — {@code PUT /sales/entries/{entryNo}}(프론트 B-4①).
      *
      * <p>요청 본문은 등록과 같다. <b>등록번호·거래순번은 그대로 두고</b> 줄만 바꾼다 —
@@ -951,6 +1021,26 @@ public class SaleService {
      *
      * @param action 거부 문구에 들어갈 동작 이름("수정" / "삭제")
      */
+    /**
+     * 수량 수정 거부 — <b>발주처가 지정한 문구</b>를 그대로 쓴다(요청 2026-11-17 §4①).
+     *
+     * <p>‼️문구를 임의로 다듬지 말 것. 화면이 이 문구를 그대로 띄운다(프론트 확인 2026-11-17 §4).
+     * 발송완료도 같은 문구로 통일했다 — 담당자에게는 "왜 못 바꾸나"와 "어떻게 하면 되나"가
+     * 같고, 상태별로 다른 문구를 주면 화면이 분기해야 한다.
+     */
+    private void assertQtyEditable(Sale sale) {
+        List<com.daesung.sales.logistics.entity.Shipment> shipments =
+                shipmentService.shipmentsFor(sale);
+        for (com.daesung.sales.logistics.entity.Shipment sh : shipments) {
+            if (sh.progressState() != com.daesung.sales.dsre.gateway.OrderState.RECEIVED) {
+                throw new BusinessException(ErrorCode.INVALID_INPUT,
+                        "주문이 접수완료 상태가 아니라 수량을 바꿀 수 없습니다. "
+                                + "수량을 고치려면 주문 조회/등록에서 접수완료로 되돌린 뒤 "
+                                + "수정해 주시기 바랍니다.");
+            }
+        }
+    }
+
     private void assertEditable(Sale sale, String action) {
         // ★★「발송 건이 없는 매출」과 「발송 건을 못 찾음」을 **가른다**(프론트 요청 2026-11-17 §3).
         //   비어 있으면 진짜로 발송이 없는 매출(매출만·특강·창고없음) → 통과.

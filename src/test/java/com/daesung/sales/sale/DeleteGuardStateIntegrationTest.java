@@ -110,26 +110,32 @@ class DeleteGuardStateIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("‼️★발송에 **등록번호가 없어도** 거부한다 — 못 찾으면 통과하던 결함(프론트 §3)")
-    void 등록번호_없는_발송도_거부() {
+    @DisplayName("★이관분(매출·발송 둘 다 등록번호 없음)은 진행됐으면 거부한다")
+    void 이관분도_거부() {
         String day = "2056-04-01";
         String entryNo = register(day, 6);
         moveTo(entryNo, day, "PRINT");          // 발송준비중
 
-        // 이관분과 같은 모양 — **발송의 등록번호를 비운다**(매출에는 그대로 있다).
-        clearShipmentEntryNo(day);
-
-        JsonNode whole = del("/sales/entries/" + entryNo, Map.of("reason", "결함 재현"));
-        assertThat(whole.path("success").asBoolean())
-                .as("‼️여기서 성공하면 발송준비중 주문이 지워진다: %s", whole).isFalse();
+        // ★이관분과 같은 모양 — **매출과 발송 양쪽** 등록번호를 비운다.
+        //   운영의 이관분이 이 모양이다(매출 entry_no NULL · 발송 entry_no NULL).
+        clearEntryNoOf(day);
+        clearSaleEntryNoOf(day);
 
         long saleId = firstSaleId(day);
         JsonNode one = del("/sales/" + saleId, Map.of("reason", "결함 재현"));
         assertThat(one.path("success").asBoolean())
-                .as("‼️단건도 막혀야 한다: %s", one).isFalse();
-
+                .as("‼️진행된 발송이 있는 이관분이 지워지면 안 된다: %s", one).isFalse();
         assertThat(liveQty(day)).as("줄이 그대로").isEqualTo(6);
     }
+
+    /**
+     * ‼️<b>삭제한 테스트에 대한 기록</b> — 11/16 에 「매출엔 등록번호가 있고 발송엔 없는」
+     * 조합을 거부로 고정했는데, <b>그 조합이 바로 「거슬러 넣은 반품」이었다.</b>
+     * 운영 실측에서 그 조합은 1건이고 그것이 반품이었다(프론트 지적 2026-11-17 §5).
+     * 발송은 {@code ensureFor} 가 매출의 등록번호로 만들므로 <b>같은 주문에서 둘이 어긋날 수
+     * 없다</b> — 그 테스트는 현실에 없는 시나리오를 거부로 굳혀 **오탐을 만들었다.**
+     * 지켜야 할 규칙은 위 {@code 이관분도_거부}(둘 다 비어 있을 때)다.
+     */
 
     @Test
     @DisplayName("‼️「매출만(배송X)」은 그대로 지워진다 — '발송 없음'과 '못 찾음'을 갈라야 한다")
@@ -157,7 +163,10 @@ class DeleteGuardStateIntegrationTest extends IntegrationTestSupport {
         JsonNode r = patch("/sales/" + saleId, Map.of("qty", 10));
         assertThat(r.path("success").asBoolean())
                 .as("‼️여기서 성공하면 재고 30부가 창고에 없는 채로 돌아온다: %s", r).isFalse();
-        assertThat(r.path("error").path("message").asText()).contains("발송완료");
+        // ★발주처가 지정한 문구를 그대로 쓴다(요청 2026-11-17 §4①) — 화면이 이걸 띄운다.
+        assertThat(r.path("error").path("message").asText())
+                .isEqualTo("주문이 접수완료 상태가 아니라 수량을 바꿀 수 없습니다. "
+                        + "수량을 고치려면 주문 조회/등록에서 접수완료로 되돌린 뒤 수정해 주시기 바랍니다.");
         assertThat(liveQty(day)).as("수량이 그대로여야 한다").isEqualTo(40);
     }
 
@@ -189,7 +198,119 @@ class DeleteGuardStateIntegrationTest extends IntegrationTestSupport {
         assertThat(liveQty(day)).isEqualTo(7);
     }
 
+    @Test
+    @DisplayName("★★이관 발송이 있는 날짜·거래처로 **거슬러 넣은 반품**은 막히지 않는다(프론트 §5)")
+    void 거슬러넣은_반품은_통과() {
+        String day = "2056-08-08";
+        // ① 그 날짜·거래처·학교·분류로 **진행된 이관 발송**을 만든다(등록번호 없음).
+        register(day, 5);
+        moveTo(entryNoOf(day), day, "PRINT");     // 발송준비중까지 진행
+        clearEntryNoOf(day);                      // 이관분과 같은 모양
+
+        // ② 같은 날짜·거래처로 **반품**을 넣는다 — 반품은 발송을 만들지 않는다.
+        JsonNode r = post("/sales/return-inbound", Map.of(
+                "returnDate", day, "partnerId", partner, "warehouseId", wh,
+                "items", List.of(Map.of("productId", book, "qty", 2,
+                        "unitPrice", 10000, "supplyRate", 70))));
+        assertThat(r.path("success").asBoolean()).as("반품 등록: %s", r).isTrue();
+
+        long returnSaleId = -1;
+        for (JsonNode n : data(get("/sales?fromDate=" + day + "&toDate=" + day
+                + "&partnerId=" + partner + "&size=50")).path("content")) {
+            if ("반품".equals(n.path("shipmentTypeName").asText())) {
+                returnSaleId = n.path("id").asLong();
+            }
+        }
+        assertThat(returnSaleId).as("반품 줄을 찾아야 한다").isPositive();
+
+        // ③ ‼️반품 줄의 수량 수정·삭제가 막히면 안 된다.
+        //   가드가 「등록번호 빈 발송」까지 넓게 보면, 같은 네 칸의 **이관 발송**이 걸려
+        //   주문과 무관한 반품이 막힌다(발주처 §4③ "주문과 연결되지 않은 매출은 제한 제외").
+        JsonNode upd = patch("/sales/" + returnSaleId, Map.of("qty", 1));
+        assertThat(upd.path("success").asBoolean())
+                .as("‼️반품 수량 수정이 막혔다 — 이관 발송에 걸린 것이다: %s", upd).isTrue();
+
+        JsonNode del = del("/sales/" + returnSaleId, Map.of("reason", "반품 취소"));
+        assertThat(del.path("success").asBoolean())
+                .as("‼️반품 삭제가 막혔다: %s", del).isTrue();
+    }
+
+    @Test
+    @DisplayName("★★여러 건 삭제 — 하나라도 막히면 **아무것도 지우지 않는다**(발주처 §2③)")
+    void 일괄삭제_하나막히면_전체중단() {
+        String okDay = "2056-09-01";
+        String blockedDay = "2056-09-02";
+        register(okDay, 3);                       // 접수완료 — 지울 수 있다
+        String b = register(blockedDay, 4);
+        moveTo(b, blockedDay, "PRINT");           // 발송준비중 — 막힌다
+
+        long okId = firstSaleId(okDay);
+        long blockedId = firstSaleId(blockedDay);
+
+        JsonNode r = post("/sales/bulk-delete", Map.of(
+                "saleIds", List.of(okId, blockedId), "reason", "일괄 취소"));
+        assertThat(r.path("success").asBoolean()).as("막혀도 200: %s", r).isTrue();
+        JsonNode d = data(r);
+        assertThat(d.path("requested").asInt()).isEqualTo(2);
+        assertThat(d.path("deleted").asInt())
+                .as("‼️0 이어야 한다 — 하나라도 막히면 아무것도 지우지 않는다").isZero();
+        assertThat(d.path("blocked").asInt()).isEqualTo(1);
+        assertThat(d.path("results")).as("막힌 건만 담는다").hasSize(1);
+        assertThat(d.path("results").get(0).path("saleId").asLong()).isEqualTo(blockedId);
+        assertThat(d.path("results").get(0).path("message").asText()).isNotEmpty();
+
+        // ★지울 수 있던 건도 **그대로 남아 있어야** 한다
+        assertThat(liveQty(okDay)).as("통과 건도 안 지워졌다").isEqualTo(3);
+        assertThat(liveQty(blockedDay)).isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("여러 건 삭제 — 전부 통과하면 한 번에 지워진다. 사유는 비워도 된다")
+    void 일괄삭제_전부통과() {
+        String day = "2056-09-03";
+        register(day, 2);
+        register(day, 7);
+        long[] ids = data(get("/sales?fromDate=" + day + "&toDate=" + day
+                + "&partnerId=" + partner + "&size=50")).path("content")
+                .findValuesAsText("id").stream().mapToLong(Long::parseLong).toArray();
+        assertThat(ids).hasSize(2);
+
+        // ★사유를 안 보낸다(단건 삭제와 같은 규칙 — 프론트 §2-1)
+        JsonNode d = data(post("/sales/bulk-delete",
+                Map.of("saleIds", List.of(ids[0], ids[1]))));
+        assertThat(d.path("deleted").asInt()).isEqualTo(2);
+        assertThat(d.path("blocked").asInt()).isZero();
+        assertThat(d.path("results")).isEmpty();
+        assertThat(liveQty(day)).isZero();
+    }
+
     // ───────────────────────── 도우미
+
+    /** 그 날 **매출** 줄의 등록번호를 비운다(이관분 모양). */
+    private void clearSaleEntryNoOf(String day) {
+        new org.springframework.transaction.support.TransactionTemplate(txManager)
+                .executeWithoutResult(st -> {
+                    em.createQuery("update Sale s set s.entryNo = null"
+                                    + " where s.salesDate = :d and s.partner.id = :p")
+                            .setParameter("d", java.time.LocalDate.parse(day))
+                            .setParameter("p", partner)
+                            .executeUpdate();
+                    em.clear();
+                });
+    }
+
+    /** 그 날 발송들의 등록번호를 비운다(이관분 모양). */
+    private void clearEntryNoOf(String day) {
+        new org.springframework.transaction.support.TransactionTemplate(txManager)
+                .executeWithoutResult(st -> {
+                    em.createQuery("update Shipment s set s.entryNo = null"
+                                    + " where s.tradeDate = :d and s.partner.id = :p")
+                            .setParameter("d", java.time.LocalDate.parse(day))
+                            .setParameter("p", partner)
+                            .executeUpdate();
+                    em.clear();
+                });
+    }
 
     /** 그 날 등록한 주문의 등록번호. */
     private String entryNoOf(String day) {
