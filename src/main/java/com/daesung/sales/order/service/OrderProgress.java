@@ -66,11 +66,51 @@ public final class OrderProgress {
      * 상품준비중을 돌려준다. 호출부는 비었는지 먼저 확인하고 사유를 말해야 한다.
      */
     public static OrderState groupState(Collection<Shipment> shipments) {
+        // ★★이관이 쪼갠 묶음(등록번호 없는 발송 여럿)은 **대표의 상태**를 쓴다(2026-11-17).
+        //   ‼️형제는 **줄이 0**이다(줄은 대표에만 붙는다 — `buildWorkOrders`). 쌀 것이 없는
+        //     발송의 상태를 "가장 덜 진행된 것"으로 집으면, **대표가 이미 출력·발송됐는데도
+        //     주문조회가 「접수완료」로 보여준다**(운영 #97599: 대표 발송준비중 + 형제 접수완료).
+        //     접수완료는 "고쳐도 된다"는 뜻이라, 물류가 손댄 주문을 고쳐도 되는 것처럼 보인다.
+        //   ★등록번호가 있는 주문은 **종전 그대로 「가장 덜 진행된 것」** 이다 —
+        //     그쪽은 학교·분류로 갈린 발송이 **각자 내용을 갖는다.**
+        //     세 상자 중 둘만 나갔으면 그 주문은 아직 발송완료가 아니다(§3-6).
+        Shipment rep = representativeOf(shipments);
+        if (rep != null) {
+            return rep.progressState();
+        }
         int min = Integer.MAX_VALUE;
         for (Shipment s : shipments) {
             min = Math.min(min, rankOf(s.progressState()));
         }
         return (min == Integer.MAX_VALUE) ? OrderState.PREPARING : stateOf(min);
+    }
+
+    /**
+     * 이관이 쪼갠 묶음의 <b>대표</b> — 등록번호 없는 발송이 둘 이상일 때 살아 있는 것 중
+     * 가장 작은 id. 그 밖에는 {@code null}(= 기존 「가장 덜 진행된 것」 규칙을 쓴다).
+     *
+     * <p>★대표를 "가장 작은 id"로 정하는 것은 {@code WorkService.buildWorkOrders} 의
+     * 줄 부착 규칙과 <b>같아야 한다</b> — 다르면 줄이 붙은 발송과 상태를 보여주는 발송이
+     * 갈린다. 테스트가 지킨다.
+     */
+    private static Shipment representativeOf(Collection<Shipment> shipments) {
+        if (shipments.size() < 2) {
+            return null;
+        }
+        Shipment rep = null;
+        for (Shipment s : shipments) {
+            String e = s.getEntryNo();
+            if (e != null && !e.isBlank()) {
+                return null;   // 등록번호가 있는 묶음 — 이관이 쪼갠 것이 아니다
+            }
+            if (s.getDeletedAt() != null) {
+                continue;      // 삭제된 발송은 대표가 되지 않는다
+            }
+            if (rep == null || s.getId() < rep.getId()) {
+                rep = s;
+            }
+        }
+        return rep;   // 전부 삭제됐으면 null → 아래 규칙이 삭제(99)로 집는다
     }
 
     /**

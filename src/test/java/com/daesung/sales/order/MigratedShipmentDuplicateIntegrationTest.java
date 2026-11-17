@@ -193,6 +193,64 @@ class MigratedShipmentDuplicateIntegrationTest extends IntegrationTestSupport {
                 .as("표시용: %s", mine).startsWith("#").doesNotContain("|");
     }
 
+    @Test
+    @DisplayName("★★대표가 출력됐으면 주문조회도 **발송준비중**으로 보인다 — 형제 때문에 접수완료로 보이면 안 된다")
+    void 대표상태를_따른다() {
+        String day = "2064-08-08";
+        // 매출 1건 → 발송 1건, 그 뒤 같은 네 칸 키 발송 2건을 더 넣는다(이관 모양).
+        assertThat(post("/sales/entries", Map.of("salesDate", day, "partnerId", partner,
+                "warehouseId", wh,
+                "items", List.of(Map.of("productId", book, "shipmentType", "NORMAL_SHIP",
+                        "qty", 5, "unitPrice", 10000, "supplyRate", 70,
+                        "schoolCode", SCHOOL, "schoolName", "중복검증학교"))))
+                .path("success").asBoolean()).isTrue();
+        splitAt(day);
+
+        // 대표(줄이 붙은 발송)만 출력한다 — 형제는 접수완료로 남는다.
+        handOverToLogistics(day, day, partner);
+        long rep = -1;
+        for (JsonNode r : data(get("/logistics/work-orders?fromDate=" + day + "&toDate=" + day
+                + "&partnerId=" + partner + "&size=50")).path("content")) {
+            if (r.path("lines").size() > 0) {
+                rep = r.path("id").asLong();
+            }
+        }
+        assertThat(rep).isPositive();
+        assertThat(post("/logistics/work-orders/" + rep + "/print", null)
+                .path("success").asBoolean()).isTrue();
+
+        JsonNode mine = null;
+        for (JsonNode r : data(get("/orders?fromDate=" + day + "&toDate=" + day
+                + "&partnerId=" + partner + "&size=50")).path("content")) {
+            mine = r;
+        }
+        // ‼️「가장 덜 진행된 것」을 쓰면 형제(접수완료) 때문에 RECEIVED 로 보인다 —
+        //   그러면 물류가 이미 출력한 주문을 "고쳐도 된다"고 보여주는 셈이다(운영 #97599).
+        assertThat(mine.path("progressState").asText())
+                .as("대표 상태를 따라야 한다: %s", mine).isEqualTo("READY_TO_SHIP");
+    }
+
+    /** 그 날 발송의 등록번호를 비우고 같은 네 칸 키 발송을 2건 더 넣는다. */
+    private void splitAt(String day) {
+        new org.springframework.transaction.support.TransactionTemplate(txManager)
+                .executeWithoutResult(st -> {
+                    em.createNativeQuery("UPDATE shipment SET entry_no = NULL"
+                                    + " WHERE trade_date = ?1 AND partner_id = ?2")
+                            .setParameter(1, java.sql.Date.valueOf(day))
+                            .setParameter(2, partner).executeUpdate();
+                    for (int seq = 2; seq <= 3; seq++) {
+                        em.createNativeQuery("INSERT INTO shipment"
+                                        + " (trade_class, trade_date, trade_seq, partner_id,"
+                                        + "  school_code, school_name, created_at, created_by)"
+                                        + " VALUES ('교재', ?1, ?2, ?3, ?4, '중복검증학교', NOW(), 'migration')")
+                                .setParameter(1, java.sql.Date.valueOf(day))
+                                .setParameter(2, seq).setParameter(3, partner)
+                                .setParameter(4, SCHOOL).executeUpdate();
+                    }
+                    em.clear();
+                });
+    }
+
     /**
      * 이관과 같은 모양 — 그 날 발송의 등록번호를 비우고, 같은 네 칸 키의 발송을 2건 더 넣는다.
      *
