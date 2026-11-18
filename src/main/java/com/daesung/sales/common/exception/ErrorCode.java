@@ -55,7 +55,14 @@ public enum ErrorCode {
     // 발송구분이 '화물'인 건에 송장·택배사를 입력하려 한 경우(11/04 회신 §3).
     // ★전용 코드로 둔 이유: 사이트·화면이 "택배 건만 입력 가능"이라는 안내를 띄우고
     //   입력칸을 비활성화해야 한다 — 문구로 분기하면 메시지를 다듬는 순간 깨진다.
-    TRACKING_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "발송구분이 '택배'인 건에만 송장을 입력할 수 있습니다.");
+    TRACKING_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "발송구분이 '택배'인 건에만 송장을 입력할 수 있습니다."),
+
+    // --- 입력 가능 최소 거래일(V132) ---
+    // 이관이 담당하는 기간(설정일 이전)으로 **새로 등록**하거나 날짜를 그쪽으로 바꾼 경우.
+    // ★PERIOD_LOCKED 와 **따로 둔 이유**: 담당자가 해야 할 일이 다르다 —
+    //   마감은 "재무팀이 그 달을 풀어야" 하고, 이쪽은 "이관 뒤에 넣거나 관리자가 하한을
+    //   내려야" 한다. 화면 안내 문구가 달라지므로 코드로 구분할 수 있게 한다.
+    ENTRY_DATE_TOO_OLD(HttpStatus.CONFLICT, "이관 대상 기간의 날짜로는 등록할 수 없습니다.");
 
     private final HttpStatus status;
     private final String message;

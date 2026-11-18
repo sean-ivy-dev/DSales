@@ -55,7 +55,7 @@ public class BulkSalesImportService {
 
         // 월마감 잠금 횡단검사(감사 결함 수정): 실제 적재(dryRun=false)만 — 마감월 매출 유입 차단.
         if (!dryRun) {
-            periodLockService.assertNotLocked(to);
+            periodLockService.assertEntryDateAllowed(to);
         }
 
         List<BulkImportResponse.Line> lines = new ArrayList<>();

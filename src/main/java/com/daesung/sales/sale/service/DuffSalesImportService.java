@@ -170,7 +170,7 @@ public class DuffSalesImportService {
         //     전부 PERIOD_LOCKED 로 떨어뜨리면 담당자는 뭘 잘못했는지 알기 어렵다.
         //   미리보기(dryRun)는 마감된 달도 들여다볼 수 있어야 하므로 검사하지 않는다.
         if (!dryRun && req.salesDate() != null) {
-            periodLockService.assertNotLocked(req.salesDate());
+            periodLockService.assertEntryDateAllowed(req.salesDate());
         }
 
         List<DuffImportResponse.Line> lines = new ArrayList<>();
@@ -418,7 +418,7 @@ public class DuffSalesImportService {
                         : Amounts.supplyOf(mPrice, mRate, inwon, mDiscount);
                 LocalDate mDate = (req.salesDate() != null) ? req.salesDate() : to;
                 if (!dryRun) {
-                    periodLockService.assertNotLocked(mDate);
+                    periodLockService.assertEntryDateAllowed(mDate);
                 }
                 long mTax = taxOf(ml.tax(), mTotal, chosen, where);
                 String mSchoolCode = blankToNullStr(ml.schoolCode());

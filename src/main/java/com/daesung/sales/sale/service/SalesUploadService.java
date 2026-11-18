@@ -116,7 +116,7 @@ public class SalesUploadService {
                     if (qty <= 0) {
                         throw new BusinessException(ErrorCode.INVALID_INPUT, "수량이 0 이하");
                     }
-                    periodLockService.assertNotLocked(date);
+                    periodLockService.assertEntryDateAllowed(date);
 
                     Partner partner = partnerRepository.findByCode(custCode)
                             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "거래처 없음: " + custCode));

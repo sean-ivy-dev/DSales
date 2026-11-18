@@ -71,7 +71,8 @@ public class ReceivableService {
 
     /** 수금 한 줄 저장. 묶음 등록도 이걸 쓴다 — 규칙이 둘이면 경로에 따라 결과가 달라진다. */
     private Collection registerCollectionEntity(CollectionRequest req) {
-        periodLockService.assertNotLocked(req.collDate());
+        // ★등록이라 입력 하한까지 본다(「매출 마무리」 §2-3 ㄱ).
+        periodLockService.assertEntryDateAllowed(req.collDate());
         Partner partner = partnerRepository.findById(req.partnerId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
                         "거래처가 없습니다. id=" + req.partnerId()));
@@ -167,7 +168,8 @@ public class ReceivableService {
     public CollectionResponse updateCollection(Long id, CollectionRequest req) {
         Collection c = getCollectionOrThrow(id);
         periodLockService.assertNotLocked(c.getCollDate());     // 원래 귀속 월
-        periodLockService.assertNotLocked(req.collDate());      // 옮겨 갈 월
+        // ‼️옮겨 갈 날짜만 하한을 본다(원래 날짜까지 막으면 이관분을 못 고친다).
+        periodLockService.assertEntryDateAllowed(req.collDate());   // 옮겨 갈 월
         c.update(req.collDate(), req.writeDate(), req.collKind(), req.collType(), req.collAmt(),
                 req.promissoryNo(), req.promissoryDue(), req.bankName(), req.branchName(), req.memo());
         return CollectionResponse.from(c);

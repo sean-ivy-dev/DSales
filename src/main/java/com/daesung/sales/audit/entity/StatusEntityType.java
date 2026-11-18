@@ -43,5 +43,12 @@ public enum StatusEntityType {
      *
      * <p>근거: 10/31 클라이언트 회신 §1-4 "변경 이력(누가, 언제, 열기/닫기)을 남긴다".
      */
-    PARTNER_PRODUCT_VISIBILITY
+    PARTNER_PRODUCT_VISIBILITY,
+    /**
+     * 입력 가능 최소 거래일 — 변경·해제. entityId = 1(싱글톤).
+     *
+     * <p>근거: 「매출 마무리」 §2-3 ㄱ "관리자만 풀 수 있게". 이 값은 <b>풀리는 순간</b>
+     * 이관 기간에 손입력이 들어갈 수 있게 되므로, "누가 언제 풀었나"가 유일한 감사 질문이다.
+     */
+    ENTRY_DATE_FLOOR
 }

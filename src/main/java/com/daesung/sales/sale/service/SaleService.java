@@ -113,7 +113,9 @@ public class SaleService {
     public SalesEntryResponse createEntries(SalesEntryRequest req,
                                             String fixedEntryNo, Integer fixedTradeSeq,
                                             com.daesung.sales.sale.entity.OrderChannel fallbackChannel) {
-        periodLockService.assertNotLocked(req.salesDate());
+        // ★등록이라 **입력 하한까지** 본다(「매출 마무리」 §2-3 ㄱ) — 이관이 담당하는
+        //   기간으로 손입력이 들어가면 12/10 이관이 같은 거래를 두 번 남긴다.
+        periodLockService.assertEntryDateAllowed(req.salesDate());
 
         // ★위탁출고는 **여기서 받아** 위탁 경로로 넘긴다(10/27 명세 §4-1 "주문 등록의
         //   출고유형에 '위탁출고'를 포함", 프론트 C-1). 예전엔 전용 화면(/consignment/out)만
@@ -346,7 +348,7 @@ public class SaleService {
      */
     @Transactional
     public SalesEntryResponse returnInbound(ReturnInboundRequest req) {
-        periodLockService.assertNotLocked(req.returnDate());
+        periodLockService.assertEntryDateAllowed(req.returnDate());
         Partner partner = partnerRepository.findById(req.partnerId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
                         "거래처가 없습니다. id=" + req.partnerId()));
@@ -977,7 +979,9 @@ public class SaleService {
         Sale first = sales.get(0);
 
         periodLockService.assertNotLocked(first.getSalesDate());   // 원래 달
-        periodLockService.assertNotLocked(req.salesDate());        // 바꾼 뒤 달
+        // ‼️바꾼 뒤 날짜만 하한을 본다 — 원래 날짜까지 막으면 이관분(1~11월)을
+        //   고칠 길이 없어진다. 막는 것은 "그 날짜로 새로 넣는 것"뿐이다.
+        periodLockService.assertEntryDateAllowed(req.salesDate());  // 바꾼 뒤 달
 
         assertEditable(sales);
 

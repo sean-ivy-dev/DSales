@@ -31,6 +31,8 @@ public class PeriodLockService {
     private final StatusHistoryService statusHistoryService;
     private final CurrentAuditor currentAuditor;
     private final PeriodLockCache periodLockCache;
+    private final com.daesung.sales.closing.repository.EntryDateFloorSettingRepository
+            entryDateFloorRepository;
 
     /** 해당 일자가 속한 월이 마감이면 PERIOD_LOCKED. 모든 재무 쓰기 API의 횡단 검사(캐시 조회). */
     @Transactional(readOnly = true)
@@ -39,6 +41,71 @@ public class PeriodLockService {
             throw new BusinessException(ErrorCode.PERIOD_LOCKED,
                     date.getYear() + "년 " + date.getMonthValue() + "월은 마감되어 재무 등록/수정이 불가합니다.");
         }
+    }
+
+    /**
+     * <b>새로 집어넣는</b> 거래일이 쓸 수 있는 날짜인지 — 월마감 + 입력 하한을 함께 본다.
+     *
+     * <p>근거: 「매출 마무리」 §2-3 ㄱ — "11/30 이전 날짜 입력을 서버에서 막기(매출·수금·주문,
+     * 12/1~10). 「입력하면 알려 달라」보다 막는 쪽으로. 관리자만 풀 수 있게."
+     *
+     * <p>★<b>등록·날짜변경 경로만 이걸 쓴다.</b> 이미 있는 자료의 취소·삭제·금액수정은
+     * 그대로 {@link #assertNotLocked} 를 쓴다 — 이관분(1~11월)을 손대지 못하게 하면
+     * 잘못 들어간 자료를 바로잡을 길이 없어진다. 막는 것은 "그 날짜로 새로 넣는 것"뿐이다.
+     *
+     * <p>★<b>월마감으로는 못 막는다</b>(그래서 따로 둔다) — 마감은 달 단위라 11월을 잠가도
+     * 10월은 열려 있고, 11월을 잠그는 시점 자체가 이관 뒤다(V132 참고).
+     *
+     * @throws BusinessException 하한보다 이전이면 ENTRY_DATE_TOO_OLD, 마감월이면 PERIOD_LOCKED
+     */
+    @Transactional(readOnly = true)
+    public void assertEntryDateAllowed(LocalDate date) {
+        LocalDate floor = entryDateFloor();
+        if (date != null && floor != null && date.isBefore(floor)) {
+            throw new BusinessException(ErrorCode.ENTRY_DATE_TOO_OLD,
+                    floor + " 이전 날짜로는 등록할 수 없습니다(이관 대상 기간). "
+                            + "그 날짜로 넣어야 하면 관리자에게 요청하세요.");
+        }
+        assertNotLocked(date);
+    }
+
+    /** 입력 하한(없으면 null). 싱글톤 행 하나라 PK 조회다. */
+    @Transactional(readOnly = true)
+    public LocalDate entryDateFloor() {
+        return entryDateFloorRepository
+                .findById(com.daesung.sales.closing.entity.EntryDateFloorSetting.SINGLETON_ID)
+                .map(com.daesung.sales.closing.entity.EntryDateFloorSetting::getFloorDate)
+                .orElse(null);
+    }
+
+    /** 입력 하한 조회(관리자 화면). {@code blockedDays}는 오늘 기준으로 막히는 과거 일수다. */
+    @Transactional(readOnly = true)
+    public com.daesung.sales.closing.dto.EntryDateFloorResponse getEntryDateFloor() {
+        LocalDate floor = entryDateFloor();
+        Long days = (floor == null) ? null
+                : java.time.temporal.ChronoUnit.DAYS.between(floor, LocalDate.now());
+        return new com.daesung.sales.closing.dto.EntryDateFloorResponse(
+                floor, floor != null, days);
+    }
+
+    /**
+     * 입력 하한 변경 — <b>관리자만</b>(컨트롤러 {@code @PreAuthorize}). null이면 제한 해제.
+     *
+     * <p>이력을 남긴다 — "누가 언제 풀었나"가 이 값의 유일한 감사 질문이다.
+     */
+    @Transactional
+    public com.daesung.sales.closing.dto.EntryDateFloorResponse updateEntryDateFloor(
+            LocalDate floorDate) {
+        var setting = entryDateFloorRepository
+                .findById(com.daesung.sales.closing.entity.EntryDateFloorSetting.SINGLETON_ID)
+                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT,
+                        "입력 하한 설정 행이 없습니다(V132 미적용)."));
+        LocalDate before = setting.getFloorDate();
+        setting.setFloorDate(floorDate);
+        statusHistoryService.record(StatusEntityType.ENTRY_DATE_FLOOR,
+                com.daesung.sales.closing.entity.EntryDateFloorSetting.SINGLETON_ID,
+                "floorDate", String.valueOf(before), String.valueOf(floorDate), null);
+        return getEntryDateFloor();
     }
 
     /**
