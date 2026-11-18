@@ -381,6 +381,33 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
      * <p>‼️줄은 그 묶음에 <b>한 번만</b> 붙어야 한다({@code WorkService.buildWorkOrders} 의
      * 대표 발송 규칙). 키만 합치고 줄 부착을 그대로 두면 <b>합친 줄에서 16번 더해진다.</b>
      */
+    /**
+     * 묶음(주문)의 상태 랭크 — {@code OrderProgress.groupState} 와 <b>같은 규칙</b>이어야 한다.
+     *
+     * <h3>‼️갈라져서 실제로 틀렸다(2026-11-18)</h3>
+     * {@code 58cbee9} 로 Java 쪽만 「이관 묶음은 대표 상태」로 바꾸고 <b>이 식을 안 바꿨다.</b>
+     * 그래서 {@code state=RECEIVED} 로 걸렀는데 <b>발송준비중 행이 섞여 나왔다</b>
+     * (운영 #97599 — 표시는 발송준비중, 필터는 접수완료로 집었다).
+     * 건수도 52로 남아 보고 숫자(51)와 어긋났다.
+     *
+     * <h3>규칙</h3>
+     * <pre>
+     *   등록번호 있는 묶음   MIN(랭크)  — 갈린 발송이 각자 내용을 가진다(가장 덜 진행된 것)
+     *   등록번호 없는 묶음   대표의 랭크 — 이관이 쪼갠 것이고 형제는 줄이 0이다
+     * </pre>
+     * 대표 = <b>살아 있는 것 중 가장 작은 id</b>. {@code GROUP_CONCAT} 을 (삭제여부, id) 로
+     * 정렬해 <b>첫 값</b>을 꺼낸다 — 그게 대표의 랭크다.
+     *
+     * <p>★묶음이 1건이면 두 규칙의 결과가 같다(MIN = 대표). 전부 삭제된 묶음도 같다(99).
+     */
+    String GROUP_STATE_RANK =
+            " CASE WHEN MAX(CASE WHEN s.entry_no IS NULL OR s.entry_no = '' THEN 0 ELSE 1 END) = 1"
+            + "      THEN MIN(" + ORDER_STATE_RANK + ")"
+            + "      ELSE CAST(SUBSTRING_INDEX(GROUP_CONCAT("
+            + "               (" + ORDER_STATE_RANK + ")"
+            + "               ORDER BY (s.deleted_at IS NOT NULL), s.id), ',', 1) AS SIGNED)"
+            + " END ";
+
     String ORDER_KEY = "COALESCE(s.entry_no, CONCAT(s.trade_date, '|', s.partner_id, '|',"
             + " COALESCE(s.school_code, ''), '|', COALESCE(s.trade_class, '')))";
 
@@ -418,7 +445,7 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             + "                AND sx.channel = :channel)))"
             + " GROUP BY okey"
             + " HAVING (CAST(:stateRank AS SIGNED) IS NULL"
-            + "         OR MIN(" + ORDER_STATE_RANK + ") = :stateRank)"
+            + "         OR (" + GROUP_STATE_RANK + ") = :stateRank)"
             + " ORDER BY MAX(s.trade_date) DESC, MIN(p.code), MIN(s.trade_seq), okey",
             countQuery = "SELECT COUNT(*) FROM (SELECT " + ORDER_KEY + " AS okey"
             + " FROM shipment s JOIN partners p ON p.id = s.partner_id"
@@ -440,7 +467,7 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             + "                AND sx.channel = :channel)))"
             + " GROUP BY okey"
             + " HAVING (CAST(:stateRank AS SIGNED) IS NULL"
-            + "         OR MIN(" + ORDER_STATE_RANK + ") = :stateRank)) g",
+            + "         OR (" + GROUP_STATE_RANK + ") = :stateRank)) g",
             nativeQuery = true)
     org.springframework.data.domain.Page<String> findOrderKeyPage(
             @Param("from") LocalDate from,

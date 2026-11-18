@@ -230,6 +230,61 @@ class MigratedShipmentDuplicateIntegrationTest extends IntegrationTestSupport {
                 .as("대표 상태를 따라야 한다: %s", mine).isEqualTo("READY_TO_SHIP");
     }
 
+    @Test
+    @DisplayName("★★상태 필터(SQL)와 표시 상태(Java)가 **같아야** 한다 — 갈리면 거른 결과에 다른 상태가 섞인다")
+    void 필터와_표시가_일치() {
+        String day = "2064-09-09";
+        assertThat(post("/sales/entries", Map.of("salesDate", day, "partnerId", partner,
+                "warehouseId", wh,
+                "items", List.of(Map.of("productId", book, "shipmentType", "NORMAL_SHIP",
+                        "qty", 4, "unitPrice", 10000, "supplyRate", 70,
+                        "schoolCode", SCHOOL, "schoolName", "중복검증학교"))))
+                .path("success").asBoolean()).isTrue();
+        splitAt(day);
+
+        // ★운영 #97599 와 **똑같은 모양**을 만든다 — 대표만 출력됨, 형제는 접수완료로 남음.
+        //   ‼️API 로는 이 상태를 만들 수 없다. `handOverToLogistics` 는 묶음 전체를 바꾸고
+        //     출력도 b30d629 로 형제까지 전파되므로, **앞으로는 이 상태가 새로 생기지 않는다.**
+        //     #97599 는 그 수정 **전에** 만들어진 운영 데이터다 → DB 로 직접 재현한다.
+        markPrintedOnRepresentativeOnly(day);
+
+        // ‼️**접수완료로 걸렀을 때 나오면 안 된다.** SQL 랭크식이 「가장 덜 진행된 것」을
+        //   쓰면 형제(접수완료) 때문에 걸려 나오고, 표시만 발송준비중이라 **거른 결과에
+        //   다른 상태가 섞인다**(운영 #97599 가 그랬다 — 52줄로 남아 보고 숫자와 어긋났다).
+        for (JsonNode r : data(get("/orders?fromDate=" + day + "&toDate=" + day
+                + "&partnerId=" + partner + "&state=RECEIVED&size=50")).path("content")) {
+            assertThat(r.path("progressState").asText())
+                    .as("접수완료로 걸렀는데 다른 상태가 나왔다: %s", r).isEqualTo("RECEIVED");
+        }
+
+        // 발송준비중으로 걸렀을 때는 **나와야** 한다.
+        boolean found = false;
+        for (JsonNode r : data(get("/orders?fromDate=" + day + "&toDate=" + day
+                + "&partnerId=" + partner + "&state=READY_TO_SHIP&size=50")).path("content")) {
+            found = true;
+            assertThat(r.path("progressState").asText()).isEqualTo("READY_TO_SHIP");
+        }
+        assertThat(found).as("발송준비중으로 걸렀을 때 그 주문이 나와야 한다").isTrue();
+    }
+
+    /**
+     * 그 날 묶음에서 <b>대표(가장 작은 id)에만</b> 출력일을 찍는다 — 운영 #97599 재현.
+     * 형제는 접수완료로 남는다.
+     */
+    private void markPrintedOnRepresentativeOnly(String day) {
+        new org.springframework.transaction.support.TransactionTemplate(txManager)
+                .executeWithoutResult(st -> {
+                    Object rep = em.createNativeQuery(
+                                    "SELECT MIN(id) FROM shipment"
+                                    + " WHERE trade_date = ?1 AND partner_id = ?2 AND deleted_at IS NULL")
+                            .setParameter(1, java.sql.Date.valueOf(day))
+                            .setParameter(2, partner).getSingleResult();
+                    em.createNativeQuery("UPDATE shipment SET printed_at = NOW() WHERE id = ?1")
+                            .setParameter(1, ((Number) rep).longValue()).executeUpdate();
+                    em.clear();
+                });
+    }
+
     /** 그 날 발송의 등록번호를 비우고 같은 네 칸 키 발송을 2건 더 넣는다. */
     private void splitAt(String day) {
         new org.springframework.transaction.support.TransactionTemplate(txManager)
