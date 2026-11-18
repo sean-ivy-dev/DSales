@@ -168,8 +168,12 @@ public class ReceivableService {
     public CollectionResponse updateCollection(Long id, CollectionRequest req) {
         Collection c = getCollectionOrThrow(id);
         periodLockService.assertNotLocked(c.getCollDate());     // 원래 귀속 월
-        // ‼️옮겨 갈 날짜만 하한을 본다(원래 날짜까지 막으면 이관분을 못 고친다).
-        periodLockService.assertEntryDateAllowed(req.collDate());   // 옮겨 갈 월
+        periodLockService.assertNotLocked(req.collDate());      // 옮겨 갈 월
+        // ★하한은 **날짜를 그 전으로 옮길 때만**(프론트 지적 2026-11-18 §3) —
+        //   금액만 고치는 수정까지 막으면 안 된다.
+        if (!req.collDate().equals(c.getCollDate())) {
+            periodLockService.assertEntryDateFloorOnly(req.collDate());
+        }
         c.update(req.collDate(), req.writeDate(), req.collKind(), req.collType(), req.collAmt(),
                 req.promissoryNo(), req.promissoryDue(), req.bankName(), req.branchName(), req.memo());
         return CollectionResponse.from(c);

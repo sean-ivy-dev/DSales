@@ -115,7 +115,19 @@ public class SaleService {
                                             com.daesung.sales.sale.entity.OrderChannel fallbackChannel) {
         // ★등록이라 **입력 하한까지** 본다(「매출 마무리」 §2-3 ㄱ) — 이관이 담당하는
         //   기간으로 손입력이 들어가면 12/10 이관이 같은 거래를 두 번 남긴다.
-        periodLockService.assertEntryDateAllowed(req.salesDate());
+        //
+        // ‼️<b>묶음 수정(replaceEntry)은 빼 준다</b>(프론트 지적 2026-11-18 §3).
+        //   수정은 「지우고 다시 만들기」로 구현돼 있어 여기를 다시 지나는데,
+        //   그러면 <b>날짜를 그대로 둔 수정</b>(수량·금액만 고치는 경우, 특약점 주문 수정)까지
+        //   막혀 11월 말 주문을 12월 초에 고칠 길이 없어진다.
+        //   하한 판단은 {@code replaceEntry} 가 <b>날짜가 바뀌었을 때만</b> 이미 했다.
+        //   {@code fixedEntryNo} 가 있는 호출은 그 경로 하나뿐이다(호출부 실측).
+        //   ★월마감은 여기서도 본다 — 그건 "그 달 숫자를 건드리지 말라"는 별개 규칙이다.
+        if (fixedEntryNo == null) {
+            periodLockService.assertEntryDateAllowed(req.salesDate());
+        } else {
+            periodLockService.assertNotLocked(req.salesDate());
+        }
 
         // ★위탁출고는 **여기서 받아** 위탁 경로로 넘긴다(10/27 명세 §4-1 "주문 등록의
         //   출고유형에 '위탁출고'를 포함", 프론트 C-1). 예전엔 전용 화면(/consignment/out)만
@@ -979,9 +991,14 @@ public class SaleService {
         Sale first = sales.get(0);
 
         periodLockService.assertNotLocked(first.getSalesDate());   // 원래 달
-        // ‼️바꾼 뒤 날짜만 하한을 본다 — 원래 날짜까지 막으면 이관분(1~11월)을
-        //   고칠 길이 없어진다. 막는 것은 "그 날짜로 새로 넣는 것"뿐이다.
-        periodLockService.assertEntryDateAllowed(req.salesDate());  // 바꾼 뒤 달
+        periodLockService.assertNotLocked(req.salesDate());        // 바꾼 뒤 달
+        // ★하한은 **날짜를 그 전으로 옮길 때만** 본다(프론트 지적 2026-11-18 §3).
+        //   원래 날짜가 그대로 실려 오는 수정(수량·금액만 고치는 경우, 특약점 주문 수정)까지
+        //   막으면 "막는 것은 그 날짜로 새로 넣는 것뿐"이라던 약속과 어긋난다 —
+        //   11월 말 주문을 12월 초에 고치는 일이 실제로 생긴다.
+        if (!req.salesDate().equals(first.getSalesDate())) {
+            periodLockService.assertEntryDateFloorOnly(req.salesDate());
+        }
 
         assertEditable(sales);
 

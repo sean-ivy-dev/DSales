@@ -581,12 +581,15 @@ public class ConsignmentService {
      */
     @Transactional
     public ConsignReturnResponse returnConsignment(ConsignReturnRequest req) {
-        // ★여기도 Case1(확정매출분 반품)에서 **매출 반품 행을 만든다** → 입력 하한을 본다.
-        // ‼️월마감은 **일부러 안 본다** — 이 경로엔 애초에 월마감 검사가 없었고(프론트 지적
-        //   2026-11-18 §2-2 로 드러났다), 지금 같이 메우면 마감된 2026-01·02 의 위탁반품이
-        //   갑자기 거부돼 담당자 동작이 바뀐다. 그건 먼저 알리고 올리기로 한 약속이 있어
-        //   PM 확인 뒤 assertEntryDateAllowed 로 바꾼다.
-        periodLockService.assertEntryDateFloorOnly(req.processedDate());
+        // ★Case1(확정매출분 반품)에서 **매출 반품 행을 만든다** → 하한 + 월마감 둘 다 본다.
+        //
+        // ‼️<b>월마감 검사가 애초에 없었다</b>(프론트 지적 2026-11-18 §2-2 로 드러났다) —
+        //   마감된 달에도 반품 매출이 그대로 들어가 마감 숫자가 바뀔 수 있었다.
+        //   담당자 동작이 바뀌는 반영이라 먼저 알리고, **마감월(2026-01·02)에 이미 들어간
+        //   위탁반품이 0건**인 것을 운영에서 확인한 뒤 PM 지시로 메웠다.
+        //   화면은 이 경로를 부르지 않는다(화면의 위탁반품은 settle 의 returnQty 로 간다)
+        //   — 그래서 화면 동작은 바뀌지 않는다.
+        periodLockService.assertEntryDateAllowed(req.processedDate());
         List<ConsignReturnResponse.Line> lines = new ArrayList<>();
         for (ConsignReturnRequest.Item item : req.items()) {
             // 정산과 동일하게 비관적 락 — 반품·정산이 같은 미결 행에서 동시 축소해도 직렬화(이슈#97).

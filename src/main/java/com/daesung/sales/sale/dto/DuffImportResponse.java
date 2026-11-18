@@ -67,7 +67,12 @@ public record DuffImportResponse(
             @Schema(description = "총금액(단가×청구인원)") long totalAmount,
             @Schema(description = """
                     처리 결과 — IMPORTED / SKIPPED / **UNMAPPED_PARTNER** / **UNMAPPED_PRODUCT** /
-                    UNMAPPED(둘 다 없음) / ZERO_INWON / ZERO_AMOUNT / PREVIEW.
+                    UNMAPPED(둘 다 없음) / ZERO_INWON / ZERO_AMOUNT / **ENTRY_DATE_TOO_OLD** / PREVIEW.
+
+                    ★`ENTRY_DATE_TOO_OLD` = 그 줄의 거래일이 **입력 최소일 이전**이다
+                    (「신청일 기준」으로 실행하면 줄마다 거래일이 신청일이라 줄별로 갈린다).
+                    ‼️SKIPPED 로 합치지 않는다 — 화면이 SKIPPED 를 「이미 등록됨」으로 세어
+                    요약 숫자가 틀어진다(프론트 요청 2026-11-18).
 
                     ★거래처·상품을 **갈라서** 알려준다. 예전엔 UNMAPPED 하나로 합쳐 두어
                     화면이 전부 "거래처 매핑 실패"로 읽었고, 실제 원인(상품 미등록)이 묻혔다.

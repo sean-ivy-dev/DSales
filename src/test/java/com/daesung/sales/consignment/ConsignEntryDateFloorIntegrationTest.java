@@ -22,8 +22,10 @@ import org.junit.jupiter.api.TestInstance;
  * 12/10 이관이 같은 기간을 다시 실으면 같은 거래가 두 줄이 된다.
  *
  * <p>위탁반품도 Case1(확정매출분 반품)에서 <b>매출 반품 행</b>을 만든다.
- * ‼️다만 그 경로는 <b>월마감 검사가 애초에 없어</b> 지금은 <b>하한만</b> 건다 —
- * 같이 메우면 마감된 달의 위탁반품이 갑자기 거부돼 담당자 동작이 바뀐다(PM 확인 대기).
+ * ‼️그 경로는 <b>월마감 검사가 애초에 없었다</b> — 마감된 달에도 반품 매출이 들어가
+ * 마감 숫자가 바뀔 수 있었다. 마감월에 이미 들어간 건이 <b>0건</b>인 것을 운영에서
+ * 확인한 뒤 PM 지시로 메웠다(2026-11-18). 화면은 이 경로를 부르지 않는다
+ * (화면의 위탁반품은 {@code settle} 의 {@code returnQty} 로 간다).
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @DisplayName("위탁 정산·반품도 입력 최소일을 본다(2026-11-18)")
@@ -103,6 +105,29 @@ class ConsignEntryDateFloorIntegrationTest extends IntegrationTestSupport {
         assertThat(post("/consignment/return", Map.of("processedDate", BEFORE,
                 "items", List.of(Map.of("consignmentOutId", outId, "returnQty", 5))))
                 .path("success").asBoolean()).isTrue();
+    }
+
+
+    @Test
+    @DisplayName("★★위탁반품이 **마감된 달**도 거부한다 — 그전엔 날짜 검사가 하나도 없었다")
+    void 반품_마감월_거부() {
+        setFloor(null);
+        // 그 달을 마감한다(이 테스트 전용 연도라 다른 테스트와 겹치지 않는다)
+        assertThat(post("/closing/periods/lock",
+                Map.of("year", 2064, "month", 2, "memo", "위탁반품 월마감 검증"))
+                .path("success").asBoolean()).isTrue();
+        try {
+            JsonNode res = post("/consignment/return", Map.of("processedDate", "2064-02-20",
+                    "items", List.of(Map.of("consignmentOutId", outId, "returnQty", 3))));
+            assertThat(res.path("success").asBoolean()).isFalse();
+            assertThat(res.path("error").path("code").asText())
+                    .as("‼️여기가 통과하면 마감된 달에 반품 매출이 들어가 신고 숫자가 틀어진다")
+                    .isEqualTo("PERIOD_LOCKED");
+        } finally {
+            assertThat(post("/closing/periods/unlock",
+                    Map.of("year", 2064, "month", 2, "memo", "검증 종료"))
+                    .path("success").asBoolean()).isTrue();
+        }
     }
 
     private JsonNode settle(String date, int qty) {

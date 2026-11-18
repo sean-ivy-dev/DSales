@@ -348,6 +348,22 @@ public class DuffSalesImportService {
                 continue;
             }
 
+            // ★입력 하한도 **줄마다** 본다(프론트 지적 2026-11-18 §2).
+            //   「신청일 기준」(거래일자를 비워 보냄)이면 줄마다 tradeDate=신청일이 되는데
+            //   그 줄은 월마감만 보고 하한을 안 봤다 — 12/1~10 에 기간을 11월로 잡고 실행하면
+            //   11월 날짜 매출이 그대로 들어가 12/10 이관과 겹친다.
+            //
+            // ‼️결과를 SKIPPED 로 주지 않는다 — 화면이 SKIPPED 를 「이미 등록됨」으로 세어
+            //   요약 숫자가 틀어진다(프론트가 (가)안으로 요청). 전용 코드로 갈라 준다.
+            LocalDate floor = periodLockService.entryDateFloor();
+            if (floor != null && tradeDate.isBefore(floor)) {
+                skipped++;
+                lines.add(line(shown, charge, unit, total, "ENTRY_DATE_TOO_OLD",
+                        "거래일(" + tradeDate + ")이 " + floor + " 이전입니다(이관 대상 기간). "
+                                + "그 날짜로 넣어야 하면 관리자에게 요청하세요.", null, sourceKey));
+                continue;
+            }
+
             // 세액은 자동산출하지 않는다(발주처 확정 2026-08-06) — 기본 0 이고,
             // 담당자가 줄별 '세금'을 체크한 줄에만 총금액÷10 이 붙는다(레거시 줄별 세금 칸).
             long tax = taxOf((fix == null) ? null : fix.tax(), total, product,

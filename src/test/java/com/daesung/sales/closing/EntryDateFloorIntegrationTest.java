@@ -172,6 +172,77 @@ class EntryDateFloorIntegrationTest extends IntegrationTestSupport {
         setFloor(null);
     }
 
+
+    @Test
+    @DisplayName("★★날짜를 **안 바꾼** 묶음 수정은 통과한다 — 수량·금액만 고치는 길을 막으면 안 된다")
+    void 날짜_안바꾼_수정은_통과() {
+        setFloor(null);
+        // 하한 이전 날짜로 묶음 하나를 만든다(= 11월 말 주문에 해당)
+        assertThat(sell(BEFORE, 7).path("success").asBoolean()).isTrue();
+        String entryNo = entryNoOf(BEFORE, 7);
+
+        setFloor(FLOOR);
+
+        // ★같은 날짜로 수량만 고친다 — 11월 말 주문을 12월 초에 고치는 상황이다
+        JsonNode same = put("/sales/entries/" + entryNo, Map.of(
+                "salesDate", BEFORE, "partnerId", partner, "warehouseId", warehouse,
+                "items", List.of(Map.of("productId", book, "shipmentType", "NORMAL_SHIP",
+                        "qty", 9, "unitPrice", 10000, "supplyRate", 70))));
+        assertThat(same.path("success").asBoolean())
+                .as("‼️여기서 막히면 11월 주문의 수량을 12월에 고칠 길이 없다: %s", same)
+                .isTrue();
+
+        // ‼️날짜를 하한 **이전으로 옮기는** 수정은 막힌다(새로 넣는 것과 같다)
+        String onEntry = moveTo(entryNo, ON);
+        JsonNode moved = put("/sales/entries/" + onEntry, Map.of(
+                "salesDate", BEFORE, "partnerId", partner, "warehouseId", warehouse,
+                "items", List.of(Map.of("productId", book, "shipmentType", "NORMAL_SHIP",
+                        "qty", 9, "unitPrice", 10000, "supplyRate", 70))));
+        assertThat(moved.path("success").asBoolean()).isFalse();
+        assertThat(moved.path("error").path("code").asText()).isEqualTo("ENTRY_DATE_TOO_OLD");
+    }
+
+    @Test
+    @DisplayName("★금액만 고치는 수금 수정도 통과한다 — 날짜를 옮길 때만 막는다")
+    void 수금_날짜_안바꾸면_통과() {
+        setFloor(null);
+        JsonNode reg = post("/closing/collections", Map.of(
+                "partnerId", partner, "collDate", BEFORE, "collType", "CASH", "collAmt", 50000));
+        assertThat(reg.path("success").asBoolean()).as("수금 등록: %s", reg).isTrue();
+        long id = reg.path("data").path("id").asLong();
+
+        setFloor(FLOOR);
+
+        JsonNode same = put("/closing/collections/" + id, Map.of(
+                "partnerId", partner, "collDate", BEFORE, "collType", "CASH", "collAmt", 60000));
+        assertThat(same.path("success").asBoolean())
+                .as("‼️금액만 고치는데 막히면 안 된다: %s", same)
+                .isTrue();
+    }
+
+    /** 그 날짜·수량의 묶음번호. */
+    private String entryNoOf(String date, int qty) {
+        for (JsonNode n : get("/sales?fromDate=" + date + "&toDate=" + date
+                + "&partnerId=" + partner + "&size=100").path("data").path("content")) {
+            if (n.path("qty").asInt() == qty && !n.path("canceled").asBoolean()) {
+                return n.path("entryNo").asText();
+            }
+        }
+        throw new AssertionError("묶음번호를 못 찾았다");
+    }
+
+    /** 하한이 걸린 상태에서 날짜를 옮기는 경우를 만들려고, 먼저 열린 날짜로 옮겨 둔다. */
+    private String moveTo(String entryNo, String date) {
+        setFloor(null);
+        assertThat(put("/sales/entries/" + entryNo, Map.of(
+                "salesDate", date, "partnerId", partner, "warehouseId", warehouse,
+                "items", List.of(Map.of("productId", book, "shipmentType", "NORMAL_SHIP",
+                        "qty", 9, "unitPrice", 10000, "supplyRate", 70))))
+                .path("success").asBoolean()).isTrue();
+        setFloor(FLOOR);
+        return entryNoOf(date, 9);
+    }
+
     /** 설정 변경. null이면 해제. */
     private void setFloor(String date) {
         Map<String, Object> body = new HashMap<>();
