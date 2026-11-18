@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.springframework.http.HttpMethod;
 
 /**
  * 입력 가능 최소 거래일 — 이관 기간으로의 <b>신규 입력만</b> 막는다(「매출 마무리」 §2-3 ㄱ).
@@ -136,6 +137,39 @@ class EntryDateFloorIntegrationTest extends IntegrationTestSupport {
 
         setFloor(null);
         assertThat(sell(BEFORE, 4).path("success").asBoolean()).isTrue();
+    }
+
+
+    @Test
+    @DisplayName("★★물류·영업 계정도 **조회는 된다** — 권한표에 줄을 안 넣어 403 이던 것(V133)")
+    void 조회는_전_역할_허용() throws Exception {
+        token();
+        String user = "floor-logis-" + (System.nanoTime() % 1_000_000L);
+        exchangeRaw(HttpMethod.POST, "/auth/users", Map.of(
+                "username", user, "password", "Pw123456!",
+                "name", "하한물류", "role", "LOGISTICS"), token(), null);
+        var login = exchangeRaw(HttpMethod.POST, "/auth/login",
+                Map.of("username", user, "password", "Pw123456!"), null, null);
+        String logisToken = om.readTree(login.getBody()).path("data").path("accessToken").asText();
+
+        // ‼️V133 전에는 /closing/** (마감 화면)에 먹혀 403 이었다.
+        assertThat(exchangeRaw(HttpMethod.GET, "/closing/entry-date-floor", null, logisToken, null)
+                .getStatusCode().value())
+                .as("조회가 막히면 화면이 날짜칸을 미리 막을 수 없다")
+                .isEqualTo(200);
+
+        // 변경은 관리자만 — 물류는 403
+        assertThat(exchangeRaw(HttpMethod.PUT, "/closing/entry-date-floor",
+                Map.of("floorDate", FLOOR), logisToken, null).getStatusCode().value())
+                .as("★하한을 푸는 것은 관리자 권한이다")
+                .isEqualTo(403);
+    }
+
+    @Test
+    @DisplayName("★관리자는 **변경도** 된다 — ADMIN 을 READ 로 넣으면 PUT 이 403 이 된다")
+    void 관리자는_변경_가능() {
+        setFloor(FLOOR);
+        setFloor(null);
     }
 
     /** 설정 변경. null이면 해제. */

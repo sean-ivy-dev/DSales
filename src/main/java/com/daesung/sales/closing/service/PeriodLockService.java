@@ -60,13 +60,30 @@ public class PeriodLockService {
      */
     @Transactional(readOnly = true)
     public void assertEntryDateAllowed(LocalDate date) {
+        assertEntryDateFloorOnly(date);
+        assertNotLocked(date);
+    }
+
+    /**
+     * <b>입력 하한만</b> 본다 — 월마감은 보지 않는다.
+     *
+     * <p>‼️<b>왜 따로 두는가</b>: 위탁반품({@code POST /consignment/return})은
+     * <b>월마감 검사가 애초에 없다</b>(2026-11-18 프론트 지적으로 드러났다. 매출 반품 행을
+     * 만드는데 마감된 달도 통과한다). 그 결함을 이 커밋에서 같이 메우면
+     * <b>마감된 2026-01·02 의 위탁반품이 갑자기 거부</b>되는 동작 변화가 섞인다 —
+     * 담당자 동작이 바뀌는 반영은 먼저 알리고 올리기로 한 약속이 있다.
+     *
+     * <p>→ 그래서 지금은 <b>하한만</b> 건다(설정이 비어 있어 당장은 아무것도 막지 않는다).
+     * 월마감 누락은 PM 확인 뒤 {@link #assertEntryDateAllowed} 로 바꿔 메운다.
+     */
+    @Transactional(readOnly = true)
+    public void assertEntryDateFloorOnly(LocalDate date) {
         LocalDate floor = entryDateFloor();
         if (date != null && floor != null && date.isBefore(floor)) {
             throw new BusinessException(ErrorCode.ENTRY_DATE_TOO_OLD,
                     floor + " 이전 날짜로는 등록할 수 없습니다(이관 대상 기간). "
                             + "그 날짜로 넣어야 하면 관리자에게 요청하세요.");
         }
-        assertNotLocked(date);
     }
 
     /** 입력 하한(없으면 null). 싱글톤 행 하나라 PK 조회다. */

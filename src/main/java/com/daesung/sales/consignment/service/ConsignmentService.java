@@ -261,7 +261,11 @@ public class ConsignmentService {
      */
     @Transactional
     public ConsignSettleResponse settle(ConsignSettleRequest req) {
-        periodLockService.assertNotLocked(req.salesDate());
+        // ★정산은 **매출을 새로 만든다**(정본 2탭 1015행 "정산 시점에 매출로 잡는다") —
+        //   그래서 입력 하한도 본다(프론트 지적 2026-11-18 §2-2).
+        //   「매출·수금·주문」에 정산 매출이 빠져 있으면 12/1~10 에 11월 이전 날짜로
+        //   정산 매출이 새로 생겨 12/10 이관과 겹친다.
+        periodLockService.assertEntryDateAllowed(req.salesDate());
         String datePart = req.salesDate().format(YYYYMMDD);
         // 위탁정산도 한 번에 여러 미결을 확정한다 — 묶음번호·순번을 붙인다(프론트 실측 2026-10-16 B-2).
         String entryNo = entryNumberService.next(req.salesDate());
@@ -577,6 +581,12 @@ public class ConsignmentService {
      */
     @Transactional
     public ConsignReturnResponse returnConsignment(ConsignReturnRequest req) {
+        // ★여기도 Case1(확정매출분 반품)에서 **매출 반품 행을 만든다** → 입력 하한을 본다.
+        // ‼️월마감은 **일부러 안 본다** — 이 경로엔 애초에 월마감 검사가 없었고(프론트 지적
+        //   2026-11-18 §2-2 로 드러났다), 지금 같이 메우면 마감된 2026-01·02 의 위탁반품이
+        //   갑자기 거부돼 담당자 동작이 바뀐다. 그건 먼저 알리고 올리기로 한 약속이 있어
+        //   PM 확인 뒤 assertEntryDateAllowed 로 바꾼다.
+        periodLockService.assertEntryDateFloorOnly(req.processedDate());
         List<ConsignReturnResponse.Line> lines = new ArrayList<>();
         for (ConsignReturnRequest.Item item : req.items()) {
             // 정산과 동일하게 비관적 락 — 반품·정산이 같은 미결 행에서 동시 축소해도 직렬화(이슈#97).
