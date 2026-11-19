@@ -76,9 +76,18 @@ public class SecurityConfig {
                         //   ★개발·시험 서버는 기본값(true)이라 지금처럼 열려 있다.
                         //     운영(`aws` 프로파일)에서만 false 로 닫는다.
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**")
-                        .access((who, ctx) ->
-                                new org.springframework.security.authorization.AuthorizationDecision(
-                                        apiDocsPublic || (who.get() != null && who.get().isAuthenticated())))
+                        .access((who, ctx) -> {
+                            // ‼️**익명도 `isAuthenticated()` 가 true 다.**
+                            //   AnonymousAuthenticationToken 을 빼지 않으면 "인증된 사용자만"이
+                            //   말뿐인 조건이 되어 닫아도 그대로 열린다 — 실제로 그렇게 짰다가
+                            //   테스트(ApiDocsExposureTest.ClosedTest)가 잡았다.
+                            org.springframework.security.core.Authentication a = who.get();
+                            boolean real = a != null && a.isAuthenticated()
+                                    && !(a instanceof org.springframework.security.authentication
+                                            .AnonymousAuthenticationToken);
+                            return new org.springframework.security.authorization
+                                    .AuthorizationDecision(apiDocsPublic || real);
+                        })
                         .requestMatchers(
                                 com.daesung.sales.dealer.config.DealerSiteKeyFilter.PATH_PREFIX + "**")
                         .permitAll()

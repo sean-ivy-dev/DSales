@@ -7,6 +7,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.http.HttpMethod;
 
 /**
  * API 문서(Swagger)는 <b>운영에서 인증 뒤로</b> 옮겼다(보안 점검 2026-11-19).
@@ -37,8 +38,10 @@ class ApiDocsExposureTest extends IntegrationTestSupport {
     @DisplayName("기본값(개발·시험)은 인증 없이도 열린다 — 프론트가 쓰는 길이다")
     void 기본값은_열려있다() {
         for (String p : new String[] {"/v3/api-docs", "/swagger-ui/index.html"}) {
+            // ‼️`!= 401` 로만 보면 **500 도 통과한다**. springdoc 상향(2.7.0 → 2.10.0)이
+            //   Boot 3.4 에서 깨지는지 이 테스트가 잡아야 하므로 **200 을 못박는다**.
             int code = raw.getForEntity(p, String.class).getStatusCode().value();
-            assertThat(code).as("%s 는 기본값에서 열려 있어야 한다", p).isNotEqualTo(401);
+            assertThat(code).as("%s 는 기본값에서 200 이어야 한다", p).isEqualTo(200);
         }
     }
 
@@ -47,5 +50,43 @@ class ApiDocsExposureTest extends IntegrationTestSupport {
     void 데이터는_여전히_막힌다() {
         assertThat(raw.getForEntity("/api/v1/sales", String.class).getStatusCode().value())
                 .isEqualTo(401);
+    }
+
+    /**
+     * ★<b>운영과 같은 설정</b>({@code api-docs-public=false})에서 문서가 닫히는지 못박는다.
+     *
+     * <p>‼️이걸 안 두면 「닫았다」가 말뿐이 된다 — 운영 프로파일은 통합테스트가 타지 않는 길이라,
+     * 설정 한 줄이 오타여도 아무도 모른 채 배포된다. 별도 컨텍스트를 띄워서라도 확인한다.
+     */
+    @org.springframework.test.context.TestPropertySource(
+            properties = "daesung.security.api-docs-public=false")
+    @DisplayName("운영 설정 — API 문서가 인증을 요구한다")
+    static class ClosedTest extends IntegrationTestSupport {
+
+        @Autowired
+        private TestRestTemplate raw;
+
+        @Test
+        @DisplayName("★★인증 없이는 401 — 설계도가 더는 공짜로 나가지 않는다")
+        void 인증없으면_막힌다() {
+            for (String p : new String[] {"/v3/api-docs", "/swagger-ui/index.html"}) {
+                assertThat(raw.getForEntity(p, String.class).getStatusCode().value())
+                        .as("%s 는 운영 설정에서 401 이어야 한다", p)
+                        .isEqualTo(401);
+            }
+        }
+
+        @Test
+        @DisplayName("‼️로그인하면 그대로 보인다 — 끈 것이 아니라 옮긴 것이다")
+        void 로그인하면_보인다() {
+            String t = token();
+            org.springframework.http.HttpHeaders h = new org.springframework.http.HttpHeaders();
+            h.setBearerAuth(t);
+            var res = raw.exchange("/v3/api-docs", HttpMethod.GET,
+                    new org.springframework.http.HttpEntity<>(h), String.class);
+            assertThat(res.getStatusCode().value())
+                    .as("프론트·특약점팀이 로그인해서 보던 문서가 사라지면 안 된다")
+                    .isEqualTo(200);
+        }
     }
 }
