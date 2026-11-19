@@ -46,11 +46,3 @@ spring:
 #   그렇지 않으면 아무나 X-Forwarded-Proto 를 위조해 보낼 수 있다.
 server:
   forward-headers-strategy: framework
-
-# ★★API 문서(Swagger)를 **운영에서는 인증 뒤로** 옮긴다(보안 점검 2026-11-19).
-#   그전엔 `/v3/api-docs`(796 KB)와 swagger-ui 번들(1.4 MB)이 인증 없이 받아졌다.
-#   ‼️지우는 것이 아니라 **로그인하면 그대로 보인다** — 프론트·특약점팀 작업에 지장이 없다.
-#   개발·시험 서버는 이 값이 없어 기본값(true)이라 지금처럼 열려 있다.
-daesung:
-  security:
-    api-docs-public: false

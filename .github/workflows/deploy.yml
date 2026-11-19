@@ -320,6 +320,14 @@ jobs:
           DAESUNG_SECURITY_JWTSECRET=${JWT_SECRET}
           DAESUNG_SECURITY_COOKIESECURE=true
           DAESUNG_SECURITY_COOKIESAMESITE=Strict
+          # ★★API 문서(Swagger)를 **운영에서만** 인증 뒤로 옮긴다(보안 점검 2026-11-19).
+          #   그전엔 인증 없이 404개 엔드포인트의 경로·파라미터가 통째로 나갔고
+          #   (/v3/api-docs 약 790 KB), swagger-ui 번들 자체도 XSS 권고를 품고 있었다.
+          #   ‼️끄는 것이 아니라 **로그인하면 그대로 보인다** — 프론트 작업에 지장 없다.
+          #   ‼️**여기에 둔다**: 운영은 SPRING_PROFILES_ACTIVE 를 쓰지 않아 기본 프로파일로 돈다.
+          #     application-aws.yml 에 넣으면 그 파일을 읽는 **개발 서버**가 닫히고
+          #     운영은 그대로 열린다 — 처음에 실제로 그렇게 반대로 나갔다.
+          DAESUNG_SECURITY_APIDOCSPUBLIC=false
           DAESUNG_DSRE_ENABLED=${DSRE_ENABLED}
           DAESUNG_DSRE_URL=jdbc:mysql://dsre-mariadb:3306/dsre2?characterEncoding=UTF-8&useUnicode=true
           DAESUNG_DSRE_USERNAME=dsre
