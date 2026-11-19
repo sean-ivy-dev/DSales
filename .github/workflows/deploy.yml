@@ -88,7 +88,11 @@ jobs:
         run: echo "pw=$(aws ecr get-login-password --region $AWS_REGION)" >> "$GITHUB_OUTPUT"
 
       - name: EC2 배포 (SSH) — DB 자격증명은 Secrets Manager에서 앱이 직접 조회
-        uses: appleboy/ssh-action@v1
+      # ★★제3자 액션이라 **커밋 해시로 고정**한다(보안 점검 2026-11-19).
+      #   이 스텝에 배포 서버 SSH 키가 들어간다. `@v1` 같은 태그는 저자가
+      #   조용히 다른 커밋으로 돌릴 수 있고, 그 순간 키가 통째로 넘어간다.
+      #   올릴 때는 태그가 아니라 **해시를 바꿔** 올린다.
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.5
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ec2-user
@@ -211,7 +215,7 @@ jobs:
       # 배포가 "컨테이너는 떴는데 DB 못 붙음" 상태로 조용히 성공 처리되는 것을 막는다.
       # (2026-08-01 장애가 며칠간 안 잡힌 이유 = 기동 검증이 없었음)
       - name: 기동 검증 (health)
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.5
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ec2-user

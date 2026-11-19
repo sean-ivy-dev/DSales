@@ -1,6 +1,10 @@
 plugins {
 	id 'java'
-	id 'org.springframework.boot' version '3.4.5'
+	// ★3.4.5 → 3.4.13: **같은 패치 라인**이라 API 변화가 없고, BOM 이 묶고 있는
+	//   tomcat·spring-framework·spring-security·jackson·netty·logback 이 한꺼번에 올라간다.
+	//   (2026-11-19 보안 점검: 그 묶음에서만 CRITICAL 33건이 나왔다. 마이너 상향(3.5.x)은
+	//    12/11 이관 뒤로 미루고, 지금은 패치만 올린다 — 실사용 직전이라 변화를 최소로 둔다.)
+	id 'org.springframework.boot' version '3.4.13'
 	id 'io.spring.dependency-management' version '1.1.7'
 	// 정적분석(P0-07 / 검수 S-7 "정적분석 SQLi 0건"). SpotBugs + FindSecBugs 보안 룰.
 	id 'com.github.spotbugs' version '6.0.26'
@@ -26,13 +30,35 @@ repositories {
 
 ext {
 	querydslVersion = '5.1.0'
-	poiVersion = '5.3.0'
-	springdocVersion = '2.7.0'
-	awsJdbcWrapperVersion = '2.6.0'
+	// ★5.3.0 → 5.4.1: OOXML 입력 검증(CVE-2025-31672).
+	poiVersion = '5.4.1'
+	// ★2.7.0 → 2.10.0: 품고 있는 swagger-ui 가 5.18.2 라 DOMPurify XSS 권고 23건이 딸려 온다.
+	springdocVersion = '2.10.0'
+	// ★2.6.0 → 2.6.8: Aurora 권한 상승(GHSA-7xw4-g7mm-r4hh, 2.6.5 에서 수정).
+	awsJdbcWrapperVersion = '2.6.8'
 	findSecBugsVersion = '1.13.0'
 	awsSdkVersion = '2.46.7'
 	// Docker Engine 29.x(min API 1.40) 대응 — Boot 3.4.5 기본 TC(1.20.6)의 docker-java가 구 API로 핑해 실패.
 	set('testcontainers.version', '1.21.3')
+
+	// ★★Boot BOM 이 안 묶거나 낮게 묶는 것만 **개별로 올린다**(2026-11-19 보안 점검).
+	//   BOM 이 묶는 것(tomcat·spring-\*·jackson·netty·logback)은 **손대지 않는다** —
+	//   따로 올리면 BOM 이 맞춰 둔 조합이 깨진다. Boot 패치 상향으로 같이 올라간다.
+	set('mysql.version', '9.7.0')            // CVE-2025-30706 (9.1.0 영향)
+	set('httpclient5.version', '5.6.5')      // CVE-2026-71290 TLS 호스트명 검증 미비(CVSS 9.1)
+	set('httpcore5.version', '5.5')          // CVE-2026-54399/54428 헤더 파싱 메모리 고갈
+	set('angus-mail.version', '2.0.5')       // CVE-2025-7962 SMTP 인젝션
+	set('commons-lang3.version', '3.18.0')   // CVE-2025-48924 무한 재귀(3.17.0 영향)
+
+	// ★★BOM 이 묶는 것도 **같은 패치 라인 안에서만** 더 올린다(2026-11-19 보안 점검 2차).
+	//   Boot 3.4.13 이 데려오는 버전이 아직 낡아 CRITICAL 이 남는다.
+	//   ‼️마이너(6.2→6.3, 10.1→11.0)는 올리지 않는다 — API 가 바뀐다.
+	//     패치 안에서만 올리므로 호환이 유지되고, 통합테스트 1,082건이 그것을 확인한다.
+	set('spring-framework.version', '6.2.19')  // spring-core/webmvc/expression CRITICAL 다수
+	set('tomcat.version', '10.1.62')           // 인증 우회·접근제어(CVSS 9.8) — 10.1.58 에서 수정
+	set('netty.version', '4.1.141.Final')      // SNI 라우팅 우회·TLS 호스트명 검증(CVSS 10.0)
+	set('jackson-bom.version', '2.18.12')      // 다형성 타입 우회·ReDoS
+	set('log4j2.version', '2.26.1')            // 비유한 부동소수 인코딩
 }
 
 dependencies {

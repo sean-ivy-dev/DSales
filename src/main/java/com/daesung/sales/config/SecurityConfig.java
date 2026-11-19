@@ -36,7 +36,9 @@ public class SecurityConfig {
             HttpSecurity http, JwtProvider jwtProvider,
             com.daesung.sales.permission.service.DynamicAuthorizationManager dynamicAuthorizationManager,
             com.daesung.sales.audit.service.AccessDeniedLogger accessDeniedLogger,
-            com.daesung.sales.dealer.config.DealerSiteProperties dealerSiteProperties)
+            com.daesung.sales.dealer.config.DealerSiteProperties dealerSiteProperties,
+            @org.springframework.beans.factory.annotation.Value(
+                    "${daesung.security.api-docs-public:true}") boolean apiDocsPublic)
             throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -53,14 +55,30 @@ public class SecurityConfig {
                                 //   남이 호출해도 그 사람을 로그아웃시킬 뿐, 권한이 올라가지 않는다.
                                 "/api/v1/auth/logout",
                                 "/api/v1/auth/bootstrap-admin").permitAll()
-                        .requestMatchers(
-                                "/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**",
-                                "/actuator/health").permitAll()
+                        .requestMatchers("/actuator/health").permitAll()
                         // ★특약점 사이트 서버 전용 경로 — 인가를 **전용 키 필터**가 한다
                         //   (DealerSiteKeyFilter). 키가 없거나 틀리면 그 필터가 401 로 끊으므로
                         //   여기서 permitAll 이어도 열려 있지 않다.
                         //   JWT·권한표를 같이 걸지 않는 이유: 그러면 사이트 서버가 사람 계정으로
                         //   로그인해야 하고, 사이트에 사람 토큰이 상주한다(명세 §10-3 서버간 호출).
+                        // ★★API 문서(Swagger)는 **운영에서 닫는다**(보안 점검 2026-11-19).
+                        //
+                        //   운영에서 인증 없이 404개 엔드포인트의 경로·파라미터·응답 구조가
+                        //   통째로 나가고 있었다(`/v3/api-docs` 796 KB). 데이터는 401 로 막혀
+                        //   있지만, 공격자에게 설계도를 그대로 주는 셈이다.
+                        //
+                        //   ‼️그보다 더한 것은 **swagger-ui 번들 자체가 취약**하다는 점이다 —
+                        //     `swagger-ui 5.18.2` 가 품은 DOMPurify 에 XSS 권고가 23건 있고,
+                        //     그 1.4 MB 짜리 .js 를 누구나 받아 갈 수 있었다.
+                        //
+                        //   ★끄지 않고 **인증 뒤로 옮긴다**(permitAll 에서 뺀다). 지우면 프론트·
+                        //     특약점팀이 쓰던 문서가 사라진다 — 로그인하면 그대로 볼 수 있다.
+                        //   ★개발·시험 서버는 기본값(true)이라 지금처럼 열려 있다.
+                        //     운영(`aws` 프로파일)에서만 false 로 닫는다.
+                        .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**")
+                        .access((who, ctx) ->
+                                new org.springframework.security.authorization.AuthorizationDecision(
+                                        apiDocsPublic || (who.get() != null && who.get().isAuthenticated())))
                         .requestMatchers(
                                 com.daesung.sales.dealer.config.DealerSiteKeyFilter.PATH_PREFIX + "**")
                         .permitAll()

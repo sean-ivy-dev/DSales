@@ -26,6 +26,16 @@ RUN keytool -importcert -noprompt -alias sectigo-public-server-auth-ca-ov-r36 \
     && rm /tmp/mail-ca.pem
 
 COPY build/libs/app.jar app.jar
+
+# ★★root 로 돌지 않는다(보안 점검 2026-11-19, semgrep `missing-user-entrypoint`).
+#   기본값은 root 라, 앱이 뚫렸을 때 컨테이너 안에서 바로 root 권한을 쥔다.
+#   ‼️USER 는 **COPY 뒤·ENTRYPOINT 앞**에 둔다 — 앞에 두면 위의 keytool(인증서 주입)이
+#     `/opt/java/.../cacerts` 를 못 고쳐 기동 자체가 깨진다.
+#   8080 은 1024 보다 커서 비특권 사용자도 그대로 연다(포트 변경 불필요).
+RUN useradd --system --uid 10001 --create-home --shell /usr/sbin/nologin app \
+    && chown -R app:app /app
+USER app
+
 EXPOSE 8080
 # ‼️TZ 환경변수만으로는 OS의 tz 파일 유무에 기댄다. JVM 옵션으로 한 번 더 못박아
 #   어느 베이스 이미지에서든 같은 날짜가 나오게 한다(LocalDate.now() 가 장부 날짜가 된다).
