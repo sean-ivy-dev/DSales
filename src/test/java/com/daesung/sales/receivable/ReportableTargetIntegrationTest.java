@@ -16,11 +16,17 @@ import org.junit.jupiter.api.TestInstance;
  * 외상매출장 <b>신고대상</b> 판정.
  *
  * <p>근거: 화면 담당 전달 2026-10-23 §3③ —
- * "신고대상 = 기간 내 매출 금액 합 ≠ 0 인 거래처, <b>거래처코드 'E110000' 미만</b>(레거시 기준).
- * 화면 목록은 이 기준으로 맞췄습니다."
+ * "신고대상 = 기간 내 매출 금액 합 ≠ 0 인 거래처, <b>거래처코드 'E110000' 미만</b>(레거시 기준)."
  *
- * <p>‼️이 플래그는 단순 조회 필터가 아니라 <b>일괄 메일·PDF 대상</b>을 추리는 스위치다.
- * 서버가 화면보다 넓게 주면 <b>화면에 안 보이던 거래처에 메일이 나간다</b> — 되돌릴 수 없다.
+ * <p>‼️<b>이 플래그는 조회 필터가 아니라 일괄 메일·PDF 대상을 추리는 스위치다.</b>
+ * 레거시 「신고대상」 체크박스는 <b>거래처 콤보 목록과 일괄전송 버튼만</b> 바꾸고
+ * ({@code CommonDB.GetCustList_Sales}), 장부 본문의 거래처 조건은 「전체 거래처」면
+ * <b>빈 문자열</b>이다({@code 외상매출장조회.vb:181}). 상한 {@code E110000} 은 레거시
+ * 전체 소스에서 <b>그 목록 함수 한 곳</b>에만 있다.
+ *
+ * <p>★<b>2026-11-24 정정</b>: 이 테스트는 원래 「조회에서도 상한을 건다」를 못박고 있었다.
+ * 그게 결함이었다 — 특강 거래처 14곳·33.8억이 통째로 안 보였다(발주처 2026-11-23 9번).
+ * 이제 <b>조회는 걸지 않고</b>, 메일 대상 선정에만 쓴다. 아래 두 테스트가 양쪽을 못박는다.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @DisplayName("외상매출장 신고대상(거래처코드 상한)")
@@ -82,21 +88,29 @@ class ReportableTargetIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("★신고대상은 거래처코드 'E110000' 미만만 — 매출이 있어도 그 위는 빠진다")
-    void 코드상한() {
-        List<Long> target = ids(true);
+    @DisplayName("★★**조회는 코드 상한을 걸지 않는다** — 신고대상을 켜도 그 위가 안 빠진다")
+    void 조회는_상한을_걸지_않는다() {
+        List<Long> on = ids(true);
+        List<Long> off = ids(false);
 
-        assertThat(target).as("상한 아래는 대상").contains(inRange);
-        // ‼️셋 다 같은 기간에 매출이 있다. 그런데도 빠지는 것이 코드 조건의 증거다.
-        assertThat(target).as("'E110000' 초과는 제외").doesNotContain(overRange);
-        assertThat(target).as("'E110000' 정확히 일치도 제외 — 조건은 '미만'이다")
-                .doesNotContain(atBoundary);
+        assertThat(on)
+                .as("‼️다르면 「신고대상」이 또 조회 필터로 돌아간 것이다")
+                .isEqualTo(off);
+        // ‼️셋 다 같은 기간에 매출이 있다. 레거시 장부 본문엔 거래처 조건이 없으므로 셋 다 나온다.
+        assertThat(on).as("상한 아래").contains(inRange);
+        assertThat(on).as("'E110000' 초과도 조회에는 나온다 — 특강 거래처가 이 모양이다")
+                .contains(overRange);
+        assertThat(on).as("'E110000' 정확히 일치도 조회에는 나온다").contains(atBoundary);
     }
 
     @Test
-    @DisplayName("‼️신고대상을 안 켜면 코드 상한도 안 건다 — 조회는 전부 보여야 한다")
-    void 평소조회는_그대로() {
-        List<Long> all = ids(false);
-        assertThat(all).contains(inRange, atBoundary, overRange);
+    @DisplayName("‼️**메일 대상**은 코드 상한을 건다 — 화면에 없던 곳에 명세서가 나가면 되돌릴 수 없다")
+    void 메일대상은_상한을_건다() {
+        // 거래처를 안 고르면 서버가 대상을 추린다. 상한 초과만 골라 보내면 "대상 없음"이어야 한다.
+        JsonNode res = post("/closing/ar-ledger/email"
+                + RANGE + "&onlyReportable=true&partnerIds=" + overRange, Map.of());
+        assertThat(res.path("success").asBoolean())
+                .as("‼️성공하면 상한 초과 거래처에 메일이 나간 것이다: %s", res)
+                .isFalse();
     }
 }

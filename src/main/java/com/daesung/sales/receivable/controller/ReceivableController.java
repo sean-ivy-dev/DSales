@@ -478,10 +478,21 @@ public class ReceivableController {
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
             @Parameter(description = "종료일(yyyy-MM-dd, 미지정 시 오늘)") @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
-            @Parameter(description = "신고대상만(조회 화면의 그 체크박스)")
+            @Parameter(description = """
+                    신고대상만 — **조회 결과를 바꾸지 않는다**(2026-11-24 정정, 발주처 9번).
+
+                    레거시 「신고대상」 체크박스는 **거래처 콤보 목록과 일괄전송 버튼만** 바꾸고
+                    (`CommonDB.GetCustList_Sales`), 장부 본문의 거래처 조건은 「전체 거래처」면
+                    **빈 문자열**이다(`외상매출장조회.vb:181`). 거래처코드 상한 `E110000` 은
+                    레거시 전체 소스에서 **그 목록 함수 한 곳**에만 있다.
+
+                    ‼️우리가 그 조건을 조회에까지 걸어 **특강 거래처 14곳·33.8억이 통째로
+                    안 보였다.** 이제 조회는 이 값을 보지 않고, **메일·PDF 대상
+                    (`POST /ar-ledger/email`)** 에만 쓴다. 프론트 호환을 위해 파라미터는 남겨 둔다.""")
             @RequestParam(required = false, defaultValue = "false") boolean onlyReportable) {
+        // 조회는 신고대상을 보지 않는다(위 설명). 레거시 장부 본문과 같다.
         return ApiResponse.success(
-                receivableService.arLedgerMerged(fromDate, toDate, onlyReportable));
+                receivableService.arLedgerMerged(fromDate, toDate, false));
     }
 
     @Operation(summary = "외상매출장 — 전체 거래처(24p)",
@@ -501,11 +512,16 @@ public class ReceivableController {
             @Parameter(description = "키워드 — 거래처명으로 좁힌다(부분일치)")
             @RequestParam(required = false) String keyword,
             @Parameter(description = """
-                    **신고대상만** — 기간 내 거래(매출·반품·수금)가 있는 거래처만 내려준다.
+                    신고대상만 — **조회 결과를 바꾸지 않는다**(2026-11-24 정정, 발주처 9번).
 
-                    레거시에서 '신고대상'은 조회 필터가 아니라 **일괄 메일·PDF 대상을 추리는 스위치**였다
-                    (화면 안내: "신고대상 체크시 설정된 기간내 신고내역이 있는 거래처에 내역서 일괄 메일 전송").
-                    여기서 걸러 주면 **거래가 없는 곳에 0원짜리 명세서가 나가는 사고**를 막는다.""")
+                    레거시 「신고대상」 체크박스는 **거래처 콤보 목록과 일괄전송 버튼만** 바꾸고
+                    (`CommonDB.GetCustList_Sales`), 장부 본문의 거래처 조건은 「전체 거래처」면
+                    **빈 문자열**이다(`외상매출장조회.vb:181`). 거래처코드 상한 `E110000` 은
+                    레거시 전체 소스에서 **그 목록 함수 한 곳**에만 있다.
+
+                    ‼️우리가 그 조건을 조회에까지 걸어 **특강 거래처 14곳·33.8억이 통째로
+                    안 보였다.** 이제 조회는 이 값을 보지 않고, **메일·PDF 대상
+                    (`POST /ar-ledger/email`)** 에만 쓴다. 프론트 호환을 위해 파라미터는 남겨 둔다.""")
             @RequestParam(required = false, defaultValue = "false") boolean onlyReportable,
             @org.springdoc.core.annotations.ParameterObject
             com.daesung.sales.common.dto.PageRequestDto pageReq) {
@@ -515,7 +531,7 @@ public class ReceivableController {
         var p = pageReq.toPageable();
         if (keyword != null && !keyword.isBlank()) {
             var filtered = Keywords.filter(
-                    receivableService.arLedgerAll(fromDate, toDate, onlyReportable), keyword,
+                    receivableService.arLedgerAll(fromDate, toDate, false), keyword,
                     x -> new Object[]{x.partnerName()});
             int from = (int) Math.min(p.getOffset(), filtered.size());
             int to = Math.min(from + p.getPageSize(), filtered.size());
@@ -524,7 +540,7 @@ public class ReceivableController {
                             filtered.subList(from, to), p, filtered.size())));
         }
         return ApiResponse.success(com.daesung.sales.common.response.PageResponse.of(
-                receivableService.arLedgerAllPage(fromDate, toDate, onlyReportable, p)));
+                receivableService.arLedgerAllPage(fromDate, toDate, false, p)));
     }
 
     @Operation(summary = "외상매출장 '더프모만'(24p)",

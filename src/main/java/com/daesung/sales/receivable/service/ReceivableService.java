@@ -834,12 +834,7 @@ public class ReceivableService {
         LocalDate from = (fromDate != null) ? fromDate : LocalDate.now().withDayOfYear(1);
         LocalDate to = (toDate != null) ? toDate : LocalDate.now();
 
-        List<ArStatusResponse.Row> rows = arStatus(fromDate, toDate, null).rows();
-        List<Long> ids = rows.stream()
-                .map(ArStatusResponse.Row::partnerId)
-                .filter(java.util.Objects::nonNull)      // 합계행 제외
-                .distinct()
-                .toList();
+        List<Long> ids = ledgerPartnerIds(fromDate, toDate, from);
         if (ids.isEmpty()) {
             return List.of();
         }
@@ -854,13 +849,16 @@ public class ReceivableService {
 
         // 이월잔액 3종 — 세 쿼리 모두 partnerId 가 null 이면 **전 거래처를 GROUP BY** 한다.
         //   그래서 배치용 쿼리를 새로 만들 필요가 없었다(기존 시그니처 그대로 null 전달).
+        // ‼️연도는 **조회 시작일**에서 뽑는다 — `asOf` 에서 뽑으면 1/1 조회가 한 해 어긋난다
+        //   (단건 쪽 balanceAsOf javadoc 참고). 레거시는 `year(carrDate) = 조회 시작연도`다.
         LocalDate asOf = from.minusDays(1);
-        LocalDate yStart = LocalDate.of(asOf.getYear(), 1, 1);
+        LocalDate yStart = LocalDate.of(from.getYear(), 1, 1);
+        boolean yearStart = asOf.isBefore(yStart);   // 1/1 조회 — 그 해 선행 거래가 없다
         Map<Long, Long> carryMap = amountByPartner(
-                carryforwardRepository.sumByYear(asOf.getYear(), null));
-        Map<Long, Long> genMap = amountByPartner(
+                carryforwardRepository.sumByYear(from.getYear(), null));
+        Map<Long, Long> genMap = yearStart ? Map.of() : amountByPartner(
                 saleRepository.receivableByPartner(yStart, asOf, null));
-        Map<Long, Long> collSumMap = amountByPartner(
+        Map<Long, Long> collSumMap = yearStart ? Map.of() : amountByPartner(
                 collectionRepository.sumByPartner(yStart, asOf, null));
 
         Map<Long, List<Sale>> salesByPartner = new HashMap<>();
@@ -873,37 +871,89 @@ public class ReceivableService {
         }
 
         List<ArLedgerResponse> out = new ArrayList<>();
-        for (ArStatusResponse.Row r : rows) {
-            if (r.partnerId() == null) {
-                continue;   // 합계행
-            }
-            Partner pt = partners.get(r.partnerId());
+        for (Long id : ids) {
+            Partner pt = partners.get(id);
             if (pt == null) {
                 continue;   // 집계 직후 지워진 거래처 — 단건 조회였다면 404였을 자리다.
             }
-            long opening = nz(carryMap.get(r.partnerId()))
-                    + nz(genMap.get(r.partnerId()))
-                    - nz(collSumMap.get(r.partnerId()));
+            long opening = nz(carryMap.get(id)) + nz(genMap.get(id)) - nz(collSumMap.get(id));
             ArLedgerResponse led = buildLedger(pt, from, to, opening,
-                    salesByPartner.getOrDefault(r.partnerId(), List.of()),
-                    collByPartner.getOrDefault(r.partnerId(), List.of()));
-            // '신고내역이 있는' = 그 기간에 매출·반품·수금 중 하나라도 움직인 거래처.
-            // 이월만 있고 기간 거래가 없는 곳은 보낼 내역서가 없다.
-            // ‼️**명세행(DETAIL)으로 센다.** 이월·일계 같은 집계행이 생긴 뒤로 lines 는 늘 비지 않는다 —
-            //   isEmpty() 로 보면 거래가 없는 거래처에도 0원짜리 명세서가 메일로 나간다.
-            if (onlyReportable && led.lines().stream().noneMatch(l -> "DETAIL".equals(l.rowType()))) {
-                continue;
-            }
-            // ★거래처코드 상한도 '신고대상'의 조건이다(화면 담당 전달 2026-10-23 §3③ —
-            //   "신고대상 = 기간 내 매출 금액 합 ≠ 0 **인 거래처, 거래처코드 'E110000' 미만**").
-            //   레거시 기준이고, 화면 목록이 이미 그 기준으로 맞춰져 있다 —
-            //   서버가 더 넓게 주면 **화면에 안 보이던 거래처에 메일·PDF가 나간다.**
-            if (onlyReportable && !reportableCode(r.partnerCode())) {
+                    salesByPartner.getOrDefault(id, List.of()),
+                    collByPartner.getOrDefault(id, List.of()));
+            // ★★`onlyReportable` 은 **메일·PDF 대상 추리기 전용**이다 — 장부 내용을 바꾸지 않는다.
+            //   레거시 「신고대상」 체크박스는 **거래처 콤보 목록과 일괄전송 버튼만** 바꾸고
+            //   (`CommonDB.GetCustList_Sales`), 장부 본문 쿼리의 거래처 조건은
+            //   「전체 거래처」면 **빈 문자열**이다(`외상매출장조회.vb:181`).
+            //   ‼️우리가 그 조건을 **조회에까지** 걸어 특강 거래처 14곳·33.8억이 통째로
+            //     안 보였다(발주처 2026-11-23 9번). 조회 경로는 이 값을 넘기지 않는다.
+            if (onlyReportable && !reportableTarget(led, pt)) {
                 continue;
             }
             out.add(led);
         }
         return out;
+    }
+
+    /**
+     * 전체 외상매출장에 <b>실을 거래처</b> — 기간 내 거래가 있는 곳 <b>∪ 그 해 이월이 있는 곳</b>.
+     *
+     * <p>★★<b>이월만 있고 기간 중 거래가 없는 거래처도 넣는다</b>(발주처 2026-11-23 9번).
+     * 레거시 이월 행은 {@code sum(carrData where year = 조회 시작연도)} 이고
+     * <b>거래처 조건이 없다</b> → 이월만 있어도 「이월 한 줄」로 장부에 들어온다
+     * ({@code 외상매출장조회.vb} 이월 서브쿼리).
+     *
+     * <p>‼️우리는 거래처를 <b>매출 집계({@link #arStatus})</b> 에서만 뽑아 그런 곳이 통째로
+     * 빠졌다 — 2026-01~08 기준 <b>36곳 · 이월 65,124,114원</b>(E10A181 21,000,000 등)이
+     * 전체 장부에서 사라졌고, 그게 발주처가 센 이월 차이의 대부분이었다.
+     *
+     * <p>순서는 {@link #arStatus} 가 정한 것을 먼저 두고, 새로 들어온 곳만 <b>거래처코드순</b>으로
+     * 뒤에 붙인다 — 기존 화면 순서를 흔들지 않으면서 같은 조회가 늘 같은 차례를 낸다.
+     *
+     * <p>★<b>목록 조회와 페이징 조회가 이 메서드를 함께 쓴다.</b> 둘이 다른 집합을 세면
+     * 「전체에는 있는데 페이지에는 없는 거래처」가 생긴다(실제로 그렇게 어긋났다).
+     */
+    private List<Long> ledgerPartnerIds(LocalDate fromDate, LocalDate toDate, LocalDate from) {
+        java.util.LinkedHashSet<Long> idSet = new java.util.LinkedHashSet<>();
+        arStatus(fromDate, toDate, null).rows().stream()
+                .map(ArStatusResponse.Row::partnerId)
+                .filter(java.util.Objects::nonNull)      // 합계행 제외
+                .forEach(idSet::add);
+        java.util.Map<Long, String> codes = new java.util.HashMap<>();
+        List<Long> carryOnly = carryforwardRepository.sumByYear(from.getYear(), null).stream()
+                .map(r -> (Long) r[0])
+                .filter(java.util.Objects::nonNull)
+                .filter(id -> !idSet.contains(id))
+                .toList();
+        if (!carryOnly.isEmpty()) {
+            partnerRepository.findAllById(carryOnly)
+                    .forEach(pt -> codes.put(pt.getId(), pt.getCode()));
+            carryOnly = carryOnly.stream()
+                    .sorted(java.util.Comparator.comparing(
+                            id -> codes.getOrDefault(id, "\uffff")))
+                    .toList();
+            idSet.addAll(carryOnly);
+        }
+        return List.copyOf(idSet);
+    }
+
+    /**
+     * 메일·PDF <b>일괄 전송 대상</b>인지 — 레거시 「신고대상」 체크박스와 같은 판정.
+     *
+     * <p>근거 둘 다 레거시에 실재한다({@code CommonDB.GetCustList_Sales}):
+     * <ul>
+     *   <li>{@code having sum(totalamt) <> 0} — 그 기간에 움직임이 있는 거래처만.
+     *       <b>명세행(DETAIL)으로 센다</b> — 이월·일계 같은 집계행이 생긴 뒤로
+     *       {@code lines} 는 늘 비지 않아 {@code isEmpty()} 로 보면 거래가 없는 거래처에도
+     *       0원짜리 명세서가 메일로 나간다.</li>
+     *   <li>{@code custCode < 'E110000'} — 그 이상은 신고 대상이 아닌 계열(내부·기타)이다.
+     *       ‼️코드가 없으면 대상이 아니다 — 정체를 모르는 거래처에 명세서를 보내지 않는다.</li>
+     * </ul>
+     *
+     * <p>‼️<b>조회에는 쓰지 않는다.</b> 레거시 장부 본문엔 이 조건이 없다.
+     */
+    private static boolean reportableTarget(ArLedgerResponse led, Partner pt) {
+        return led.lines().stream().anyMatch(l -> "DETAIL".equals(l.rowType()))
+                && reportableCode(pt.getCode());
     }
 
     /**
@@ -936,12 +986,10 @@ public class ReceivableService {
     public org.springframework.data.domain.Page<ArLedgerResponse> arLedgerAllPage(
             LocalDate fromDate, LocalDate toDate, boolean onlyReportable,
             org.springframework.data.domain.Pageable pageable) {
-        List<Long> partnerIds = new ArrayList<>();
-        for (ArStatusResponse.Row r : arStatus(fromDate, toDate, null).rows()) {
-            if (r.partnerId() != null) {
-                partnerIds.add(r.partnerId());   // 합계행 제외
-            }
-        }
+        // ★목록 조회와 **같은 집합**을 쓴다(ledgerPartnerIds) — 기간 내 거래가 있는 곳
+        //   ∪ 그 해 이월이 있는 곳. 둘이 갈리면 「전체에는 있는데 페이지에는 없는 거래처」가 생긴다.
+        LocalDate fromForCarry = (fromDate != null) ? fromDate : LocalDate.now().withDayOfYear(1);
+        List<Long> partnerIds = ledgerPartnerIds(fromDate, toDate, fromForCarry);
         // ★원장은 **이 페이지의 거래처만** 만든다. 전체를 만들고 자르면 느린 것은 그대로다.
         //   다만 onlyReportable 은 원장을 만들어 봐야 알 수 있어, 그 경우에만 전량을 훑는다.
         if (onlyReportable) {
@@ -978,7 +1026,8 @@ public class ReceivableService {
         LocalDate from = (fromDate != null) ? fromDate : LocalDate.now().withDayOfYear(1);
         LocalDate to = (toDate != null) ? toDate : LocalDate.now();
 
-        return buildLedger(partner, from, to, balanceAsOf(partnerId, from.minusDays(1)),
+        return buildLedger(partner, from, to,
+                balanceAsOf(partnerId, from.minusDays(1), from.getYear()),
                 saleRepository.findLedgerLines(partnerId, from, to),
                 collectionRepository.findLedgerLines(partnerId, from, to));
     }
@@ -1311,10 +1360,33 @@ public class ReceivableService {
         return m;
     }
 
-    private long balanceAsOf(Long partnerId, LocalDate asOf) {
-        int year = asOf.getYear();
-        LocalDate yStart = LocalDate.of(year, 1, 1);
-        long carry = firstAmount(carryforwardRepository.sumByYear(year, partnerId));
+    /**
+     * 기초잔액 — <b>이월 연도를 따로 받는다</b>.
+     *
+     * <p>‼️<b>연도를 {@code asOf} 에서 뽑으면 1월 1일 조회가 한 해 어긋난다.</b>
+     * {@code asOf = from.minusDays(1)} 이라 {@code from=2026-01-01} 이면 {@code asOf=2025-12-31},
+     * 그 해는 <b>2025</b>다 — 2026 이월 행을 쓰지 않고 <b>2025년을 통째로 다시 계산</b>했다.
+     * 레거시는 {@code carrData where year(carrDate) = 조회 시작연도} 를 그대로 쓴다
+     * ({@code 외상매출장조회.vb} 이월 서브쿼리).
+     *
+     * <p>보통은 같은 값이 나온다 — 그 해 이월 자체가 전년 말 잔액이니까. 그래서 오래 드러나지
+     * 않았다(2026 이월 81곳 중 80곳이 맞았다). <b>우리 전년 장부가 레거시와 다른 거래처에서만</b>
+     * 어긋났다: {@code A30D201} 은 이월 행에 12,600(레거시와 동일)이 있는데 재계산은 −23,400을 냈다.
+     *
+     * <p>★더 큰 부작용도 같이 사라진다 — 매입처는 이월 행이 없는데 전년 재계산으로는
+     * 거액의 음수가 잡혀(강남대성수능연구소 −112억) 전체 장부 이월이 −139억이 됐다.
+     *
+     * <p>‼️2-인자 판({@code asOf} 만 받던 것)은 <b>지웠다</b> — 남겨 두면 연도를 {@code asOf}
+     * 에서 뽑는 그 실수가 다시 들어온다. 부르는 곳이 <b>조회 시작연도를 명시</b>하게 한다.
+     *
+     * @param carryYear 이월 행을 읽을 연도 = <b>조회 시작일의 연도</b>
+     */
+    private long balanceAsOf(Long partnerId, LocalDate asOf, int carryYear) {
+        LocalDate yStart = LocalDate.of(carryYear, 1, 1);
+        long carry = firstAmount(carryforwardRepository.sumByYear(carryYear, partnerId));
+        if (asOf.isBefore(yStart)) {
+            return carry;   // 연초(1/1) 조회 — 그 해에 더할 거래가 아직 없다
+        }
         long gen = firstAmount(saleRepository.receivableByPartner(yStart, asOf, partnerId));
         long coll = firstAmount(collectionRepository.sumByPartner(yStart, asOf, partnerId));
         return carry + gen - coll;
