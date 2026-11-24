@@ -811,9 +811,18 @@ public class InventoryService {
         return v != null && v.toLowerCase(java.util.Locale.ROOT).contains(kw);
     }
 
-    /** 입고/대체 내역이 다루는 재고이벤트 — 입고·이고·세트조립·세트해체. */
+    /**
+     * 입고/대체 내역이 다루는 재고이벤트 — 입고·이고·세트조립·세트해체·<b>반품</b>.
+     *
+     * <p>★<b>반품을 넣었다</b>(발주처 2026-11-23 2번 "반품 입고 후 하단 「입고/대체 내역」에
+     * 반품 내역이 안 보임 — 보이게"). 반품도 그 화면에서 등록하고 <b>물류창고 재고를 늘리는</b>
+     * 작업이라, 등록해 놓고 되짚어 볼 곳이 없으면 재고가 안 맞을 때 원인을 찾을 수 없다.
+     *
+     * <p>출고·폐기·실사는 그대로 뺀다 — 각자 화면이 따로 있다.
+     */
     private static final java.util.List<TxnType> RECORD_KINDS = java.util.List.of(
-            TxnType.INBOUND, TxnType.TRANSFER, TxnType.BOM_ASSEMBLE, TxnType.BOM_DISASSEMBLE);
+            TxnType.INBOUND, TxnType.TRANSFER, TxnType.BOM_ASSEMBLE, TxnType.BOM_DISASSEMBLE,
+            TxnType.RETURN);
 
     /**
      * 입고/대체 내역 조회(8p·9p). 등록만 되고 조회가 없던 것을 채운다.
@@ -821,6 +830,7 @@ public class InventoryService {
      * <p>★수량 부호를 <b>그대로</b> 준다. 폐기는 "12권 버렸다"라 양수로 뒤집었지만,
      * 여기서는 방향이 곧 정보다 — 이고는 출발(−)·도착(+) 두 줄이고
      * 세트작업도 완제품(+)·구성품(−)으로 갈린다. 절댓값으로 바꾸면 그 구분이 사라진다.
+     * 반품은 물류창고로 돌아오는 것이라 <b>양수</b>로 들어와 그대로 나간다.
      *
      * <p>도서·창고는 <b>다중선택</b>이다(좌측 트리뷰 체크박스, 2026-08-31 공통 요구).
      *

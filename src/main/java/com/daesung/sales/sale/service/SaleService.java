@@ -158,6 +158,23 @@ public class SaleService {
         Map<String, Boolean> specialLectureCache = new HashMap<>();
         assertWarehouseWhenStockMoves(req, warehouse);
         List<SalesEntryResponse.Warning> warnings = collectReturnWarnings(partner.getId(), resolved);
+        // ★「매출 반품」(창고 없는 반품)은 **경고로 알린다** — 저장은 된다.
+        //   재고가 돌아오지 않는 것이 이 구분의 뜻이지만, 출고 반품을 넣으려다 창고를
+        //   안 고른 실수도 같은 모양이다. 조용히 통과시키면 담당자는 물건이 장부에
+        //   안 돌아온 줄 모른다(초과 반품을 경고로 알리는 것과 같은 결).
+        if (warehouse == null) {
+            for (ResolvedItem r : resolved) {
+                if (r.salesCategory() != SalesCategory.RETURN || r.item().qty() == 0) {
+                    continue;
+                }
+                warnings.add(new SalesEntryResponse.Warning(
+                        "RETURN_WITHOUT_WAREHOUSE", r.product().getId(), r.product().getCode(),
+                        0L, r.item().qty(), 0L,
+                        "출고 창고를 고르지 않은 반품입니다(매출 반품). 매출만 음수로 서고"
+                                + " 재고는 돌아오지 않으며 출고/반품 조회에도 나오지 않습니다."
+                                + " 실물이 돌아온 반품이면 출고 창고를 골라 주세요."));
+            }
+        }
 
         // 2단계: 저장 + 재고 반영.
         String datePart = req.salesDate().format(YYYYMMDD);
@@ -579,11 +596,22 @@ public class SaleService {
             if (item.qty() == 0) {
                 continue;
             }
+            // ★★**반품은 창고를 비울 수 있다 = 「매출 반품」**(발주처 2026-11-23 1번 표).
+            //   그 표가 매출 반품을 이렇게 적었다 — "재고: **출고 창고 고른 때만** /
+            //   출고/반품 조회: 출고 창고 고른 때만 / 통합 매출 조회: 음수 /
+            //   재고 영향 없음". 즉 **두 반품을 가르는 값이 곧 출고 창고**다.
+            //   창고를 비우면 재고 이벤트가 안 생기고(아래 applyShipment 를 안 탄다),
+            //   `shippedOnly` 가 창고를 요구하므로 출고/반품 조회에서도 빠진다.
+            //   통합 매출 조회엔 RETURN 이라 음수로 그대로 나온다 — 표와 정확히 같다.
+            //   ‼️새 구분값을 만들지 않는다. 만들면 창고와 둘이 돼 "어느 쪽이 진짜냐"가 생긴다.
+            if (item.shipmentType() == ShipmentType.RETURN) {
+                continue;
+            }
             Product p = productRepository.findById(item.productId()).orElse(null);
             if (p != null && p.isStockManaged()) {
                 throw new BusinessException(ErrorCode.INVALID_INPUT,
-                        "재고가 움직이는 매출은 창고를 지정해야 합니다. 출고 없는 매출(문항사용료 등)만 "
-                        + "창고를 비울 수 있습니다. 상품=" + p.getCode());
+                        "재고가 움직이는 매출은 창고를 지정해야 합니다. 출고 없는 매출(문항사용료 등)과 "
+                        + "매출 반품만 창고를 비울 수 있습니다. 상품=" + p.getCode());
             }
         }
     }

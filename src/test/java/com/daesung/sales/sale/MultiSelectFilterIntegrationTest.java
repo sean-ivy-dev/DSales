@@ -188,10 +188,12 @@ class MultiSelectFilterIntegrationTest extends IntegrationTestSupport {
     @DisplayName("입고이력도 창고·작업구분 다중선택")
     void 입고이력_다중선택() {
         String q = "?fromDate=" + YEAR + "-01-01&toDate=" + YEAR + "-12-31&productIds=" + book;
-
-        assertThat(data(get("/stock/records" + q + "&warehouseIds=" + wh1 + "," + wh2)))
+        // ‼️구분을 INBOUND 로 좁힌다 — 이 테스트가 보는 것은 **창고 다중선택**이고,
+        //   2026-11-24 부터 입고/대체 내역에 **반품도 들어온다**(발주처 2번).
+        //   같은 도서에 반품이 생기면 건수가 늘어 창고 필터와 무관하게 깨진다.
+        assertThat(data(get("/stock/records" + q + "&kinds=INBOUND&warehouseIds=" + wh1 + "," + wh2)))
                 .as("두 창고 입고 2건").hasSize(2);
-        assertThat(data(get("/stock/records" + q + "&warehouseIds=" + wh1)))
+        assertThat(data(get("/stock/records" + q + "&kinds=INBOUND&warehouseIds=" + wh1)))
                 .as("한 창고만").hasSize(1);
         assertThat(data(get("/stock/records" + q + "&kinds=INBOUND,TRANSFER")))
                 .as("작업구분 다중선택 — 입고만 있으니 2건").hasSize(2);

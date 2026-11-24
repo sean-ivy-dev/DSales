@@ -62,6 +62,8 @@ public record StockRecordRow(
             case TRANSFER -> "단순이고";
             case BOM_ASSEMBLE -> "세트조립";
             case BOM_DISASSEMBLE -> "세트해체";
+            // ★반품(발주처 2026-11-23 2번) — 그 화면에서 등록하고 재고를 늘리는 작업이다.
+            case RETURN -> "반품";
             default -> t.name();
         };
     }

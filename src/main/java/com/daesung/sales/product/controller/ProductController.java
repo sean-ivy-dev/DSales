@@ -104,9 +104,29 @@ public class ProductController {
         return ApiResponse.success(page);
     }
 
-    @Operation(summary = "도서 목록 엑셀 다운로드", description = "검색조건 전체를 xlsx로(도서관리 기본정보).")
+    @Operation(summary = "도서 목록 엑셀 다운로드",
+            description = """
+                    도서관리 기본정보를 xlsx 로. **조회와 같은 조건**을 받는다.
+
+                    ‼️**예전엔 `keyword` 만 받고 사용여부를 무시해 늘 '사용중'만 냈다**
+                    (14,144행 / 전체 14,812 — **사용 중지 668종이 빠졌다**).
+                    이 파일은 프론트가 서버에서 그대로 받아 쓰는 **업로드용 목록**이라,
+                    중지한 도서가 빠지면 그 도서를 다시 올릴 길이 없었다.
+
+                    · `includeUnused=true` — 사용 중지 도서까지 함께
+                    · `useYn=false` — **사용 중지만** (화면에서 걸러낼 수 없다 — 페이징이라 총 건수가 틀어진다)""")
     @GetMapping("/export")
-    public org.springframework.http.ResponseEntity<byte[]> listExport(@RequestParam(required = false) String keyword) {
+    public org.springframework.http.ResponseEntity<byte[]> listExport(
+            @Parameter(description = "검색어(상품코드 또는 상품명 부분일치)")
+            @RequestParam(required = false) String keyword,
+            @Parameter(description = "수불부노출 여부. 미지정=전체")
+            @RequestParam(required = false) Boolean ledgerVisible,
+            @Parameter(description = "단가노출 여부. 미지정=전체")
+            @RequestParam(required = false) Boolean priceVisible,
+            @Parameter(description = "사용여부 N(=중지한 도서)도 포함할지. 기본 false(제외)")
+            @RequestParam(defaultValue = "false") boolean includeUnused,
+            @Parameter(description = "사용여부 — 미지정=`includeUnused` 규칙 / true=사용중만 / **false=사용 중지만**")
+            @RequestParam(required = false) Boolean useYn) {
         var cols = java.util.List.of(
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("도서코드", "code"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("도서명", "name"),
@@ -123,7 +143,8 @@ public class ProductController {
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("재고관리", "stockManaged"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("사용여부", "useYn"));
         byte[] xlsx = excel.toXlsx("도서목록", cols,
-                productService.findAll(keyword, null, null,
+                productService.findAll(keyword, ledgerVisible, priceVisible, null,
+                        includeUnused, useYn,
                         org.springframework.data.domain.PageRequest.of(0, 100000)).getContent());
         return excel.asDownload(xlsx, "도서목록.xlsx");
     }
