@@ -957,8 +957,18 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
               COALESCE(SUM(CASE WHEN s.sales_category='SALE' THEN s.supply_amount ELSE 0 END),0) AS sale_amt,
               COALESCE(SUM(CASE WHEN s.sales_category='RETURN' THEN s.supply_amount ELSE 0 END),0) AS return_amt,
               COALESCE(SUM(CASE WHEN s.sales_category='RETURN' THEN -s.tax ELSE s.tax END),0) AS tax_net,
-              COALESCE(SUM(CASE WHEN s.sales_category='FREE' THEN s.supply_amount ELSE 0 END),0) AS teacher_amt,
-              COALESCE(SUM(CASE WHEN s.sales_category='FREE' THEN s.qty ELSE 0 END),0) AS teacher_qty,
+              -- ★★교사용은 **무가 중 공급률이 있는 것**만이다
+              --   (레거시 `외상매출현황조회.vb:200` — `tradeType='무상' AND supRate<>0`).
+              --   ‼️전엔 FREE 전부를 세어 **증정(공급률 0)이 교사용으로 잡혔다** —
+              --     2026-01~10 운영 실측: 무가 3,333건이 **전부 공급률 0(증정)** 인데
+              --     교사용 수량이 58,217 로 나왔다. 기존 프로그램은 0 이고 그게 맞다.
+              --     금액은 공급률 0이면 0이라 **수량만** 틀렸다(그래서 잔액은 맞았다).
+              --   ★외상매출장 쪽은 이미 이 기준이다({@code ReceivableService} isTeacher) —
+              --     같은 화면군이 서로 다른 교사용을 보여주고 있었다.
+              COALESCE(SUM(CASE WHEN s.sales_category='FREE' AND s.supply_rate <> 0
+                                THEN s.supply_amount ELSE 0 END),0) AS teacher_amt,
+              COALESCE(SUM(CASE WHEN s.sales_category='FREE' AND s.supply_rate <> 0
+                                THEN s.qty ELSE 0 END),0) AS teacher_qty,
               COALESCE(SUM(CASE WHEN s.sales_category='SALE' THEN s.qty ELSE 0 END),0) AS sale_qty,
               COALESCE(SUM(CASE WHEN s.sales_category='RETURN' THEN s.qty ELSE 0 END),0) AS return_qty
             FROM sales s

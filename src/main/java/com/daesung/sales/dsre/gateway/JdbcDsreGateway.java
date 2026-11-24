@@ -341,24 +341,38 @@ public class JdbcDsreGateway implements DsreGateway {
     private static final String RATE_LIST_SQL = """
             SELECT lc.DTL_CD, lc.PAPER, lc.OMR, lc.ETC, lc.LABEL, lc.BASIC, lc.TRADE,
                    lc.PACKTYPE, lc.bSpare, lc.INPUTDATE,
-                   pi.PROD_NM, pd.DTL_NM
+                   -- ★상품코드·연도를 함께 낸다(발주처 2026-11-23 3번).
+                   --   화면이 「상품년도」로 걸 수 있어야 하는데 이 두 칸이 없었다 —
+                   --   2026년으로 보고 있는데 2019~2021년 상품이 그대로 보였다.
+                   pi.PROD_CD, pi.YEAR, pi.PROD_NM, pd.DTL_NM
               FROM tbl_logis_cost lc
               LEFT JOIN tbl_product_dtl  pd ON pd.DTL_CD  = lc.DTL_CD
               LEFT JOIN tbl_product_info pi ON pi.PROD_CD = pd.PROD_CD
+             -- 연도 필터. 값이 없으면 전 연도(회수단가 특수행 DTL_CD=0 은 연도가 없어
+             -- 연도를 걸면 빠진다 — 그 행은 회수 쪽에서만 쓰므로 맞다).
+             WHERE (? IS NULL OR pi.YEAR = ?)
              ORDER BY lc.DTL_CD
             """;
 
     @Override
     public List<LogisCostRate> listLogisCosts() {
+        return listLogisCosts(null);
+    }
+
+    @Override
+    public List<LogisCostRate> listLogisCosts(Integer productYear) {
         return dsreJdbcTemplate.query(RATE_LIST_SQL,
                 (rs, i) -> new LogisCostRate(
                         rs.getInt("DTL_CD"),
+                        rs.getString("PROD_CD"),
+                        (rs.getObject("YEAR") == null) ? null : rs.getInt("YEAR"),
                         rs.getString("PROD_NM"), rs.getString("DTL_NM"),
                         rs.getInt("PAPER"), rs.getInt("OMR"), rs.getInt("ETC"),
                         rs.getInt("LABEL"), rs.getInt("BASIC"), rs.getInt("TRADE"),
                         rs.getInt("PACKTYPE"), rs.getString("bSpare"),
                         rs.getTimestamp("INPUTDATE") == null
-                                ? null : rs.getTimestamp("INPUTDATE").toLocalDateTime()));
+                                ? null : rs.getTimestamp("INPUTDATE").toLocalDateTime()),
+                productYear, productYear);
     }
 
     @Override

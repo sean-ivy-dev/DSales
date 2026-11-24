@@ -12,6 +12,14 @@ import io.swagger.v3.oas.annotations.media.Schema;
  */
 public record LogisCostRate(
         @Schema(description = "시행코드(DTL_CD, 0=회수단가)") int dtlCd,
+        @Schema(description = "상품코드(DSRE PROD_CD)", example = "A0150") String productCode,
+        @Schema(description = """
+                **상품 연도**(DSRE `tbl_product_info.YEAR`).
+
+                ‼️전엔 이 칸이 없어 화면이 **상품년도로 걸 수 없었다** — 「상품년도 2026」으로
+                보고 있는데 2019~2021년 상품이 그대로 보였다(발주처 2026-11-23 3번).
+                단가 2,651행이 2019~2026 전 연도이고 **2026년은 229행**뿐이다.""")
+        Integer productYear,
         @Schema(description = "상품명", example = "더 프리미엄") String productName,
         @Schema(description = "시행명(회차)", example = "7월 16일(영어)") String detailName,
         @Schema(description = "시험지 단가(OMR외)") int paper,

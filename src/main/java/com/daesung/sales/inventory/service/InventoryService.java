@@ -454,6 +454,8 @@ public class InventoryService {
         if (origins.isEmpty()) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "전표가 없습니다: " + refNo);
         }
+        // ‼️종류를 먼저 본다 — 매출이 따라오는 전표(반품·출고)는 여기서 처리할 수 없다.
+        assertVoucherCancelable(origins.get(0).getTxnType(), refNo);
         // 원 전표의 거래일 기준으로 마감을 본다 — 되돌리는 대상이 그 달의 숫자다.
         periodLockService.assertNotLocked(origins.get(0).getTradeDate());
 
@@ -1123,6 +1125,8 @@ public class InventoryService {
             throw new BusinessException(ErrorCode.INVALID_INPUT,
                     "이미 취소된 전표는 삭제할 수 없습니다: " + refNo + " (취소 기록이 장부에 남아 있습니다)");
         }
+        // ‼️취소와 같은 규칙 — 매출이 따라오는 전표는 여기서 지울 수 없다.
+        assertVoucherCancelable(origins.get(0).getTxnType(), refNo);
         periodLockService.assertNotLocked(origins.get(0).getTradeDate());
 
         // ‼️지운 내용을 먼저 남긴다 — 삭제 후에는 이 기록에만 남는다.
@@ -1223,6 +1227,42 @@ public class InventoryService {
             }
         }
         return txns.size();
+    }
+
+    /**
+     * 전표 취소·삭제가 <b>다룰 수 있는 종류</b>만 통과시킨다.
+     *
+     * <p>‼️<b>매출이 따라오는 전표는 거부한다</b>(프론트 지적 2026-11-24).
+     * 취소·삭제는 <b>재고 이벤트만</b> 되돌린다({@code reverseByRefNo}·{@code softDeleteByRefNo}) —
+     * 매출 반품({@code RETURN})이나 매출 출고({@code OUTBOUND}) 번호를 넣으면
+     * <b>매출 줄은 그대로 남고 재고만 움직여</b> 두 장부가 어긋난다.
+     * 게다가 {@link #voucherKind} 의 기본값이 {@code DISPOSE} 라
+     * 취소 기록이 <b>「폐기」로</b> 남는다.
+     *
+     * <p>★이 구멍은 <b>2026-11-24 에 길이 열렸다</b> — 그전엔 반품이 입고/대체 내역에
+     * 안 보여 화면에서 그 번호를 누를 수 없었는데, 발주처 2번으로 보이게 하면서 닿게 됐다.
+     * 화면에서 버튼을 막는 것과 별개로 <b>서버가 거부해야</b> 한다(주소로 직접 부를 수 있다).
+     *
+     * <p>★실사({@code ADJUST})도 거부한다 — 되돌릴 일이 있으면 실사를 다시 해야 하고,
+     * 전표 취소로 되돌리면 "언제 무엇을 실사했나"가 어긋난다.
+     *
+     * <p>통과: 입고 · 이고 · 세트조립 · 세트해체 · 폐기.
+     */
+    private static void assertVoucherCancelable(TxnType txnType, String refNo) {
+        switch (txnType) {
+            case INBOUND, TRANSFER, BOM_ASSEMBLE, BOM_DISASSEMBLE, DISPOSE -> {
+                // 통과
+            }
+            case RETURN -> throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "반품 전표는 재고 전표 취소·삭제로 처리할 수 없습니다: " + refNo
+                            + " (반품은 통합 매출 조회에서 취소·삭제하세요 — 매출과 재고가 함께 되돌아갑니다)");
+            case OUTBOUND -> throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "매출 출고 전표는 재고 전표 취소·삭제로 처리할 수 없습니다: " + refNo
+                            + " (매출 취소·삭제로 처리하세요 — 매출과 재고가 함께 되돌아갑니다)");
+            case ADJUST -> throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "재고실사 전표는 재고 전표 취소·삭제로 처리할 수 없습니다: " + refNo
+                            + " (실사를 다시 등록하세요)");
+        }
     }
 
     /**

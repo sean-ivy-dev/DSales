@@ -30,7 +30,20 @@ import org.junit.jupiter.api.TestInstance;
  * </ul>
  *
  * <p>‼️<b>유가 교사용은 채권에 들어간다</b>(받을 돈이다). 무가는 금액이 0이라 영향이 없다.
- * 수량 칸은 유가·무가를 합치고 금액 칸은 유가분만 잡힌다 — 이 구분을 함께 고정한다.
+ *
+ * <p>★★<b>2026-11-24 정정 — 두 화면의 교사용 기준이 다르다.</b>
+ * <ul>
+ *   <li><b>순매출조회</b>는 화면이 요구한 것이 "교사용·<b>증정</b> 수량"이라
+ *       <b>증정을 포함</b>한다({@code freeQty} 와 같은 값). 그대로 둔다.</li>
+ *   <li><b>외상매출현황</b>은 <b>레거시 재현 화면</b>이고, 레거시는
+ *       {@code tradeType='무상' AND supRate<>0} 만 센다({@code 외상매출현황조회.vb:200}) —
+ *       <b>증정은 교사용이 아니다.</b> 전엔 FREE 전부를 세어 증정이 섞였고, 운영 실측
+ *       (2026-01~10)에서 무가 3,333건이 <b>전부 공급률 0(증정)</b> 인데 교사용 수량이
+ *       <b>58,217</b> 로 나왔다 — 기존 프로그램은 <b>0</b> 이고 그게 맞다.
+ *       금액은 공급률 0이면 0이라 <b>수량만</b> 틀렸고, 그래서 잔액은 맞아 오래 안 드러났다
+ *       (프론트 지적 2026-11-24).</li>
+ * </ul>
+ * 즉 <b>「증정 포함」은 우리가 정한 기준</b>이었고, 레거시를 재현하는 화면에는 맞지 않았다.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @DisplayName("교사용(증정포함) 칸 — 순매출·외상매출현황")
@@ -121,13 +134,16 @@ class TeacherColumnIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("★외상매출현황 — 교사용 금액 칸이 생기되 매출액과 섞이지 않는다")
+    @DisplayName("★외상매출현황 — 교사용은 **유가분만**(증정 제외), 매출액과 섞이지 않는다")
     void 외상매출_교사용() {
         JsonNode r = arRow();
 
         assertThat(r.path("teacherAmount").asLong()).as("교사용 공급가액(유가분)").isEqualTo(20 * 7000);
-        // 수량은 유가·무가를 합친다(교사용 20 + 증정 5) — 금액과 기준이 다르다.
-        assertThat(r.path("teacherQty").asLong()).as("교사용 수량(증정 포함)").isEqualTo(25);
+        // ★★수량도 **유가분만** 센다(교사용 20). 증정 5부는 교사용이 아니다 —
+        //   레거시 `외상매출현황조회.vb:200` = `tradeType='무상' AND supRate<>0`.
+        //   ‼️전엔 25(증정 포함)였다. 운영에서 그 때문에 교사용 수량이 58,217 로 나왔는데
+        //     기존 프로그램은 0 이었다(무가가 전부 증정이었다). 클래스 주석 참고.
+        assertThat(r.path("teacherQty").asLong()).as("교사용 수량 — 증정 제외").isEqualTo(20);
 
         // ‼️교사용이 '매출액'에 섞이면 매출 통계가 통째로 부푼다. 별도 칸이어야 한다.
         assertThat(r.path("saleAmount").asLong()).as("매출액은 정상출고만").isEqualTo(100 * 7000);

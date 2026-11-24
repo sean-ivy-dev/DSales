@@ -292,8 +292,27 @@ public class LogisticsController {
 
                     dtl_cd=0은 회수단가 특수행이라 상품명·시행명이 비어 있다.""")
     @GetMapping("/rates")
-    public ApiResponse<List<LogisCostRate>> listRates() {
-        return ApiResponse.success(dsreGateway.listLogisCosts());
+    public ApiResponse<List<LogisCostRate>> listRates(
+            @Parameter(description = """
+                    **상품 연도**로 좁힌다. 미지정=전 연도.
+
+                    ‼️전엔 이 축이 없어 화면이 「상품년도」로 걸 수 없었다 —
+                    2026년으로 보고 있는데 **2019~2021년 상품이 그대로** 보였다
+                    (발주처 2026-11-23 3번). 단가 2,651행이 2019~2026 전 연도이고
+                    **2026년은 229행**뿐이다.
+
+                    ★응답에 `productCode`·`productYear` 도 함께 실어 두었다 —
+                    화면에서 그 두 칸으로 가릴 수 있다.
+
+                    ‼️**DSRE 에는 법인 구분이 없다**(`tbl_product_info.COM_CD` 가 220종 전부
+                    같은 값). 그래서 이 목록을 법인으로 가를 근거가 DSRE 쪽에 없고,
+                    연도로 좁히는 것이 할 수 있는 전부다.
+                    (법인으로 가르는 것은 **우리 상품**을 쓰는 `/logistics-costs/products` 쪽이다)
+
+                    ★연도를 주면 회수단가 특수행(`dtlCd=0`)은 빠진다 — 그 행은 연도가 없고
+                    회수 쪽에서만 쓴다.""", example = "2026")
+            @RequestParam(required = false) Integer productYear) {
+        return ApiResponse.success(dsreGateway.listLogisCosts(productYear));
     }
 
     @Operation(summary = "물류단가 일괄 수정",

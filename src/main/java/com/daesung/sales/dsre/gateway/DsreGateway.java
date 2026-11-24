@@ -64,6 +64,13 @@ public interface DsreGateway {
     /** 물류단가 전체 목록(DTL_CD 오름차순). */
     java.util.List<LogisCostRate> listLogisCosts();
 
+    /**
+     * 위와 같고 <b>상품 연도</b>로 좁힌다 — 화면의 「상품년도」 축
+     * (발주처 2026-11-23 3번: 2026년으로 보고 있는데 2019~2021년 상품이 보였다).
+     * {@code null} 이면 전 연도.
+     */
+    java.util.List<LogisCostRate> listLogisCosts(Integer productYear);
+
     /** 물류단가 등록/수정(dtl_cd 기준 upsert). */
     void upsertLogisCost(int dtlCd, int paper, int omr, int etc, int label,
                          int basic, int trade, int packtype, String bSpare);
