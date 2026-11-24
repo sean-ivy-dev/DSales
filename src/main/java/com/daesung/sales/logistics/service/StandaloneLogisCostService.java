@@ -204,6 +204,78 @@ public class StandaloneLogisCostService {
      * 그때는 수량을 <b>합친다</b> — 둘 다 실제로 나간 물량이다. 같은 물량이 두 번 세어지는
      * 경우는 "정산으로 생긴 매출"뿐이고 그건 판정 조각이 이미 뺀다.
      */
+    /**
+     * <b>단독 상품의 회수(반품) 작업비</b> 행 — 발주처 2026-11-23 4번
+     * "유상 · 무상 출고 + <b>반품(회수) 비용 포함</b>".
+     *
+     * <p>★그 회수 축이 DSRE 기준({@code tbl_wol_*})뿐이라 <b>단독 상품은 회수가 통째로 0</b>이었다.
+     *
+     * <h3>계산식 — 레거시 회수와 같다</h3>
+     * <pre>
+     *   회수비 = Σ(자재별 소요수량 × 반품수량 × 그 자재구분 단가)
+     * </pre>
+     * ‼️<b>노무비(기본작업비·출고비)를 더하지 않는다.</b> 레거시 회수 쿼리에는 그 두 칸이
+     * 아예 없다({@code RETURN_DETAIL_TEMPLATE} — 자재구분별 단가만 쓴다). 출고 쪽 식을
+     * 그대로 베끼면 회수에 없는 비용이 붙는다.
+     *
+     * <p>★단가는 <b>그 상품의 물류비용등록 단가</b>를 쓴다 — 발주처 확정(2026-10-23 #10)
+     * "계산식·단가 기존 그대로". DSRE 회수단가 특수행({@code DTL_CD=0})은 DSRE 상품용이라
+     * 단독 상품에는 해당 행이 없다.
+     *
+     * <p>「기본」 단가가 곧 <b>시험지 단가</b>라는 것도 레거시가 정해 둔 것이다 —
+     * 회수 쿼리의 {@code ELSE cost.PAPER}(자재구분이 OMR·단행본·책자·라벨이 아니면 시험지).
+     * 우리도 해설지를 시험지 단가에 붙이는 {@link #breakdown} 규칙을 그대로 쓴다.
+     */
+    @Transactional(readOnly = true)
+    public List<com.daesung.sales.dsre.gateway.ReturnCostDetailRow> returnRows(LocalDate from,
+                                                                               LocalDate to) {
+        List<Long> purchasers = inventoryTxnRepository.purchaserPartnerIds();
+        boolean noPurchaser = purchasers.isEmpty();
+        List<com.daesung.sales.dsre.gateway.ReturnCostDetailRow> out = new ArrayList<>();
+        for (Object[] r : saleRepository.standaloneReturnedQty(from, to,
+                salesDivisionService.lectureDivisionCodes(),
+                noPurchaser, noPurchaser ? List.of(0L) : purchasers)) {
+            Long productId = ((Number) r[0]).longValue();
+            ProductLogisRate rate = rateRepository.findByProductId(productId).orElse(null);
+            if (rate == null) {
+                continue;   // 단가 미등록 — 출고 쪽과 같은 규칙(0원 행을 끼워 넣지 않는다)
+            }
+            long qty = ((Number) r[6]).longValue();
+            Breakdown b = breakdown(productId, rate, qty);
+            // ★★**자재구분별로 행을 쪼갠다** — DSRE 회수 명세와 같은 모양이다.
+            //   ‼️한 행으로 묶으면 「적용 단가」를 정할 수 없다(자재구분마다 다르다).
+            //     역산해 넣으면 나눗셈이 버려져 **수량×단가 ≠ 금액**이 되고, 화면이 그 둘을
+            //     나란히 보여 주므로 담당자가 어느 쪽을 믿을지 모른다.
+            //   ‼️노무비(기본작업비·출고비)는 어느 행에도 더하지 않는다 — 레거시 회수에 없다.
+            addReturnRow(out, r, "시험지", b.paperQty(), rate.getPaper());
+            addReturnRow(out, r, "OMR", b.omrQty(), rate.getOmr());
+            addReturnRow(out, r, "단행본", b.etcQty(), rate.getEtc());
+            addReturnRow(out, r, "라벨", b.labelQty(), rate.getLabel());
+        }
+        return out;
+    }
+
+    /**
+     * 회수 행 한 줄 — 자재구분 하나 몫. <b>0원이면 만들지 않는다</b>(출고 쪽과 같은 규칙).
+     *
+     * <p>{@code r} 은 {@code standaloneReturnedQty} 의 7칸이다
+     * — [상품id, 상품코드, 상품명, 학년, 거래처코드, 거래처명, 반품수량].
+     */
+    private static void addReturnRow(List<com.daesung.sales.dsre.gateway.ReturnCostDetailRow> out,
+                                     Object[] r, String materialType, long qty, int unitCost) {
+        if (qty <= 0 || unitCost <= 0) {
+            return;
+        }
+        out.add(new com.daesung.sales.dsre.gateway.ReturnCostDetailRow(
+                null,                       // 회수일자 — 기간 합계라 대표 날짜가 없다
+                0, "(단독)", materialType,   // 자재코드·자재명 — 자재 단위가 아니라 구분 단위다
+                "NORMAL",                   // 단독은 사고(ACCIDENT) 축이 없다 — 반품만이다
+                (String) r[1], (String) r[2], (String) r[3],
+                0, "(단독)",                 // 시행코드·시행명 — DSRE 축이 없다
+                (String) r[4], (String) r[5], null,
+                (int) qty, unitCost, qty * unitCost));
+    }
+
     private List<Object[]> shippedQty(LocalDate from, LocalDate to) {
         List<Long> purchasers = inventoryTxnRepository.purchaserPartnerIds();
         boolean noPurchaser = purchasers.isEmpty();   // 빈 컬렉션은 JPQL in 에서 문법 오류

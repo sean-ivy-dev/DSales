@@ -135,6 +135,64 @@ class StandaloneLogisCostIntegrationTest extends IntegrationTestSupport {
                 "items", List.of(item))).path("success").asBoolean()).isTrue();
     }
 
+    @Test
+    @DisplayName("★★단독 상품의 **회수(반품) 작업비** — 예전엔 통째로 0이었다(발주처 2026-11-23 4번)")
+    void 단독_회수작업비() {
+        Long pt = createId("/masters/clients",
+                Map.of("code", "SLRP" + SFX, "name", "회수거래처", "type", "NORMAL"));
+        Long wh = createId("/masters/warehouses",
+                Map.of("code", "SLRW" + SFX, "name", "회수물류", "type", "MAIN"));
+        Long sup = createId("/masters/clients",
+                Map.of("code", "SLRS" + SFX, "name", "회수인쇄", "type", "NORMAL"));
+        assertThat(post("/stock/inbound", Map.of(
+                "processedDate", "2090-03-02", "supplierClientId", sup,
+                "destinationWarehouseId", wh,
+                "items", List.of(Map.of("productId", standalone, "unitCost", 100, "qty", 999))))
+                .path("success").asBoolean()).isTrue();
+        sell(pt, wh, standalone, 20);
+
+        // 출고 창고를 **고른** 반품 = 출고 반품(실물이 돌아왔다) → 회수 작업이 있었다.
+        assertThat(post("/sales/return-inbound", Map.of(
+                "returnDate", DATE, "partnerId", pt, "warehouseId", wh,
+                "items", List.of(Map.of("productId", standalone, "qty", 5,
+                        "unitPrice", 10000, "supplyRate", 70))))
+                .path("success").asBoolean()).isTrue();
+
+        var rows = standaloneService.returnRows(java.time.LocalDate.parse("2090-03-01"),
+                java.time.LocalDate.parse("2090-03-31")).stream()
+                .filter(r -> ("SLA" + SFX).equals(r.productCode()))
+                .filter(r -> ("SLRP" + SFX).equals(r.partnerCode()))
+                .toList();
+
+        assertThat(rows).as("‼️비면 단독 상품 회수가 또 0이다").isNotEmpty();
+        // 자재구분별로 쪼개져 나온다 — 시험지(1+해설지1=2개 ×5) · OMR(2개 ×5)
+        assertThat(rows).extracting("materialType", "qty", "unitCost", "amount")
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple("시험지", 10, 50, 500L),
+                        org.assertj.core.groups.Tuple.tuple("OMR", 10, 30, 300L));
+        // ‼️노무비(기본 100 · 출고 200)가 섞이면 안 된다 — 레거시 회수엔 그 칸이 없다.
+        assertThat(rows.stream().mapToLong(r -> r.amount()).sum())
+                .as("‼️800 이 아니면 노무비가 끼어든 것이다").isEqualTo(800L);
+    }
+
+    @Test
+    @DisplayName("‼️**창고 없는 반품(매출 반품)** 은 회수 작업비를 매기지 않는다 — 실물이 안 돌아왔다")
+    void 창고없는_반품은_회수없음() {
+        Long pt = createId("/masters/clients",
+                Map.of("code", "SLNP" + SFX, "name", "매출반품거래처", "type", "NORMAL"));
+        assertThat(post("/sales/entries", Map.of(
+                "salesDate", DATE, "partnerId", pt,
+                "items", List.of(Map.of("productId", standalone, "shipmentType", "RETURN",
+                        "qty", 9, "unitPrice", 10000, "supplyRate", 70))))
+                .path("success").asBoolean()).isTrue();
+
+        assertThat(standaloneService.returnRows(java.time.LocalDate.parse("2090-03-01"),
+                java.time.LocalDate.parse("2090-03-31")).stream()
+                .anyMatch(r -> ("SLNP" + SFX).equals(r.partnerCode())))
+                .as("‼️잡히면 실물이 안 돌아온 반품에 작업비를 매긴 것이다")
+                .isFalse();
+    }
+
     private com.daesung.sales.dsre.gateway.LogisCostDetailRow rowOf(String productCode) {
         return standaloneService.rows(java.time.LocalDate.parse("2090-03-01"),
                         java.time.LocalDate.parse("2090-03-31")).stream()
@@ -186,7 +244,11 @@ class StandaloneLogisCostIntegrationTest extends IntegrationTestSupport {
         // ★운영과 같은 모양으로 만든다 — 작업구분에 **기본·출고 작업비가 0**이다.
         //   그 둘이 있으면 자재가 없어도 노무비가 잡혀 행이 정상적으로 나온다(그게 맞다).
         //   운영의 '생명과학 SET'이 바로 basic=0·trade=0 + 자재 0건이라 전 항목이 0원이었다.
-        int zeroLabor = 7500 + (int) (System.nanoTime() % 400);
+        // ‼️**같은 클래스의 `packType`(7000~8999)과 겹치지 않게** 띄운다.
+        //   전엔 7500~7899 를 뽑아 그 범위 안에 들어 있었고, 두 값이 맞아떨어지면
+        //   작업구분 등록이 "이미 있는 코드"로 거부돼 전체 실행에서만 간헐로 깨졌다
+        //   (단독 실행은 통과 — 그래서 원인이 안 보였다).
+        int zeroLabor = packType + 10_000;
         assertThat(post("/masters/work-types", Map.of(
                 "packType", zeroLabor, "name", "노무비없음" + SFX,
                 "paper", 50, "omr", 30, "etc", 10, "label", 5,

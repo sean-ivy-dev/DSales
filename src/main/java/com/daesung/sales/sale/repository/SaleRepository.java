@@ -1395,6 +1395,47 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
                                      @Param("purchaserIds") Collection<Long> purchaserIds);
 
     /**
+     * <b>단독 상품</b>(수불부노출 Y)의 기간 <b>반품 수량</b> — <b>회수</b> 작업비에 쓴다.
+     *
+     * <p>근거: 발주처 2026-11-23 4번 — "유상 · 무상 출고 + <b>반품(회수) 비용 포함</b>".
+     * 출고({@link #standaloneShippedQty})는 매출·무상만 세고 반품을 뺀다. 반품은 빼는 게
+     * 아니라 <b>회수라는 다른 축</b>이다(레거시도 출고/회수를 라디오로 갈라 놓았다).
+     * 그 회수 축이 DSRE 기준({@code tbl_wol_*})뿐이라 <b>단독 상품은 회수가 통째로 0</b>이었다.
+     *
+     * <p>★조건은 출고와 <b>똑같이</b> 둔다 — {@code ledgerVisible=true}(병행 상품 이중계산 방지)·
+     * 매입처 제외·{@link #SHIPPED_PREDICATE}(창고 없는 매출·특강·정산매출 제외).
+     * 다른 것은 회계구분이 <b>RETURN 뿐</b>이라는 점 하나다. 조건이 갈리면 출고와 회수가
+     * 서로 다른 집합을 세어 합계가 안 맞는다.
+     *
+     * <p>‼️<b>창고 없는 반품(「매출 반품」)은 {@link #SHIPPED_PREDICATE} 가 이미 뺀다.</b>
+     * 그 반품은 실물이 돌아오지 않았으니 회수 작업도 없었다 — 작업비를 매기면 안 된다.
+     *
+     * <p>반환 Object[]: {@link #standaloneShippedQty}와 <b>같은 7칸</b>.
+     */
+    @Query("""
+            select p.id, p.code, p.name, coalesce(p.grade, ''),
+                   pt.code, pt.name, sum(s.qty)
+              from Sale s join s.product p join s.partner pt
+                   left join s.warehouse w
+             where s.canceled = false
+               and s.deletedAt is null
+               and p.ledgerVisible = true
+               and s.salesCategory = com.daesung.sales.salestype.entity.SalesCategory.RETURN
+               and s.salesDate between :from and :to
+               and (:noPurchaser = true or pt.id not in :purchaserIds)
+               and (""" + SHIPPED_PREDICATE + """
+                   )
+             group by p.id, p.code, p.name, coalesce(p.grade, ''), pt.code, pt.name
+             having sum(s.qty) > 0
+             order by p.code, pt.code
+            """)
+    List<Object[]> standaloneReturnedQty(@Param("from") LocalDate from,
+                                         @Param("to") LocalDate to,
+                                         @Param("lectureDivisions") Collection<String> lectureDivisions,
+                                         @Param("noPurchaser") boolean noPurchaser,
+                                         @Param("purchaserIds") Collection<Long> purchaserIds);
+
+    /**
      * 계산서·세금계산서 월별신고(38p): 월×발행유형으로 매출/반품/세액 집계. 취소 제외.
      * 발행유형 3종 — 앞 조건이 이긴다(배타):
      * <pre>

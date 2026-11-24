@@ -51,6 +51,9 @@ public class LogisticsController {
     private final com.daesung.sales.common.excel.ExcelExportUtil excel;
     private final com.daesung.sales.logistics.service.WorkTypeService workTypeService;
     private final LogisCostBulkService logisCostBulkService;
+    /** 단독 상품(수불부노출 Y) 회수 작업비 — DSRE 축에 없는 몫. */
+    private final com.daesung.sales.logistics.service.StandaloneLogisCostService
+            standaloneLogisCostService;
 
     @Operation(summary = "출고 물류비 계산(신청 단위)",
             description = "DSRE2에서 자재수량×단가 집계 + 인원함수 호출로 출고 물류비 산출. "
@@ -187,7 +190,46 @@ public class LogisticsController {
             @RequestParam(name = "toDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @Parameter(description = "구분(전체/반품/사고)", example = "ALL")
             @RequestParam(defaultValue = "ALL") LogisMode mode) {
-        return ApiResponse.success(dsreGateway.calcReturnPeriod(from, to, mode));
+        PeriodLogisCost dsre = dsreGateway.calcReturnPeriod(from, to, mode);
+        // ★★단독 상품 회수를 총계에도 더한다 — 명세에만 더하면 **행 합 ≠ 총계**가 되고,
+        //   그 둘이 같다는 것이 이 두 엔드포인트의 약속이다(명세 Swagger 에 명시).
+        //   ‼️사고(ACCIDENT)만 볼 때는 더하지 않는다 — 단독은 사고 축이 없다.
+        if (mode == LogisMode.ACCIDENT) {
+            return ApiResponse.success(dsre);
+        }
+        return ApiResponse.success(addStandaloneReturn(dsre,
+                standaloneLogisCostService.returnRows(from, to)));
+    }
+
+    /**
+     * 회수 총계에 <b>단독 상품 몫</b>을 자재구분별로 더한다.
+     *
+     * <p>★인원비·신청건수는 건드리지 않는다 — 회수에는 그 축이 없다
+     * (레거시 회수 쿼리에 기본작업비·출고비 칸이 아예 없다).
+     */
+    private static PeriodLogisCost addStandaloneReturn(PeriodLogisCost base,
+            java.util.List<com.daesung.sales.dsre.gateway.ReturnCostDetailRow> rows) {
+        if (rows.isEmpty()) {
+            return base;
+        }
+        long paper = 0;
+        long omr = 0;
+        long etc = 0;
+        long label = 0;
+        for (var r : rows) {
+            switch (r.materialType()) {
+                case "OMR" -> omr += r.amount();
+                case "라벨" -> label += r.amount();
+                case "단행본" -> etc += r.amount();
+                default -> paper += r.amount();
+            }
+        }
+        long material = base.materialAmount() + paper + omr + etc + label;
+        return new PeriodLogisCost(base.kind(), base.mode(), base.from(), base.to(),
+                base.paperAmount() + paper, base.omrAmount() + omr,
+                base.etcAmount() + etc, base.labelAmount() + label,
+                material, base.inwonTotal(), base.laborAmount(),
+                material + base.laborAmount(), base.reqCount());
     }
 
     @Operation(summary = "회수 물류비 명세(행 + 소계)",
@@ -223,8 +265,18 @@ public class LogisticsController {
             @RequestParam(defaultValue = "ALL") LogisMode mode,
             @Parameter(description = "시행코드 **다중선택**(좌측 시행 트리 체크박스). 미지정=전체")
             @RequestParam(required = false) java.util.List<Integer> dtlCds) {
-        return ApiResponse.success(ReturnCostDetailResponse.of(from, to, mode,
-                dsreGateway.returnDetail(from, to, mode, dtlCds)));
+        // ★★단독 상품(수불부노출 Y)의 회수도 합친다(발주처 2026-11-23 4번
+        //   "유상·무상 출고 + **반품(회수) 비용 포함**"). DSRE 회수 축(tbl_wol_*)에는
+        //   단독 상품이 없어 **회수가 통째로 0**이었다.
+        //   ‼️`mode=ACCIDENT`(사고)만 볼 때는 더하지 않는다 — 단독은 사고 축이 없고 반품뿐이다.
+        //   ‼️시행을 고른 조회(`dtlCds`)에도 더하지 않는다 — 단독은 DSRE 시행이 없어
+        //     어느 시행에도 속하지 않는다. 더하면 고른 시행과 무관한 금액이 섞인다.
+        java.util.List<com.daesung.sales.dsre.gateway.ReturnCostDetailRow> rows =
+                new java.util.ArrayList<>(dsreGateway.returnDetail(from, to, mode, dtlCds));
+        if (mode != LogisMode.ACCIDENT && (dtlCds == null || dtlCds.isEmpty())) {
+            rows.addAll(standaloneLogisCostService.returnRows(from, to));
+        }
+        return ApiResponse.success(ReturnCostDetailResponse.of(from, to, mode, rows));
     }
 
     // ── 물류단가 관리(기초관리 · DSRE2 tbl_logis_cost write-back) — 근거: 레거시 물류비용등록.vb ──
