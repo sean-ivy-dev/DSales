@@ -50,6 +50,15 @@ public interface DsreGateway {
     java.util.List<ReturnCostDetailRow> returnDetail(java.time.LocalDate from, java.time.LocalDate to,
                                                      LogisMode mode);
 
+    /**
+     * 위와 같고 <b>시행 다중 필터</b>만 더한다 — 좌측 시행 트리 체크박스가 쓰는 축
+     * (발주처 2026-11-23 4번 8쪽 "회수전체 화면도 출고전체처럼 좌측 시행 트리").
+     * 출고({@code outboundDetail})가 {@code dtlCds} 를 받는 것과 같은 모양이다.
+     */
+    java.util.List<ReturnCostDetailRow> returnDetail(java.time.LocalDate from, java.time.LocalDate to,
+                                                     LogisMode mode,
+                                                     java.util.Collection<Integer> dtlCds);
+
     // ── 물류단가 관리(DSRE2 tbl_logis_cost write-back) — 근거: 레거시 물류비용등록.vb ──
 
     /** 물류단가 전체 목록(DTL_CD 오름차순). */

@@ -58,8 +58,20 @@ public class ProductLogisRateController {
             @Parameter(description = """
                     상품 연도(미지정=전체). **분류코드 2~5번째**에서 뽑은 값이다
                     (레거시 `substring(catCode,2,4)`). 좌측 연도 트리와 같은 축이다.""")
-            @RequestParam(required = false) Integer productYear) {
-        return ApiResponse.success(service.search(packType, keyword, productYear));
+            @RequestParam(required = false) Integer productYear,
+            @Parameter(description = """
+                    법인 — **기본값 `DSLAB`(연구소)**. 발주처 2026-11-23 3번
+                    "상품 목록에 리브커넥스 법인 상품이 보인다 — **연구소만 남게**".
+
+                    판정은 이미 데이터에 있다(상품코드 접두어 `DL-` 연구소 / `DT-` 리브커넥스).
+                    `DSTXTBOOK` 을 주면 리브커넥스 것만, 빈 문자열 대신 **생략하면 연구소**다.
+                    전 법인을 보려면 `allCorp=true` 를 준다.""")
+            @RequestParam(required = false, defaultValue = "DSLAB")
+            com.daesung.sales.common.corp.Corp corp,
+            @Parameter(description = "법인을 가리지 않고 전부 — 기본 false(연구소만)")
+            @RequestParam(required = false, defaultValue = "false") boolean allCorp) {
+        return ApiResponse.success(service.search(packType, keyword, productYear,
+                allCorp ? null : corp));
     }
 
     @Operation(summary = "물류비용등록 엑셀 저장(F-39)",
@@ -74,7 +86,12 @@ public class ProductLogisRateController {
     public org.springframework.http.ResponseEntity<byte[]> export(
             @RequestParam(required = false) Integer packType,
             @RequestParam(required = false) String keyword,
-            @RequestParam(required = false) Integer productYear) {
+            @RequestParam(required = false) Integer productYear,
+            @Parameter(description = "법인 — 기본 DSLAB(연구소). 목록과 같은 조건이다")
+            @RequestParam(required = false, defaultValue = "DSLAB")
+            com.daesung.sales.common.corp.Corp corp,
+            @Parameter(description = "법인을 가리지 않고 전부 — 기본 false")
+            @RequestParam(required = false, defaultValue = "false") boolean allCorp) {
         var cols = java.util.List.of(
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("상품코드", "productCode"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("상품명", "productName"),
@@ -92,7 +109,7 @@ public class ProductLogisRateController {
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("개별수정", "overridden"),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Col("변경일", "changedAt"));
         byte[] xlsx = excel.toXlsx("물류비용등록", cols,
-                service.search(packType, keyword, productYear),
+                service.search(packType, keyword, productYear, allCorp ? null : corp),
                 new com.daesung.sales.common.excel.ExcelExportUtil.Heading(
                         "물류비용등록", (productYear == null) ? null : "상품년도 : " + productYear));
         return excel.asDownload(xlsx, "물류비용등록.xlsx");
@@ -116,8 +133,19 @@ public class ProductLogisRateController {
             @Parameter(description = "단가 등록분만 보기. 기본 false=전체")
             @RequestParam(required = false, defaultValue = "false") boolean withRateOnly,
             @Parameter(description = "키워드 — 상품코드·상품명·분류코드·분류명(부분일치)")
-            @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(service.tree(withRateOnly, keyword));
+            @RequestParam(required = false) String keyword,
+            @Parameter(description = """
+                    법인 — **기본값 `DSLAB`(연구소)**. 발주처 2026-11-23 3번
+                    "상품 목록에 리브커넥스 법인 상품이 보인다 — **연구소만 남게**".
+
+                    판정은 이미 데이터에 있다(상품코드 접두어 `DL-` 연구소 / `DT-` 리브커넥스).
+                    `DSTXTBOOK` 을 주면 리브커넥스 것만, 빈 문자열 대신 **생략하면 연구소**다.
+                    전 법인을 보려면 `allCorp=true` 를 준다.""")
+            @RequestParam(required = false, defaultValue = "DSLAB")
+            com.daesung.sales.common.corp.Corp corp,
+            @Parameter(description = "법인을 가리지 않고 전부 — 기본 false(연구소만)")
+            @RequestParam(required = false, defaultValue = "false") boolean allCorp) {
+        return ApiResponse.success(service.tree(withRateOnly, keyword, allCorp ? null : corp));
     }
 
     @Operation(summary = "물류단가 신규등록",

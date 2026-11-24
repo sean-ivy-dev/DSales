@@ -42,10 +42,25 @@ public class ProductLogisRateService {
     private final WorkTypeRepository workTypeRepository;
     private final CurrentAuditor currentAuditor;
 
-    /** 목록. 작업구분·키워드(상품코드·상품명) 필터. */
+    /**
+     * 목록. 작업구분·키워드(상품코드·상품명)·<b>법인</b> 필터.
+     *
+     * <p>★★<b>법인 기본값은 연구소다</b>(발주처 2026-11-23 3번 — "상품 목록(상품년도 2026)에
+     * 리브커넥스 법인 상품(감각 2과목·대성학원 평가고사·국수잔치 등)이 보인다. <b>연구소만 남게</b>").
+     *
+     * <p>판정은 <b>이미 데이터에 있다</b> — V125·V126 이 상품코드 접두어로 채워 뒀다
+     * (`DL-` 연구소 / `DT-` 리브커넥스). 레거시 소스가 「대성교재 법인 = 리브커넥스(주)」라고
+     * 직접 적어 두었고({@code 외상매출장조회.vb:58} + {@code Common.vb:23}), 우리 이관이
+     * 그 법인 자료에 `DT-` 를 붙였다. 새로 판정할 것이 없다.
+     *
+     * <p>‼️접두어가 없는 상품 4종은 법인이 <b>비어 있다</b> — 신규 등록분은 연구소로
+     * 자동 채워지지만({@code Product#fillCorp}) 이관 당시 접두어 없는 것은 판정 불가로 남겼다.
+     * 그 넷은 <b>연구소로 본다</b> — 안 그러면 어느 화면에도 안 나와 사라진다.
+     */
     @Transactional(readOnly = true)
     public List<ProductLogisRateResponse> search(Integer packType, String keyword,
-                                                 Integer productYear) {
+                                                 Integer productYear,
+                                                 com.daesung.sales.common.corp.Corp corp) {
         String kw = Keywords.norm(keyword);
         List<ProductLogisRate> rows = rateRepository.search(packType, (kw == null) ? null : "%" + kw + "%");
         Map<Integer, String> names = workTypeNames();
@@ -54,6 +69,9 @@ public class ProductLogisRateService {
             // ★연도는 분류코드에서 파생되는 값이라 SQL로 걸러내지 않고 여기서 본다.
             //   컬럼이 아니므로 인덱스를 탈 수도 없고, 이 목록은 단가 등록분뿐이라 양이 작다.
             if (productYear != null && !productYear.equals(r.getProduct().catCodeYear())) {
+                continue;
+            }
+            if (!corpMatches(r.getProduct(), corp)) {
                 continue;
             }
             out.add(ProductLogisRateResponse.from(r, names.get(r.getPackType())));
@@ -73,9 +91,24 @@ public class ProductLogisRateService {
      * <p>{@code withRateOnly=true} 면 <b>단가가 등록된 상품만</b>. 기본은 전체다 —
      * 트리에서 상품을 골라 단가를 <b>새로 등록</b>하는 화면이라 미등록 상품이 보여야 한다.
      */
+    /**
+     * 법인 일치 — {@code corp} 가 {@code null} 이면 <b>전 법인</b>.
+     *
+     * <p>★상품의 법인이 비어 있으면 <b>연구소로 본다</b>(접두어 없는 이관분 4종).
+     * 비었다고 빼면 그 넷이 어느 화면에도 안 나와 사라진다.
+     */
+    private static boolean corpMatches(Product p, com.daesung.sales.common.corp.Corp corp) {
+        if (corp == null) {
+            return true;
+        }
+        var v = (p.getCorp() == null) ? com.daesung.sales.common.corp.Corp.DSLAB : p.getCorp();
+        return v == corp;
+    }
+
     @Transactional(readOnly = true)
     public List<com.daesung.sales.logistics.dto.ProductTreeNode> tree(boolean withRateOnly,
-                                                                      String keyword) {
+                                                                      String keyword,
+                                                                      com.daesung.sales.common.corp.Corp corp) {
         String kw = Keywords.norm(keyword);
         java.util.Set<Long> rated = withRateOnly
                 ? rateRepository.findAll().stream()
@@ -83,6 +116,7 @@ public class ProductLogisRateService {
                 : java.util.Set.of();
         List<Product> products = productRepository.findAll().stream()
                 .filter(Product::isUseYn)
+                .filter(p -> corpMatches(p, corp))
                 .filter(p -> !withRateOnly || rated.contains(p.getId()))
                 .filter(p -> kw == null
                         || contains(p.getCode(), kw) || contains(p.getName(), kw)

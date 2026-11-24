@@ -200,7 +200,19 @@ public class LogisticsController {
                       `tbl_logis_cost` 특수행(DTL_CD=0)의 최신값을 쓴다.
                       그래서 **행 합 = `GET /logistics-costs/return` 총계**가 성립한다.
                       (따로 계산하면 두 화면 숫자가 갈리고, 그때 담당자는 둘 다 안 믿는다.)
-                    · 소계는 응답의 `byType`(자재구분별)·`byMode`(사고/반품별)로 함께 준다.""")
+                    · 소계는 **다섯 축**으로 함께 준다 — `byType`(자재구분)·`byMode`(사고/반품)
+                      **`byProduct`(상품)·`byExam`(시행)·`byPartner`(거래처)**.
+
+                    ★**상품·시행·거래처가 행에 함께 나온다**(발주처 2026-11-23 4번 8쪽 —
+                    "회수전체 화면도 출고전체처럼 좌측 시행 트리 + 상품·시행·거래처별 소계").
+                    예전엔 회수일·자재·구분·수량·단가·금액 여섯 칸뿐이라 트리도 소계도 못 붙였다.
+                    근거는 DSRE 표에 그대로 있다(복제본 실측, **매칭률 100%**) —
+                    반품(`tbl_wol_dtl_b`)은 거래처·시행을 직접 갖고, 사고(`tbl_wol_dtl`)는
+                    신청번호로 가져온다.
+
+                    ★**좌측 시행 트리는 출고와 같은 것**(`GET /logistics-costs/exam-tree`)을 쓴다 —
+                    그 트리는 시행 마스터에서 만들어 출고/회수와 무관하다. 잎의 `dtlCd` 를
+                    `dtlCds` 에 넘기면 그 시행만 걸린다.""")
     @GetMapping("/return/detail")
     public ApiResponse<ReturnCostDetailResponse> returnDetail(
             @Parameter(description = "시작일", required = true)
@@ -208,9 +220,11 @@ public class LogisticsController {
             @Parameter(description = "종료일", required = true)
             @RequestParam(name = "toDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @Parameter(description = "구분(전체/반품/사고)", example = "ALL")
-            @RequestParam(defaultValue = "ALL") LogisMode mode) {
-        return ApiResponse.success(
-                ReturnCostDetailResponse.of(from, to, mode, dsreGateway.returnDetail(from, to, mode)));
+            @RequestParam(defaultValue = "ALL") LogisMode mode,
+            @Parameter(description = "시행코드 **다중선택**(좌측 시행 트리 체크박스). 미지정=전체")
+            @RequestParam(required = false) java.util.List<Integer> dtlCds) {
+        return ApiResponse.success(ReturnCostDetailResponse.of(from, to, mode,
+                dsreGateway.returnDetail(from, to, mode, dtlCds)));
     }
 
     // ── 물류단가 관리(기초관리 · DSRE2 tbl_logis_cost write-back) — 근거: 레거시 물류비용등록.vb ──

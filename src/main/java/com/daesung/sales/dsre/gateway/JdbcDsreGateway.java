@@ -277,21 +277,45 @@ public class JdbcDsreGateway implements DsreGateway {
                    CASE WHEN c.NAME = 'OMR' THEN cost.OMR
                         WHEN c.NAME IN ('단행본','책자') THEN cost.ETC
                         WHEN c.NAME = '라벨' THEN cost.LABEL
-                        ELSE cost.PAPER END unit_cost
+                        ELSE cost.PAPER END unit_cost,
+                   -- ★상품·시행·거래처(발주처 2026-11-23 4번 8쪽 — 좌측 시행 트리 + 축별 소계).
+                   --   LEFT JOIN 이다: 시행·거래처 마스터가 비어도 **행이 사라지면 안 된다**
+                   --   (출고 명세에서 학교를 내부 조인으로 걸었다가 95%가 증발한 그 함정).
+                   pi.PROD_CD, pi.PROD_NM, pd.GRADE, t.DTL_CD, pd.DTL_NM,
+                   t.CUST_CD, cu.CUST_FNM, cu.CITY_NM
               FROM ( %s ) t
               JOIN tbl_materials_info m ON t.MAT_CD = m.MAT_CD
               JOIN tbl_comon_info c ON m.MAT_GN = c.CMD_CD
               JOIN (SELECT PAPER,OMR,ETC,LABEL FROM tbl_logis_cost
                      WHERE DTL_CD=0 ORDER BY idx DESC LIMIT 1) cost
+              LEFT JOIN tbl_product_dtl pd ON pd.DTL_CD = t.DTL_CD
+              LEFT JOIN tbl_product_info pi ON pi.PROD_CD = pd.PROD_CD
+              LEFT JOIN tbl_cust_info cu ON cu.CUST_CD = t.CUST_CD
              WHERE t.SDATE BETWEEN ? AND ?
-             ORDER BY t.SDATE, m.MAT_NM
+               -- ★시행 다중 필터 — 출고 명세와 같은 방식이다.
+               --   ‼️IN 절을 문자열로 조립하지 않는다(게이트규칙) — 쉼표로 이은 값 하나를
+               --     바인딩해 FIND_IN_SET 으로 푼다. 값이 없으면 조건 자체가 참이다.
+               AND (? IS NULL OR FIND_IN_SET(t.DTL_CD, ?) > 0)
+             ORDER BY pi.PROD_CD, pd.GRADE DESC, t.DTL_CD DESC, t.CUST_CD, t.SDATE, m.MAT_NM
             """;
 
     // 명세는 사고/반품을 구분해 보여줘야 해서 구분값을 실어 UNION 한다(총계는 안 쓰던 컬럼).
-    private static final String WOL_ACCIDENT_D =
-            "SELECT MAT_CD, CNT, REPLACE(REG_DATE,'-','') SDATE, 'ACCIDENT' MODE_GN FROM tbl_wol_dtl";
+    //
+    // ★★**두 표의 모양이 다르다**(복제본 실측 2026-11-24):
+    //   · 반품 `tbl_wol_dtl_b` — CUST_CD·DTL_CD 를 **직접** 갖는다(24,410행 전부 매칭).
+    //   · 사고 `tbl_wol_dtl`  — REQ_CD(신청번호)만 있어 `tbl_request_info` 로 가져온다
+    //                           (4,308행 전부 매칭).
+    //   그래서 UNION 전에 양쪽을 **같은 칸(CUST_CD·DTL_CD)** 으로 맞춰 둔다 —
+    //   바깥 쿼리가 둘을 구분하지 않아도 되도록.
+    private static final String WOL_ACCIDENT_D = """
+            SELECT w.MAT_CD, w.CNT, REPLACE(w.REG_DATE,'-','') SDATE, 'ACCIDENT' MODE_GN,
+                   r.CUST_CD, r.DTL_CD
+              FROM tbl_wol_dtl w
+              LEFT JOIN tbl_request_info r ON r.REQ_CD = w.REQ_CD
+            """;
     private static final String WOL_NORMAL_D =
-            "SELECT MAT_CD, CNT, REPLACE(REG_DATE,'-','') SDATE, 'NORMAL' MODE_GN FROM tbl_wol_dtl_b";
+            "SELECT MAT_CD, CNT, REPLACE(REG_DATE,'-','') SDATE, 'NORMAL' MODE_GN, "
+            + "CUST_CD, DTL_CD FROM tbl_wol_dtl_b";
 
     // ── 물류단가 관리(DSRE2 tbl_logis_cost write-back) ─────────────────────────────
     // 상품명·시행명을 함께 뽑는다(정본 10.물류비용등록 목록 컬럼).
@@ -401,21 +425,32 @@ public class JdbcDsreGateway implements DsreGateway {
 
     @Override
     public List<ReturnCostDetailRow> returnDetail(LocalDate from, LocalDate to, LogisMode mode) {
+        return returnDetail(from, to, mode, null);
+    }
+
+    @Override
+    public List<ReturnCostDetailRow> returnDetail(LocalDate from, LocalDate to, LogisMode mode,
+                                                  java.util.Collection<Integer> dtlCds) {
         String source = switch (mode) {
             case ACCIDENT -> WOL_ACCIDENT_D;
             case NORMAL -> WOL_NORMAL_D;
             case ALL -> WOL_ACCIDENT_D + " UNION ALL " + WOL_NORMAL_D;
         };
+        String dtlList = csv(dtlCds);
         // ‼️%s 자리에 들어가는 것은 **우리가 쓴 상수 셋 중 하나**다(사용자 입력이 아니다).
-        //   총계 쿼리(calcReturnPeriod)가 쓰는 방식과 같다 — 기간은 바인딩으로 넘긴다.
+        //   총계 쿼리(calcReturnPeriod)가 쓰는 방식과 같다 — 기간·시행목록은 바인딩으로 넘긴다.
         return dsreJdbcTemplate.query(String.format(RETURN_DETAIL_TEMPLATE, source), (rs, i) -> {
             int qty = rs.getInt("CNT");
             int unit = rs.getInt("unit_cost");
             return new ReturnCostDetailRow(
                     LocalDate.parse(rs.getString("SDATE"), YYYYMMDD),
                     rs.getInt("MAT_CD"), rs.getString("MAT_NM"), rs.getString("mat_gn"),
-                    rs.getString("MODE_GN"), qty, unit, (long) qty * unit);
-        }, from.format(YYYYMMDD), to.format(YYYYMMDD));
+                    rs.getString("MODE_GN"),
+                    rs.getString("PROD_CD"), rs.getString("PROD_NM"), rs.getString("GRADE"),
+                    rs.getInt("DTL_CD"), rs.getString("DTL_NM"),
+                    rs.getString("CUST_CD"), rs.getString("CUST_FNM"), rs.getString("CITY_NM"),
+                    qty, unit, (long) qty * unit);
+        }, from.format(YYYYMMDD), to.format(YYYYMMDD), dtlList, dtlList);
     }
 
     private static final DateTimeFormatter YYYYMMDD = DateTimeFormatter.BASIC_ISO_DATE;
