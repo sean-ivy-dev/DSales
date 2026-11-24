@@ -461,6 +461,29 @@ public class ReceivableController {
                                 x.productCode(), x.productName()})));
     }
 
+    @Operation(summary = "외상매출장 — 전체 거래처를 **한 장부로**",
+            description = """
+                    기존 프로그램의 「거래처 전체」 조회와 같은 모양 — **이어진 한 장부**다
+                    (발주처 2026-11-23 9번: "거래처 전체(ALL) = 기존처럼 전체 거래처 하나의 장부").
+
+                    · `/ar-ledger/all` 은 **거래처마다 한 벌**(117묶음)이라 화면이 묶음을 늘어놓게 된다.
+                      이 경로는 그 명세행을 **날짜순으로 다시 늘어놓아** 한 장부로 만든다.
+                    · **이월**은 전 거래처 합이고, **일계·월계·누계**도 거래처를 가로질러 쌓인다.
+                    · 같은 날은 **거래처코드 순**이다 — 레거시 인쇄물 순서이고,
+                      순서가 흔들리면 같은 조회를 두 번 해도 줄 차례가 달라진다.
+                    · 머리말의 거래처 칸은 비어 있다(한 곳의 장부가 아니다). 이름은 `전체 거래처`.""")
+    @GetMapping("/ar-ledger/all/merged")
+    public ApiResponse<ArLedgerResponse> arLedgerMerged(
+            @Parameter(description = "시작일(yyyy-MM-dd, 미지정 시 올해 1/1)") @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @Parameter(description = "종료일(yyyy-MM-dd, 미지정 시 오늘)") @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @Parameter(description = "신고대상만(조회 화면의 그 체크박스)")
+            @RequestParam(required = false, defaultValue = "false") boolean onlyReportable) {
+        return ApiResponse.success(
+                receivableService.arLedgerMerged(fromDate, toDate, onlyReportable));
+    }
+
     @Operation(summary = "외상매출장 — 전체 거래처(24p)",
             description = """
                     거래처별 원장을 한 번에 낸다. **거래처마다 한 벌씩** 담긴다 —

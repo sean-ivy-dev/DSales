@@ -1044,8 +1044,13 @@ public class ReceivableService {
                 v[4] += total;
                 v[7] += total;
             } else if (isReturn) {
-                v[5] -= s.getQty();
-                v[6] -= total;
+                // ★★반품 칸은 **양수로** 담는다(발주처 2026-11-23 9번, 기존 프로그램과 같게).
+                //   칸 이름이 이미 「반품 수량」·「반품 금액」이라 거기 음수를 넣으면
+                //   읽는 사람이 **두 번 빼서** 이해한다. 기존 프로그램도 양수로 찍는다.
+                //   ‼️채권(v[7])은 그대로 **빼는 쪽**이다 — 보여 주는 칸만 부호를 바꾼 것이고
+                //     잔액 계산은 손대지 않았다(이월+매출+세액+유가교사용−반품+입고−수금).
+                v[5] += s.getQty();
+                v[6] += total;
                 v[7] -= total;
             }
         }
@@ -1155,6 +1160,89 @@ public class ReceivableService {
         }
         return new ArLedgerResponse(partner.getId(), partner.getCode(), partner.getDsreCode(),
                 partner.getName(), from, to,
+                supplierProperties.name(), supplierProperties.bankAccount(),
+                opening, running, lines);
+    }
+
+    /**
+     * 외상매출장 <b>전체 거래처를 한 장부로</b> 합친다(발주처 2026-11-23 9번).
+     *
+     * <p>‼️{@link #arLedgerAll}은 <b>거래처마다 장부 하나</b>를 돌려준다(117묶음).
+     * 기존 프로그램은 「거래처 전체」로 뽑으면 <b>이어진 한 장부</b>가 나온다 —
+     * 이월도 전체 합이고, 일계·월계·누계도 전 거래처를 가로질러 쌓인다.
+     *
+     * <p>★<b>계산을 새로 짜지 않는다.</b> 거래처별 장부의 <b>명세행만</b> 뽑아
+     * 날짜순으로 다시 늘어놓고, 소계는 {@link #accumulate}·{@code agg} 를 그대로 쓴다.
+     * 한 장부를 만드는 규칙이 두 벌이 되면 두 화면의 숫자가 갈린다.
+     *
+     * <p>★같은 날에는 <b>거래처 순</b>으로 둔다 — 레거시 인쇄물이 그 순서이고,
+     * 순서가 흔들리면 같은 조회를 두 번 해도 줄 차례가 달라진다.
+     */
+    @Transactional(readOnly = true)
+    public ArLedgerResponse arLedgerMerged(LocalDate fromDate, LocalDate toDate,
+                                           boolean onlyReportable) {
+        LocalDate from = (fromDate != null) ? fromDate : LocalDate.now().withDayOfYear(1);
+        LocalDate to = (toDate != null) ? toDate : LocalDate.now();
+        List<ArLedgerResponse> each = arLedgerAll(fromDate, toDate, onlyReportable);
+
+        long opening = each.stream().mapToLong(ArLedgerResponse::opening).sum();
+
+        // (거래처코드, 날짜) 순으로 명세행만 모은다. 소계행은 거래처별 값이라 버린다.
+        record Item(String partnerCode, ArLedgerResponse.Line line) { }
+        List<Item> items = new ArrayList<>();
+        for (ArLedgerResponse led : each) {
+            for (ArLedgerResponse.Line l : led.lines()) {
+                if ("DETAIL".equals(l.rowType())) {
+                    items.add(new Item(led.partnerCode(), l));
+                }
+            }
+        }
+        items.sort(java.util.Comparator
+                .comparing((Item it) -> it.line().date())
+                .thenComparing(it -> (it.partnerCode() == null) ? "" : it.partnerCode()));
+
+        List<ArLedgerResponse.Line> lines = new ArrayList<>();
+        lines.add(ArLedgerResponse.Line.aggregate("OPENING", "이월 금액", null,
+                null, null, null, null, null, null, null, null, opening));
+        long running = opening;
+        long[] day = new long[8];
+        long[] month = new long[8];
+        long[] run = new long[8];
+        LocalDate curDay = null;
+        java.time.YearMonth curMonth = null;
+
+        for (Item it : items) {
+            ArLedgerResponse.Line l = it.line();
+            LocalDate d = l.date();
+            java.time.YearMonth ym = java.time.YearMonth.from(d);
+            if (curDay != null && !curDay.equals(d)) {
+                lines.add(agg("DAY_SUBTOTAL", "일 계", curDay, day, running));
+                java.util.Arrays.fill(day, 0L);
+                if (curMonth != null && !curMonth.equals(ym)) {
+                    lines.add(agg("MONTH_SUBTOTAL", "월 계", curDay, month, running));
+                    java.util.Arrays.fill(month, 0L);
+                }
+                lines.add(agg("RUNNING_TOTAL", "누 계", curDay, run, running));
+            }
+            curDay = d;
+            curMonth = ym;
+            running += nz(l.amount());
+            lines.add(ArLedgerResponse.Line.detail(l.date(), l.refNo(),
+                    l.catCode(), l.catName(), l.productCode(), l.productName(), l.supplyRate(),
+                    l.saleQty(), l.saleAmount(), l.tax(),
+                    l.teacherQty(), l.teacherAmount(), l.returnQty(), l.returnAmount(),
+                    l.collectAmount(), nz(l.amount()), running));
+            accumulate(day, l);
+            accumulate(month, l);
+            accumulate(run, l);
+        }
+        if (curDay != null) {
+            lines.add(agg("DAY_SUBTOTAL", "일 계", curDay, day, running));
+            lines.add(agg("MONTH_SUBTOTAL", "월 계", curDay, month, running));
+            lines.add(agg("RUNNING_TOTAL", "누 계", curDay, run, running));
+        }
+        // 거래처가 여럿이라 머리말의 거래처 칸은 비운다 — 한 곳의 장부가 아니다.
+        return new ArLedgerResponse(null, null, null, "전체 거래처", from, to,
                 supplierProperties.name(), supplierProperties.bankAccount(),
                 opening, running, lines);
     }
