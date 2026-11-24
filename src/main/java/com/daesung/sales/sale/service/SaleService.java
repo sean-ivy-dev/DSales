@@ -1268,8 +1268,29 @@ public class SaleService {
         //   **상수와 정확히 일치**로 간다(자재구분 '책자'에서 쓴 그 방식). 값은 둘뿐이고
         //   Swagger 에 대문자로 적혀 있다.
         boolean byDate = "DATE".equals(groupBy);
+        // ★도서별(발주처 2026-11-23 7번) — 레거시처럼 도서명 옆에 수량을 붙인다.
+        //   같은 엔드포인트라 `shippedOnly` 가 그대로 먹는다 = **화면마다 그 화면 기준**이다
+        //   (출고/반품 = 재고가 움직인 수량, 통합 매출 = 매출 수량). 발주처 요구 그대로다.
+        boolean byProduct = "PRODUCT".equals(groupBy);
 
-        List<Object[]> rows = byDate
+        List<Object[]> rows = byProduct
+                ? saleRepository.groupTotalsByProduct(from, to,
+                        MultiSelect.isAny(categories),
+                        MultiSelect.orPlaceholder(categories, SalesCategory.SALE),
+                        MultiSelect.isAny(shipmentTypes),
+                        MultiSelect.orPlaceholder(shipmentTypes, ShipmentType.NORMAL_SHIP),
+                        MultiSelect.isAny(partnerIds), MultiSelect.orPlaceholder(partnerIds, 0L),
+                        MultiSelect.isAny(warehouseIds), MultiSelect.orPlaceholder(warehouseIds, 0L),
+                        MultiSelect.isAny(schoolCodes), MultiSelect.orPlaceholder(schoolCodes, "\u0000"),
+                        MultiSelect.isAny(divisionCodes), MultiSelect.orPlaceholder(divisionCodes, "\u0000"),
+                        MultiSelect.isAny(productIds), MultiSelect.orPlaceholder(productIds, 0L),
+                        MultiSelect.isAny(normalizePairs(partnerSchools)),
+                        MultiSelect.orPlaceholder(normalizePairs(partnerSchools), "\u0000"),
+                        MultiSelect.isAny(salesChannels), hasUnclassifiedChannel(salesChannels),
+                        MultiSelect.orPlaceholder(namedChannels(salesChannels), "\u0000"),
+                        kw, tradeSeq, shippedOnly, lectureDivisionCodes(), includeCanceled,
+                        couponCount)
+                : byDate
                 ? saleRepository.groupTotalsByDate(from, to,
                         MultiSelect.isAny(categories),
                         MultiSelect.orPlaceholder(categories, SalesCategory.SALE),
@@ -1322,7 +1343,15 @@ public class SaleService {
         //   (프론트 실측 2026-11-02 I-4: 리브커넥스 70부·마이맥북스 10부가 0으로 나왔다).
         //   ‼️금액은 더하지 않는다 — 위탁출고는 매출이 아직 서지 않았다(미결).
         if (shippedOnly) {
-            List<Object[]> cons = byDate
+            List<Object[]> cons = byProduct
+                    ? saleRepository.consignGroupTotalsByProduct(from, to,
+                            MultiSelect.isAny(partnerIds), MultiSelect.orPlaceholder(partnerIds, 0L),
+                            MultiSelect.isAny(schoolCodes),
+                            MultiSelect.orPlaceholder(schoolCodes, "\u0000"),
+                            MultiSelect.isAny(productIds), MultiSelect.orPlaceholder(productIds, 0L),
+                            MultiSelect.isAny(divisionCodes),
+                            MultiSelect.orPlaceholder(divisionCodes, "\u0000"), kw)
+                    : byDate
                     ? saleRepository.consignGroupTotalsByDate(from, to,
                             MultiSelect.isAny(partnerIds), MultiSelect.orPlaceholder(partnerIds, 0L),
                             MultiSelect.isAny(schoolCodes),

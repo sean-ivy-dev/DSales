@@ -818,6 +818,51 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
                       @Param("includeCanceled") boolean includeCanceled,
                       @Param("couponCount") boolean couponCount);
 
+    /**
+     * <b>묶음 합계 — 도서별</b>(발주처 2026-11-23 7번 "도서명 옆 수량").
+     *
+     * <p>★{@link #groupTotalsByPartner} 와 <b>같은 WHERE 절</b>이라, 같은 호출에
+     * {@code shippedOnly} 를 그대로 넘기면 <b>화면마다 그 화면 기준</b>이 된다 —
+     * 출고/반품 조회는 재고가 움직인 수량, 통합 매출 조회는 매출 수량. 발주처 요구 그대로다.
+     *
+     * <p>정렬은 <b>분류코드 → 상품코드</b>다 — 화면 왼쪽 도서 트리가 그 순서라,
+     * 수량을 트리 줄에 그대로 붙일 수 있다. 이름순으로 두면 트리와 어긋난다.
+     *
+     * <p>반환 {@code Object[]}: [상품id, 상품명, 수량, 공급가액, 세액, 합계금액]
+     */
+    @Query("select s.product.id, s.product.name, "
+            + AGG_QTY + ", " + AGG_SUPPLY + ", " + AGG_TAX + ", " + AGG_TOTAL + " "
+            + "from Sale s left join s.warehouse w " + SALES_SEARCH_WHERE
+            + "group by s.product.id, s.product.name, s.product.catCode, s.product.code "
+            + "order by s.product.catCode, s.product.code")
+    List<Object[]> groupTotalsByProduct(@Param("from") LocalDate from,
+                      @Param("to") LocalDate to,
+                      @Param("anyCategory") boolean anyCategory,
+                      @Param("salesCategories") Collection<SalesCategory> salesCategories,
+                      @Param("anyShipmentType") boolean anyShipmentType,
+                      @Param("shipmentTypes") Collection<ShipmentType> shipmentTypes,
+                      @Param("anyPartner") boolean anyPartner,
+                      @Param("partnerIds") Collection<Long> partnerIds,
+                      @Param("anyWarehouse") boolean anyWarehouse,
+                      @Param("warehouseIds") Collection<Long> warehouseIds,
+                      @Param("anySchool") boolean anySchool,
+                      @Param("schoolCodes") Collection<String> schoolCodes,
+                      @Param("anyDivision") boolean anyDivision,
+                      @Param("divisions") Collection<String> divisions,
+                      @Param("anyProduct") boolean anyProduct,
+                      @Param("productIds") Collection<Long> productIds,
+                      @Param("anyPair") boolean anyPair,
+                      @Param("pairs") Collection<String> pairs,
+                      @Param("anyChannel") boolean anyChannel,
+                      @Param("unclassified") boolean unclassified,
+                      @Param("channels") Collection<String> channels,
+                      @Param("keyword") String keyword,
+                      @Param("tradeSeq") Integer tradeSeq,
+                      @Param("shippedOnly") boolean shippedOnly,
+                      @Param("lectureDivisions") Collection<String> lectureDivisions,
+                      @Param("includeCanceled") boolean includeCanceled,
+                      @Param("couponCount") boolean couponCount);
+
     /** <b>묶음 합계 — 거래일자별</b>. 근거·구조는 {@link #groupTotalsByPartner} 와 같다. */
     @Query("select s.salesDate, s.salesDate, "
             + AGG_QTY + ", " + AGG_SUPPLY + ", " + AGG_TAX + ", " + AGG_TOTAL + " "
@@ -1720,6 +1765,27 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
             + "from ConsignmentOut co join co.product cp " + CONSIGN_SHIPPED_WHERE
             + " group by co.partner.id, co.partner.name order by co.partner.name")
     List<Object[]> consignGroupTotalsByPartner(@Param("from") LocalDate from,
+                      @Param("to") LocalDate to,
+                      @Param("anyPartner") boolean anyPartner,
+                      @Param("partnerIds") Collection<Long> partnerIds,
+                      @Param("anySchool") boolean anySchool,
+                      @Param("schoolCodes") Collection<String> schoolCodes,
+                      @Param("anyProduct") boolean anyProduct,
+                      @Param("productIds") Collection<Long> productIds,
+                      @Param("anyDivision") boolean anyDivision,
+                      @Param("divisions") Collection<String> divisions,
+                      @Param("keyword") String keyword);
+
+    /**
+     * 위 메서드의 <b>도서별</b> 판 — 7번 도서별 수량에서 위탁 미결 몫.
+     *
+     * <p>★{@code cp}({@code co.product})로 묶는다 — {@link #CONSIGN_SHIPPED_WHERE} 가
+     * 이미 그 별칭을 쓴다. 정렬도 매출 쪽과 같은 <b>분류코드 → 상품코드</b>다.
+     */
+    @Query("select cp.id, cp.name, coalesce(sum(co.originalQty),0) "
+            + "from ConsignmentOut co join co.product cp " + CONSIGN_SHIPPED_WHERE
+            + " group by cp.id, cp.name, cp.catCode, cp.code order by cp.catCode, cp.code")
+    List<Object[]> consignGroupTotalsByProduct(@Param("from") LocalDate from,
                       @Param("to") LocalDate to,
                       @Param("anyPartner") boolean anyPartner,
                       @Param("partnerIds") Collection<Long> partnerIds,

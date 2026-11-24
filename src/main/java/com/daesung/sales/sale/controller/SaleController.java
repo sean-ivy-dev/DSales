@@ -339,12 +339,18 @@ public class SaleController {
 
                     · `groupBy=PARTNER`(기본) — 거래처별. 키=거래처 id, 이름=거래처명
                     · `groupBy=DATE` — 거래일자별. 키·이름 모두 날짜
+                    · **`groupBy=PRODUCT`** — 도서별. 키=상품 id, 이름=도서명.
+                      정렬은 **분류코드 → 상품코드**(화면 왼쪽 도서 트리와 같은 순서)라
+                      트리 줄에 수량을 그대로 붙일 수 있다(발주처 2026-11-23 7번).
+                      ‼️`shippedOnly` 를 **그 화면과 같은 값**으로 보내면 그 화면 기준이 된다 —
+                      출고/반품 조회(true)는 재고가 움직인 수량, 통합 매출 조회(false)는 매출 수량.
 
                     지금까지는 화면이 전량을 받아 더했다 — 1~10월 27,187건에 **약 4분**이 걸려
                     1만 건이 넘으면 소계를 못 붙였다. DB 가 세면 한 번이면 끝난다.""")
     @GetMapping("/group-totals")
     public ApiResponse<List<GroupTotalResponse>> groupTotals(
-            @Parameter(description = "묶는 단위 — PARTNER(기본) 또는 DATE", example = "PARTNER")
+            @Parameter(description = "묶는 단위 — PARTNER(기본) · DATE · PRODUCT(도서별)",
+                    example = "PARTNER")
             @RequestParam(defaultValue = "PARTNER") String groupBy,
             @Parameter(description = """
                     쿠폰 포함 카운트. **목록(`/sales`)과 같은 기본값(false)** 이다 —

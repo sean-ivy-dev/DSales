@@ -174,6 +174,46 @@ class Request1123IntegrationTest extends IntegrationTestSupport {
         assertThat(d.path("failed").asInt()).isEqualTo(1);
     }
 
+    @Test
+    @DisplayName("★7번 도서별 묶음 합계 — **화면마다 그 화면 기준**(출고/반품=재고 움직인 줄만, 통합매출=전부)")
+    void 도서별_묶음합계() {
+        String day = YEAR + "-02-11";
+        // 출고 창고가 있는 줄(= 재고가 움직인 줄)
+        assertThat(post("/sales/entries", Map.of(
+                "salesDate", day, "partnerId", partner, "warehouseId", warehouse,
+                "items", List.of(Map.of("productId", managed, "shipmentType", "NORMAL_SHIP",
+                        "qty", 7, "unitPrice", 10000, "supplyRate", 70))))
+                .path("success").asBoolean()).isTrue();
+        // 「매출만」 줄 — 출고 창고를 고르지 않았다. 출고/반품 조회는 이 줄을 뺀다.
+        assertThat(post("/sales/entries", Map.of(
+                "salesDate", day, "partnerId", partner,
+                "items", List.of(Map.of("productId", unmanaged, "shipmentType", "NORMAL_SHIP",
+                        "qty", 3, "unitPrice", 10000, "supplyRate", 70))))
+                .path("success").asBoolean()).isTrue();
+
+        String q = "?fromDate=" + day + "&toDate=" + day
+                + "&partnerIds=" + partner + "&groupBy=PRODUCT";
+
+        // 통합 매출 조회 기준 — 두 줄 다. **도서별로 갈라져** 나와야 한다(7번).
+        java.util.Map<String, Long> all = qtyByName(get("/sales/group-totals" + q));
+        assertThat(all).as("‼️도서별로 안 갈라지면 트리 줄에 수량을 붙일 수 없다: %s", all)
+                .containsEntry("요청1123 관리도서", 7L)
+                .containsEntry("요청1123 미관리도서", 3L);
+
+        // 출고/반품 조회 기준 — 창고 있는 줄만.
+        java.util.Map<String, Long> shipped =
+                qtyByName(get("/sales/group-totals" + q + "&shippedOnly=true"));
+        assertThat(shipped)
+                .as("‼️두 기준이 같은 값을 내면 7번이 요구한 '각 화면 조회 기준'이 아니다: %s", shipped)
+                .containsExactly(java.util.Map.entry("요청1123 관리도서", 7L));
+    }
+
+    private java.util.Map<String, Long> qtyByName(JsonNode res) {
+        java.util.Map<String, Long> out = new java.util.LinkedHashMap<>();
+        data(res).forEach(n -> out.put(n.path("name").asText(), n.path("qty").asLong()));
+        return out;
+    }
+
     /**
      * 표준양식. {@code warehouseToken} 이 {@code null} 이면 <b>13번째 칸을 아예 안 만든다</b>
      * (= 기존 12칸 양식), 빈 문자열이면 칸은 있고 비어 있다.
