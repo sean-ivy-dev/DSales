@@ -831,10 +831,19 @@ public class ReceivableService {
     @Transactional(readOnly = true)
     public List<ArLedgerResponse> arLedgerAll(LocalDate fromDate, LocalDate toDate,
                                               boolean onlyReportable) {
+        return arLedgerAll(fromDate, toDate, onlyReportable,
+                com.daesung.sales.common.corp.Corp.DSLAB);
+    }
+
+    /** 위와 같고 <b>법인</b>을 받는다 — {@code null} 이면 전 법인(리브커넥스 포함). */
+    @Transactional(readOnly = true)
+    public List<ArLedgerResponse> arLedgerAll(LocalDate fromDate, LocalDate toDate,
+                                              boolean onlyReportable,
+                                              com.daesung.sales.common.corp.Corp corp) {
         LocalDate from = (fromDate != null) ? fromDate : LocalDate.now().withDayOfYear(1);
         LocalDate to = (toDate != null) ? toDate : LocalDate.now();
 
-        List<Long> ids = ledgerPartnerIds(fromDate, toDate, from);
+        List<Long> ids = ledgerPartnerIds(fromDate, toDate, from, corp);
         if (ids.isEmpty()) {
             return List.of();
         }
@@ -912,7 +921,8 @@ public class ReceivableService {
      * <p>★<b>목록 조회와 페이징 조회가 이 메서드를 함께 쓴다.</b> 둘이 다른 집합을 세면
      * 「전체에는 있는데 페이지에는 없는 거래처」가 생긴다(실제로 그렇게 어긋났다).
      */
-    private List<Long> ledgerPartnerIds(LocalDate fromDate, LocalDate toDate, LocalDate from) {
+    private List<Long> ledgerPartnerIds(LocalDate fromDate, LocalDate toDate, LocalDate from,
+                                        com.daesung.sales.common.corp.Corp corp) {
         java.util.LinkedHashSet<Long> idSet = new java.util.LinkedHashSet<>();
         arStatus(fromDate, toDate, null).rows().stream()
                 .map(ArStatusResponse.Row::partnerId)
@@ -933,7 +943,25 @@ public class ReceivableService {
                     .toList();
             idSet.addAll(carryOnly);
         }
-        return List.copyOf(idSet);
+        if (corp == null) {
+            return List.copyOf(idSet);
+        }
+        // ★★법인으로 좁힌다. 레거시는 **법인마다 DB가 따로**였고 화면도 그 법인 것만 봤다 —
+        //   우리는 둘을 한 DB 에 들고 있어, 「전체 거래처」로 보면 리브커넥스가 섞인다.
+        //   실측(2026-11-24, 2026-01~08): 연구소만 보면 레거시와 **원단위로 맞는다** —
+        //     매출 11,155,165,365 · 수금 9,521,325,397 · 이월 444,606,855.
+        //   섞으면 매출이 25,831,633,010(리브 14,676,467,645 가 더해진 값)이 된다.
+        //   근거: 발주처 2026-11-10 §1·§3-2 — "리브커넥스는 별도 법인이므로 데이터도 완전히
+        //   분리, 통합 조회 불필요", "거래처는 법인별로 각각 별도 유지".
+        java.util.Set<Long> keep = new java.util.HashSet<>();
+        partnerRepository.findAllById(idSet).forEach(pt -> {
+            // 법인이 비어 있으면 연구소로 본다 — 빼면 그 거래처가 어느 화면에도 안 나온다.
+            var v = (pt.getCorp() == null) ? com.daesung.sales.common.corp.Corp.DSLAB : pt.getCorp();
+            if (v == corp) {
+                keep.add(pt.getId());
+            }
+        });
+        return idSet.stream().filter(keep::contains).toList();
     }
 
     /**
@@ -985,15 +1013,16 @@ public class ReceivableService {
     @Transactional(readOnly = true)
     public org.springframework.data.domain.Page<ArLedgerResponse> arLedgerAllPage(
             LocalDate fromDate, LocalDate toDate, boolean onlyReportable,
+            com.daesung.sales.common.corp.Corp corp,
             org.springframework.data.domain.Pageable pageable) {
         // ★목록 조회와 **같은 집합**을 쓴다(ledgerPartnerIds) — 기간 내 거래가 있는 곳
         //   ∪ 그 해 이월이 있는 곳. 둘이 갈리면 「전체에는 있는데 페이지에는 없는 거래처」가 생긴다.
         LocalDate fromForCarry = (fromDate != null) ? fromDate : LocalDate.now().withDayOfYear(1);
-        List<Long> partnerIds = ledgerPartnerIds(fromDate, toDate, fromForCarry);
+        List<Long> partnerIds = ledgerPartnerIds(fromDate, toDate, fromForCarry, corp);
         // ★원장은 **이 페이지의 거래처만** 만든다. 전체를 만들고 자르면 느린 것은 그대로다.
         //   다만 onlyReportable 은 원장을 만들어 봐야 알 수 있어, 그 경우에만 전량을 훑는다.
         if (onlyReportable) {
-            List<ArLedgerResponse> all = arLedgerAll(fromDate, toDate, true);
+            List<ArLedgerResponse> all = arLedgerAll(fromDate, toDate, true, corp);
             int from = (int) Math.min(pageable.getOffset(), all.size());
             int to = Math.min(from + pageable.getPageSize(), all.size());
             return new org.springframework.data.domain.PageImpl<>(
@@ -1230,9 +1259,18 @@ public class ReceivableService {
     @Transactional(readOnly = true)
     public ArLedgerResponse arLedgerMerged(LocalDate fromDate, LocalDate toDate,
                                            boolean onlyReportable) {
+        return arLedgerMerged(fromDate, toDate, onlyReportable,
+                com.daesung.sales.common.corp.Corp.DSLAB);
+    }
+
+    /** 위와 같고 <b>법인</b>을 받는다 — {@code null} 이면 전 법인. */
+    @Transactional(readOnly = true)
+    public ArLedgerResponse arLedgerMerged(LocalDate fromDate, LocalDate toDate,
+                                           boolean onlyReportable,
+                                           com.daesung.sales.common.corp.Corp corp) {
         LocalDate from = (fromDate != null) ? fromDate : LocalDate.now().withDayOfYear(1);
         LocalDate to = (toDate != null) ? toDate : LocalDate.now();
-        List<ArLedgerResponse> each = arLedgerAll(fromDate, toDate, onlyReportable);
+        List<ArLedgerResponse> each = arLedgerAll(fromDate, toDate, onlyReportable, corp);
 
         long opening = each.stream().mapToLong(ArLedgerResponse::opening).sum();
 

@@ -489,10 +489,26 @@ public class ReceivableController {
                     ‼️우리가 그 조건을 조회에까지 걸어 **특강 거래처 14곳·33.8억이 통째로
                     안 보였다.** 이제 조회는 이 값을 보지 않고, **메일·PDF 대상
                     (`POST /ar-ledger/email`)** 에만 쓴다. 프론트 호환을 위해 파라미터는 남겨 둔다.""")
-            @RequestParam(required = false, defaultValue = "false") boolean onlyReportable) {
+            @RequestParam(required = false, defaultValue = "false") boolean onlyReportable,
+            @Parameter(description = """
+                    법인 — **기본값 `DSLAB`(연구소)**.
+
+                    ★레거시는 **법인마다 DB가 따로**였고 화면도 그 법인 것만 봤다. 우리는 둘을
+                    한 DB 에 들고 있어, 섞으면 레거시와 숫자가 안 맞는다.
+                    실측(2026-01~08): 연구소만 보면 **원단위로 맞는다** —
+                    매출 11,155,165,365 · 수금 9,521,325,397 · 이월 444,606,855.
+                    섞으면 매출이 25,831,633,010 이 된다(리브커넥스 14,676,467,645 가 더해진 값).
+
+                    근거: 발주처 2026-11-10 §1·§3-2 — "리브커넥스는 별도 법인이므로 데이터도
+                    완전히 분리, 통합 조회 불필요", "거래처는 법인별로 각각 별도 유지".
+                    전 법인을 보려면 `allCorp=true`.""")
+            @RequestParam(required = false, defaultValue = "DSLAB")
+            com.daesung.sales.common.corp.Corp corp,
+            @Parameter(description = "법인을 가리지 않고 전부 — 기본 false(연구소만)")
+            @RequestParam(required = false, defaultValue = "false") boolean allCorp) {
         // 조회는 신고대상을 보지 않는다(위 설명). 레거시 장부 본문과 같다.
         return ApiResponse.success(
-                receivableService.arLedgerMerged(fromDate, toDate, false));
+                receivableService.arLedgerMerged(fromDate, toDate, false, allCorp ? null : corp));
     }
 
     @Operation(summary = "외상매출장 — 전체 거래처(24p)",
@@ -523,6 +539,22 @@ public class ReceivableController {
                     안 보였다.** 이제 조회는 이 값을 보지 않고, **메일·PDF 대상
                     (`POST /ar-ledger/email`)** 에만 쓴다. 프론트 호환을 위해 파라미터는 남겨 둔다.""")
             @RequestParam(required = false, defaultValue = "false") boolean onlyReportable,
+            @Parameter(description = """
+                    법인 — **기본값 `DSLAB`(연구소)**.
+
+                    ★레거시는 **법인마다 DB가 따로**였고 화면도 그 법인 것만 봤다. 우리는 둘을
+                    한 DB 에 들고 있어, 섞으면 레거시와 숫자가 안 맞는다.
+                    실측(2026-01~08): 연구소만 보면 **원단위로 맞는다** —
+                    매출 11,155,165,365 · 수금 9,521,325,397 · 이월 444,606,855.
+                    섞으면 매출이 25,831,633,010 이 된다(리브커넥스 14,676,467,645 가 더해진 값).
+
+                    근거: 발주처 2026-11-10 §1·§3-2 — "리브커넥스는 별도 법인이므로 데이터도
+                    완전히 분리, 통합 조회 불필요", "거래처는 법인별로 각각 별도 유지".
+                    전 법인을 보려면 `allCorp=true`.""")
+            @RequestParam(required = false, defaultValue = "DSLAB")
+            com.daesung.sales.common.corp.Corp corp,
+            @Parameter(description = "법인을 가리지 않고 전부 — 기본 false(연구소만)")
+            @RequestParam(required = false, defaultValue = "false") boolean allCorp,
             @org.springdoc.core.annotations.ParameterObject
             com.daesung.sales.common.dto.PageRequestDto pageReq) {
         // ‼️키워드가 오면 **먼저 거르고** 잘라야 한다 — 자른 뒤 거르면 페이지마다 건수가 들쭉날쭉하고
@@ -531,7 +563,8 @@ public class ReceivableController {
         var p = pageReq.toPageable();
         if (keyword != null && !keyword.isBlank()) {
             var filtered = Keywords.filter(
-                    receivableService.arLedgerAll(fromDate, toDate, false), keyword,
+                    receivableService.arLedgerAll(fromDate, toDate, false, allCorp ? null : corp),
+                    keyword,
                     x -> new Object[]{x.partnerName()});
             int from = (int) Math.min(p.getOffset(), filtered.size());
             int to = Math.min(from + p.getPageSize(), filtered.size());
@@ -540,7 +573,8 @@ public class ReceivableController {
                             filtered.subList(from, to), p, filtered.size())));
         }
         return ApiResponse.success(com.daesung.sales.common.response.PageResponse.of(
-                receivableService.arLedgerAllPage(fromDate, toDate, false, p)));
+                receivableService.arLedgerAllPage(fromDate, toDate, false,
+                        allCorp ? null : corp, p)));
     }
 
     @Operation(summary = "외상매출장 '더프모만'(24p)",

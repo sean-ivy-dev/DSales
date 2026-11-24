@@ -159,6 +159,39 @@ class ArLedgerReportableIntegrationTest extends IntegrationTestSupport {
                 });
     }
 
+    @Test
+    @DisplayName("★★**법인 기본값은 연구소** — 리브커넥스 거래처가 섞이지 않는다")
+    void 법인은_기본_연구소() {
+        Long lib = createId("/masters/clients",
+                Map.of("code", "ARL" + SFX, "name", "리브거래처" + SFX, "type", "NORMAL"));
+        insertCarry(lib, 777_000L);
+        // 등록 API 로는 법인을 정할 수 없다(기본 연구소) — 이관분과 같은 모양을 만든다.
+        new org.springframework.transaction.support.TransactionTemplate(txManager)
+                .executeWithoutResult(status -> {
+                    em.createQuery("update Partner p set p.corp = "
+                                    + "com.daesung.sales.common.corp.Corp.DSTXTBOOK where p.id = :id")
+                            .setParameter("id", lib)
+                            .executeUpdate();
+                    em.clear();
+                });
+
+        assertThat(partnerCodes(false))
+                .as("‼️섞이면 레거시보다 금액이 커진다(실측 11.2억 → 25.8억)")
+                .doesNotContain("ARL" + SFX);
+        assertThat(codesOf("&allCorp=true"))
+                .as("전 법인으로 열면 나온다").contains("ARL" + SFX);
+        assertThat(codesOf("&corp=DSTXTBOOK"))
+                .as("리브커넥스만 골라도 나온다").contains("ARL" + SFX);
+    }
+
+    private List<String> codesOf(String extra) {
+        List<String> out = new java.util.ArrayList<>();
+        data(get("/closing/ar-ledger/all?fromDate=" + YEAR + "-01-01&toDate=" + YEAR
+                + "-12-31&size=200" + extra)).path("content")
+                .forEach(n -> out.add(n.path("partnerCode").asText()));
+        return out;
+    }
+
     private JsonNode rows(boolean onlyReportable) {
         return data(get("/closing/ar-ledger/all?fromDate=" + YEAR + "-01-01&toDate=" + YEAR
                 + "-12-31&size=200&onlyReportable=" + onlyReportable)).path("content");
