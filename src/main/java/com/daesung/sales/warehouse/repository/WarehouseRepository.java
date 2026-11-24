@@ -38,6 +38,19 @@ public interface WarehouseRepository extends JpaRepository<Warehouse, Long> {
                            Pageable pageable);
 
     /**
+     * 업로드 양식의 <b>「출고 창고」 칸</b>을 창고로 푼다 — <b>코드 또는 창고명</b> 정확일치
+     * (발주처 2026-11-23 6번, 양식에 「본사 물류창고」처럼 <b>이름</b>이 적혀 온다).
+     *
+     * <p>★사용 중지한 창고는 뺀다 — 드롭다운에서 빠진 창고를 업로드로 되살리면
+     * {@code search(includeUnused=false)} 와 어긋난다.
+     *
+     * <p>여럿이면 서비스가 사유와 함께 그 줄을 거부한다(조용히 하나를 고르면 엉뚱한 창고에서 나간다).
+     */
+    @Query("select w from Warehouse w where w.useYn = true "
+            + "and (w.code = :token or w.name = :token) order by w.code")
+    List<Warehouse> findByCodeOrName(@Param("token") String token);
+
+    /**
      * 그 거래처의 <b>위탁창고</b> — 주문 등록에서 위탁출고를 받을 때 도착 창고를 찾는다
      * (10/27 명세 §4-1 "주문 등록의 출고유형에 '위탁출고'를 포함", 프론트 C-1).
      *

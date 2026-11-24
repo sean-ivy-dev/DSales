@@ -180,6 +180,9 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
      * 공급률·정가별로 그룹 → 반품 시 원 출고건 공급률 고정 적용의 근거가 됨.
      */
     @Query("select p.id as productId, p.code as productCode, p.name as productName, "
+            // ★분류코드·분류명 — 반품 등록 화면이 도서명만으로는 어느 상품인지 못 가린다
+            //   (발주처 2026-11-23 2번 "반품 도서 목록에 분류명 함께").
+            + "p.catCode as catCode, p.catName as catName, "
             + "s.unitPrice as unitPrice, s.supplyRate as supplyRate, "
             + "sum(case when s.salesCategory = com.daesung.sales.salestype.entity.SalesCategory.SALE then s.qty else 0 end) as saleQty, "
             + "sum(case when s.salesCategory = com.daesung.sales.salestype.entity.SalesCategory.RETURN then s.qty else 0 end) as returnQty, "
@@ -189,8 +192,8 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
             + "from Sale s join s.product p "
             + "where s.partner.id = :partnerId and s.canceled = false "
             + "and (:productId is null or p.id = :productId) "
-            + "group by p.id, p.code, p.name, s.unitPrice, s.supplyRate "
-            + "order by p.code, s.supplyRate")
+            + "group by p.id, p.code, p.name, p.catCode, p.catName, s.unitPrice, s.supplyRate "
+            + "order by p.catCode, p.code, s.supplyRate")
     List<ReturnableAgg> returnableAgg(@Param("partnerId") Long partnerId, @Param("productId") Long productId);
 
     /**

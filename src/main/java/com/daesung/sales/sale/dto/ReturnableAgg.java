@@ -12,6 +12,12 @@ public interface ReturnableAgg {
 
     String getProductName();
 
+    /** 분류코드 — 발주처 2026-11-23 2번. */
+    String getCatCode();
+
+    /** 분류명 — 도서명만으로는 같은 이름이 여럿이라 가릴 수 없다. */
+    String getCatName();
+
     Integer getUnitPrice();
 
     Integer getSupplyRate();

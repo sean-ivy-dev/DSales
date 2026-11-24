@@ -39,10 +39,14 @@ import org.springframework.web.multipart.MultipartFile;
 
 /**
  * 매출 엑셀 업로드(발주처 요청 추가1). 근거: 레거시 DsSales 매출가져오기.vb(salesData 일괄 INSERT, 재고 미반영).
- * 표준양식(매출 업로드양식_샘플.xlsx, 12컬럼) 파싱 → 매출 원장 일괄 등록. 재고는 건드리지 않음.
+ * 표준양식(매출 업로드양식_샘플.xlsx) 파싱 → 매출 원장 일괄 등록.
  *
  * 컬럼(0-base): 0 거래일자 · 1 거래처코드 · 2 학교코드 · 3 분류코드 · 4 도서코드 · 5 회차
  *              · 6 정가(선택) · 7 공급률(%) · 8 수량 · 9 금액(참고) · 10 구분(출고유형) · 11 메모
+ *              · <b>12 출고 창고(선택, 2026-11-23 6번 신설)</b>
+ *
+ * <p>★<b>13번째 열이 없는 기존 12컬럼 파일도 그대로 올라간다</b> — 칸을 <b>번호로</b> 읽으므로
+ * 없는 칸은 빈 값이고, 빈 값은 "지금처럼"(아래)이다. 발주처가 그 호환을 명시 요구했다.
  * 규칙: 상품=분류코드+도서코드 조합 / 정가·공급률 미입력 시 도서마스터·거래처단가 자동조회 /
  *      공급률 0.75 소수는 ×100(=75) 정규화 / 위탁출고·취소·반품은 거부(전용 메뉴) / 금액은 Amounts로 재계산.
  */
@@ -147,7 +151,16 @@ public class SalesUploadService {
                             kind.shipmentType(), kind.category(), unitPrice, supplyRate, qty,
                             amt.supplyAmount(), amt.tax(), amt.totalAmount(), str(row, 11), null);
                     sale.applyDiscount(discount);
-                    sale.applyUploadDetail(str(row, 2), null, intOrNull(row, 5));   // 학교코드·(학교명 미구현)·회차
+                    sale.applyUploadDetail(str(row, 2), null, intOrNull(row, 5));   // 학교코드·(학교명은 조회가 마스터 조인으로 채운다)·회차
+
+                    // ★「출고 창고」 칸(13번째) — 발주처 2026-11-23 6번.
+                    //   빈칸·「미선택」 = **지금처럼**(창고를 남기지 않아 출고/반품 조회에서 빠진다),
+                    //   창고를 적으면 그 창고를 매출에 남겨 **출고/반품 조회에 들어온다**.
+                    //   배경: 온라인몰 매출은 실제 출고 수량이라 작업비 수량 기준에 들어가야 한다.
+                    Warehouse shipFrom = uploadWarehouse(row);
+                    if (shipFrom != null) {
+                        sale.applyWarehouse(shipFrom);
+                    }
                     // 업로드는 한 파일이 곧 한 번의 등록이다 — 파일 전체에 같은 묶음번호,
                     // 줄마다 순번. 담당자가 "몇 번째 줄" 로 찾는 경로다(프론트 실측 2026-10-16 B-2).
                     sale.applyEntry(entryNo, ++entrySeq);
@@ -174,10 +187,14 @@ public class SalesUploadService {
                     //   재고는 그대로였다 — 제품수불부와 순매출 조회의 수량이 어긋나는 원인이었다
                     //   (2026-09-11 점검: 국어 개념 교재 수불부 103,515 / 순매출 103,518, 차이가
                     //   곧 업로드분이었다). 이중 장부가 갈라지면 어느 쪽이 맞는지 알 수 없게 된다.
-                    // ‼️양식(12컬럼)에 창고 칸이 없다 — 물류창고로 보낸다. 업로드로 받는 구분은
-                    //   정상출고·증정용·교사용뿐이고 위탁은 전용 화면이라, 실물은 물류창고에서 나간다.
+                    // ‼️재고는 **빈칸이어도 계속 뺀다**(물류창고). 발주처 6번은 「출고 창고」를
+                    //   빈칸일 때 "지금처럼"이라고 적었고, **지금이 곧 차감하는 동작**이다.
+                    //   여기서 차감을 없애면 2026-09-11 에 고친 어긋남(수불부 103,515 ↔ 순매출
+                    //   103,518, 차이가 곧 업로드분)이 그대로 되살아난다. 칸이 바꾸는 것은
+                    //   **창고를 남기는지**(=출고/반품 조회 노출)와 **어느 창고에서 빼는지**다.
                     if (product.isStockManaged()) {
-                        inventoryService.applyShipment(product, mainWarehouse(), -qty,
+                        inventoryService.applyShipment(product,
+                                shipFrom != null ? shipFrom : mainWarehouse(), -qty,
                                 TxnType.OUTBOUND, kind.shipmentType(), date, salesNo, "매출 엑셀 업로드");
                     }
 
@@ -366,6 +383,31 @@ public class SalesUploadService {
      * — 창고를 고르는 규칙이 정해지면 그때 양식에 칸을 넣어야 한다.
      * 하나도 없으면 재고를 어디서 뺄지 알 수 없으므로 올리지 않고 막는다.
      */
+    /**
+     * 「출고 창고」 칸을 창고로 푼다. 빈칸·<b>「미선택」</b>이면 {@code null}(= 창고를 남기지 않는다).
+     *
+     * <p>‼️「미선택」은 <b>화면 드롭다운의 첫 항목 문구</b>라 양식에 그대로 적혀 올 수 있다 —
+     * 창고명으로 찾으면 당연히 없어서 줄이 통째로 실패한다. 빈칸과 같게 본다.
+     *
+     * <p>적혀 있는데 못 찾으면 <b>그 줄을 거부한다</b> — 조용히 물류창고로 돌리면
+     * 담당자는 자기가 적은 창고가 무시된 줄 모른다.
+     */
+    private Warehouse uploadWarehouse(Row row) {
+        String token = str(row, 12);
+        if (token == null || token.isBlank() || "미선택".equals(token)) {
+            return null;
+        }
+        List<Warehouse> found = warehouseRepository.findByCodeOrName(token);
+        if (found.isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "출고 창고 없음: " + token);
+        }
+        if (found.size() > 1) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "출고 창고명이 여럿입니다(창고코드로 적어 주세요): " + token);
+        }
+        return found.get(0);
+    }
+
     private Warehouse mainWarehouse() {
         return warehouseRepository.findByType(WarehouseType.MAIN).stream()
                 .min(java.util.Comparator.comparing(Warehouse::getId))

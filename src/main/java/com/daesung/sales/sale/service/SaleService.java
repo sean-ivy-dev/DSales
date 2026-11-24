@@ -390,6 +390,18 @@ public class SaleService {
             if (w != null) {
                 warnings.add(w);
             }
+            // ★재고관리 N 상품을 출고 반품으로 넣으면 **경고만** 띄운다(저장은 된다).
+            //   근거: 발주처 2026-11-23 1-3 — 문구까지 원문대로 받았다.
+            //   ‼️막지 않는다 — 같은 회신 1-2 가 "재고관리 값과 관계없이 모든 상품 등록 가능"이라
+            //     여기서 거부하면 그 지시와 정면으로 어긋난다. N 상품은 DSRE 가 수불·작업비를
+            //     처리하므로 우리 재고는 움직이지 않고, 담당자가 그 사실을 알아야 할 뿐이다.
+            if (!product.isStockManaged()) {
+                warnings.add(new SalesEntryResponse.Warning(
+                        "STOCK_UNMANAGED_RETURN", product.getId(), product.getCode(),
+                        0L, item.qty(), 0L,
+                        "재고관리 N 상품입니다. DSRE에서 수불 · 작업비를 처리하는 상품은"
+                                + " 매출 반품(매출 직접 입력)으로 등록하십시오."));
+            }
 
             // 반품도 출고와 같은 기준으로 계산되어야 한다 — 할인 매출을 정가 기준으로 되돌리면
             // 반품 금액이 원래 판 금액보다 커진다.
@@ -527,7 +539,8 @@ public class SaleService {
                             a.getUnitPrice(), a.getSupplyRate(), a.getSaleQty(), a.getReturnQty(),
                             splitSalesNos(a.getSourceSalesNos())));
             byProduct.put(a.getProductId(), new ReturnableResponse.Row(
-                    a.getProductId(), a.getProductCode(), a.getProductName(),
+                    a.getProductId(), a.getCatCode(), a.getCatName(),
+                    a.getProductCode(), a.getProductName(),
                     unitPrice, supplyRate, saleQty, returned, saleQty - returned,
                     conditions.get(a.getProductId())));
         }

@@ -27,6 +27,11 @@ public record ReturnableResponse(Long partnerId, List<Row> rows) {
 
     public record Row(
             Long productId,
+            @Schema(description = "분류코드") String catCode,
+            @Schema(description = """
+                    분류명 — 반품 등록 화면이 **도서명 옆에 함께** 보여 준다
+                    (발주처 2026-11-23 2번: "도서명만 보여 도서 구분이 안 됨").""")
+            String catName,
             String productCode,
             String productName,
             Integer unitPrice,
