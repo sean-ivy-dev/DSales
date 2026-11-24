@@ -261,7 +261,7 @@ public class JdbcDsreGateway implements DsreGateway {
               COALESCE(SUM(CASE WHEN c.NAME='OMR' THEN t.CNT*cost.OMR ELSE 0 END),0) omr_amt,
               COALESCE(SUM(CASE WHEN c.NAME IN ('단행본','책자') THEN t.CNT*cost.ETC ELSE 0 END),0) etc_amt,
               COALESCE(SUM(CASE WHEN c.NAME='라벨' THEN t.CNT*cost.LABEL ELSE 0 END),0) label_amt
-            FROM ( %s ) t
+            FROM ( {{SOURCE}} ) t
               JOIN tbl_materials_info m ON t.MAT_CD=m.MAT_CD
               JOIN tbl_comon_info c ON m.MAT_GN=c.CMD_CD
               JOIN (SELECT PAPER,OMR,ETC,LABEL FROM tbl_logis_cost WHERE DTL_CD=0 ORDER BY idx DESC LIMIT 1) cost
@@ -272,6 +272,19 @@ public class JdbcDsreGateway implements DsreGateway {
     private static final String WOL_NORMAL = "SELECT MAT_CD, CNT, REPLACE(REG_DATE,'-','') SDATE FROM tbl_wol_dtl_b";
 
     /** 회수 명세 — 위 총계와 <b>같은 단가 규칙</b>이다. 다르면 행 합이 총계와 안 맞는다. */
+    /**
+     * 회수 쿼리의 <b>자리표</b> — 사고/반품/둘다 중 어느 원본을 끼울지.
+     *
+     * <p>‼️{@code String.format} 을 쓰지 않는다. 쓰던 때, SQL 주석에 적은 퍼센트 기호
+     * 뒤 글자를 포맷 지정자로 읽어 {@code UnknownFormatConversionException} 이 났고
+     * <b>회수 명세가 통째로 500</b> 이었다(2026-11-24 배포 후 실측).
+     * 토큰 치환은 퍼센트를 글자로만 보므로 그 함정이 아예 없다.
+     *
+     * <p>★끼우는 값은 <b>우리가 쓴 상수 셋 중 하나</b>다(사용자 입력이 아니다) —
+     * 기간·시행목록은 바인딩으로 넘긴다(게이트규칙).
+     */
+    private static final String SOURCE_TOKEN = "{{SOURCE}}";
+
     private static final String RETURN_DETAIL_TEMPLATE = """
             SELECT t.SDATE, t.MAT_CD, m.MAT_NM, c.NAME mat_gn, t.MODE_GN, t.CNT,
                    CASE WHEN c.NAME = 'OMR' THEN cost.OMR
@@ -280,10 +293,15 @@ public class JdbcDsreGateway implements DsreGateway {
                         ELSE cost.PAPER END unit_cost,
                    -- ★상품·시행·거래처(발주처 2026-11-23 4번 8쪽 — 좌측 시행 트리 + 축별 소계).
                    --   LEFT JOIN 이다: 시행·거래처 마스터가 비어도 **행이 사라지면 안 된다**
-                   --   (출고 명세에서 학교를 내부 조인으로 걸었다가 95%가 증발한 그 함정).
+                   --   (출고 명세에서 학교를 내부 조인으로 걸었다가 대부분이 증발한 그 함정).
+                   -- ‼️조립은 String.format 이 아니라 **토큰 치환**(SOURCE_TOKEN)이다.
+                   --   format 을 쓰던 때, 주석에 적은 「95퍼센트가」의 퍼센트 기호 뒤 글자를
+                   --   포맷 지정자로 읽어 UnknownFormatConversionException 이 났고
+                   --   회수 명세가 통째로 500 이었다(2026-11-24 배포 후 실측).
+                   --   토큰 치환은 퍼센트를 글자로만 보므로 그 함정이 아예 없다.
                    pi.PROD_CD, pi.PROD_NM, pd.GRADE, t.DTL_CD, pd.DTL_NM,
                    t.CUST_CD, cu.CUST_FNM, cu.CITY_NM
-              FROM ( %s ) t
+              FROM ( {{SOURCE}} ) t
               JOIN tbl_materials_info m ON t.MAT_CD = m.MAT_CD
               JOIN tbl_comon_info c ON m.MAT_GN = c.CMD_CD
               JOIN (SELECT PAPER,OMR,ETC,LABEL FROM tbl_logis_cost
@@ -411,13 +429,8 @@ public class JdbcDsreGateway implements DsreGateway {
 
     @Override
     public PeriodLogisCost calcReturnPeriod(LocalDate from, LocalDate to, LogisMode mode) {
-        String source = switch (mode) {
-            case ACCIDENT -> WOL_ACCIDENT;
-            case NORMAL -> WOL_NORMAL;
-            case ALL -> WOL_ACCIDENT + " UNION ALL " + WOL_NORMAL;
-        };
-        Map<String, Object> r = dsreJdbcTemplate.queryForMap(
-                String.format(RETURN_TEMPLATE, source), from.format(YYYYMMDD), to.format(YYYYMMDD));
+        Map<String, Object> r = dsreJdbcTemplate.queryForMap(returnPeriodSql(mode),
+                from.format(YYYYMMDD), to.format(YYYYMMDD));
         return PeriodLogisCost.ret(mode, from, to,
                 num(r.get("paper_amt")), num(r.get("omr_amt")),
                 num(r.get("etc_amt")), num(r.get("label_amt")));
@@ -428,18 +441,51 @@ public class JdbcDsreGateway implements DsreGateway {
         return returnDetail(from, to, mode, null);
     }
 
-    @Override
-    public List<ReturnCostDetailRow> returnDetail(LocalDate from, LocalDate to, LogisMode mode,
-                                                  java.util.Collection<Integer> dtlCds) {
-        String source = switch (mode) {
+    /**
+     * 회수 <b>명세</b> SQL 조립 — 원본(사고/반품/둘다)을 자리표에 끼운다.
+     *
+     * <p>★따로 뽑아 둔 이유: <b>테스트가 조립 결과를 볼 수 있게</b> 하려고다.
+     * {@code String.format} 을 쓰던 때 SQL 주석의 퍼센트 기호가 포맷 지정자로 읽혀
+     * <b>회수 명세가 통째로 500</b>이었는데(2026-11-24 배포 후 실측), DSRE 연동이
+     * 테스트에서 꺼져 있어 아무 테스트도 그걸 잡지 못했다. 조립만 떼어 두면
+     * 연동 없이도 「자리표가 치환됐는지·남은 퍼센트가 없는지」를 못박을 수 있다.
+     */
+    static String returnDetailSql(LogisMode mode) {
+        return RETURN_DETAIL_TEMPLATE.replace(SOURCE_TOKEN, returnSource(mode));
+    }
+
+    /**
+     * 회수 <b>총계</b> SQL 조립.
+     *
+     * <p>‼️<b>명세와 다른 원본을 쓴다.</b> 총계는 자재·수량·일자만 필요해
+     * {@code WOL_ACCIDENT}/{@code WOL_NORMAL} 을, 명세는 거래처·시행까지 실은
+     * {@code *_D} 를 쓴다. 한쪽 상수를 둘 다에 쓰면 조용히 틀린다.
+     */
+    static String returnPeriodSql(LogisMode mode) {
+        return RETURN_TEMPLATE.replace(SOURCE_TOKEN, switch (mode) {
+            case ACCIDENT -> WOL_ACCIDENT;
+            case NORMAL -> WOL_NORMAL;
+            case ALL -> WOL_ACCIDENT + " UNION ALL " + WOL_NORMAL;
+        });
+    }
+
+    /**
+     * 명세에 끼울 원본. ‼️값은 <b>우리가 쓴 상수 셋 중 하나</b>다(사용자 입력이 아니다) —
+     * 기간·시행목록은 바인딩으로 넘긴다(게이트규칙).
+     */
+    private static String returnSource(LogisMode mode) {
+        return switch (mode) {
             case ACCIDENT -> WOL_ACCIDENT_D;
             case NORMAL -> WOL_NORMAL_D;
             case ALL -> WOL_ACCIDENT_D + " UNION ALL " + WOL_NORMAL_D;
         };
+    }
+
+    @Override
+    public List<ReturnCostDetailRow> returnDetail(LocalDate from, LocalDate to, LogisMode mode,
+                                                  java.util.Collection<Integer> dtlCds) {
         String dtlList = csv(dtlCds);
-        // ‼️%s 자리에 들어가는 것은 **우리가 쓴 상수 셋 중 하나**다(사용자 입력이 아니다).
-        //   총계 쿼리(calcReturnPeriod)가 쓰는 방식과 같다 — 기간·시행목록은 바인딩으로 넘긴다.
-        return dsreJdbcTemplate.query(String.format(RETURN_DETAIL_TEMPLATE, source), (rs, i) -> {
+        return dsreJdbcTemplate.query(returnDetailSql(mode), (rs, i) -> {
             int qty = rs.getInt("CNT");
             int unit = rs.getInt("unit_cost");
             return new ReturnCostDetailRow(
