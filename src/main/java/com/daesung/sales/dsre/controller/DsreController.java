@@ -51,8 +51,18 @@ public class DsreController {
                     ‼️사본 DB 서버 시각이라 그 서버가 UTC 면 UTC 로 온다 —
                     「며칠 전」은 `refreshedDaysAgo` 를 쓸 것.""")
     @GetMapping("/snapshot")
-    public ApiResponse<com.daesung.sales.dsre.gateway.DsreSnapshot> snapshot() {
-        return ApiResponse.success(dsreGateway.snapshot());
+    public ApiResponse<com.daesung.sales.dsre.gateway.DsreSnapshot> snapshot(
+            @io.swagger.v3.oas.annotations.Parameter(description = """
+                    사본 안 **자료의 끝**(`dataAsOf`)까지 구할지 — 기본 **끔**.
+
+                    ‼️그 값은 자재 330만 행의 `MAX(REG_DATE)` 인데 **인덱스가 없어 통째로
+                    훑는다**. 이것 때문에 이 경로 한 번이 **11초**였다(프론트 실측 2026-11-25 —
+                    화면을 열 때마다 사본 DB 에 11초짜리 조회가 걸렸다). 지금은 끄면 **즉시**다.
+
+                    ★화면은 켜지 말 것 — 밀림 판정은 `refreshedAt` 으로 한다.
+                    이 값은 "자료가 어디까지 들어왔나"를 사람이 들여다볼 때만 쓴다.""")
+            @RequestParam(required = false, defaultValue = "false") boolean withDataAsOf) {
+        return ApiResponse.success(dsreGateway.snapshot(withDataAsOf));
     }
 
     @Operation(summary = "신청인원 조회(FUNC_REQINWON_GET)",

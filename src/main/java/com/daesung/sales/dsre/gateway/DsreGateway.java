@@ -48,8 +48,12 @@ public interface DsreGateway {
      * (프론트 요청 2026-11-25).
      *
      * <p>‼️사본이 10/26 에서 11/24 까지 멈춰 있었고 아무도 몰랐다 — 그래서 만들었다.
+     *
+     * @param withDataAsOf 사본 안 <b>자료의 끝</b>({@code dataAsOf})까지 구할지.
+     *     그 값은 자재 330만 행의 {@code MAX(REG_DATE)} 라 <b>인덱스가 없어 통째로 훑는다</b>
+     *     — 이것 때문에 이 경로가 11초였다(프론트 지적 2026-11-25). 기본은 끈다.
      */
-    DsreSnapshot snapshot();
+    DsreSnapshot snapshot(boolean withDataAsOf);
 
     /**
      * 회수 작업비 <b>행 명세</b>. 출고는 상세가 있는데 회수는 기간 총계뿐이었다(2026-09-18 지적).

@@ -49,11 +49,23 @@ public record DsreSnapshot(
                 며칠 전으로 나온다. 밀림 판정에는 쓰지 말 것.""")
         LocalDateTime dataAsOf,
 
-        @Schema(description = "사본에 든 자재 수량 행 수(갱신이 통째로 실패했는지 보는 값)",
+        @Schema(description = """
+                사본에 든 자재 수량 행 수 — 갱신이 **통째로 실패했는지**(0인지) 보는 값.
+                ‼️**어림수다**(`information_schema.TABLES.TABLE_ROWS`). 정확히 세려면
+                330만 행을 통째로 훑어야 해서 이 경로가 **11초**였다(프론트 지적 2026-11-25).
+                "0인가 아닌가"만 보는 값이라 어림수로 충분하다 — **합계 대조에 쓰지 말 것.**""",
                 example = "3344124")
         long materialRows,
 
-        @Schema(description = "사본에 든 신청 건수", example = "80617")
-        long requestRows
+        @Schema(description = "사본에 든 신청 건수. `materialRows` 와 같은 어림수다",
+                example = "80617")
+        long requestRows,
+
+        @Schema(description = """
+                ★**사본 DB 의 현재 시각**. `refreshedAt` 과 **같은 시계**라
+                이 둘을 비교하면 그 DB 가 UTC 로 도는지 KST 로 도는지 **화면에서 바로 알 수 있다**
+                (프론트 질문 2026-11-25 — "두 서버 `refreshedAt` 이 9시간 차이인데 한쪽이 UTC 인가").
+                화면 시계와 이 값이 9시간 어긋나면 그 DB 가 UTC 다.""")
+        LocalDateTime dbNow
 ) {
 }

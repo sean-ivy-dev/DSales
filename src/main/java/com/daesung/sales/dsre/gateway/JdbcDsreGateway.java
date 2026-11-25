@@ -538,22 +538,40 @@ public class JdbcDsreGateway implements DsreGateway {
      *
      * <p>★{@code MAX(REG_DATE)} 는 <b>자료의 끝</b>이고 갱신 지연이 아니다(DTO 주석 참고).
      */
+    /**
+     * 사본 상태 — <b>information_schema 만 읽는다</b>.
+     *
+     * <p>‼️예전엔 여기서 {@code COUNT(*)} 두 번과 {@code MAX(REG_DATE)} 를 돌렸다.
+     * {@code tbl_logis_cnt} 는 <b>330만 행에 PK·REG_DATE 인덱스가 없어</b> 세 개가 모두
+     * 통째로 훑는 조회였고, 이 경로 한 번이 <b>11초</b>였다(프론트 실측 2026-11-25 —
+     * 화면을 열 때마다 사본 DB 에 11초짜리 조회가 걸렸다).
+     *
+     * <p>행 수는 <b>어림수</b>({@code TABLE_ROWS})로 바꿨다 — 이 값의 쓸모는
+     * "갱신이 통째로 실패해 0인가"뿐이라 어림수로 충분하다. 자료의 끝({@code dataAsOf})은
+     * 달라는 때만 따로 구한다.
+     */
     private static final String SNAPSHOT_SQL = """
-            SELECT (SELECT MAX(REG_DATE) FROM tbl_logis_cnt)  AS data_as_of,
-                   (SELECT MAX(CREATE_TIME) FROM information_schema.TABLES
+            SELECT (SELECT MAX(CREATE_TIME) FROM information_schema.TABLES
                      WHERE TABLE_SCHEMA = DATABASE())          AS refreshed_at,
                    NOW()                                       AS db_now,
-                   (SELECT COUNT(*) FROM tbl_logis_cnt)        AS material_rows,
-                   (SELECT COUNT(*) FROM tbl_request_info)     AS request_rows
+                   (SELECT TABLE_ROWS FROM information_schema.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME = 'tbl_logis_cnt')       AS material_rows,
+                   (SELECT TABLE_ROWS FROM information_schema.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME = 'tbl_request_info')    AS request_rows
             """;
 
+    /** 사본 안 자료의 끝. 인덱스가 없어 330만 행을 훑는다 — 달라는 때만 돈다. */
+    private static final String DATA_AS_OF_SQL =
+            "SELECT MAX(REG_DATE) AS data_as_of FROM tbl_logis_cnt";
+
     @Override
-    public DsreSnapshot snapshot() {
+    public DsreSnapshot snapshot(boolean withDataAsOf) {
         Map<String, Object> r = dsreJdbcTemplate.queryForMap(SNAPSHOT_SQL);
         // ‼️**드라이버가 무엇으로 주는지에 기대지 않는다.** MariaDB 드라이버는 datetime 을
         //   `LocalDateTime` 으로 주는데 `java.sql.Timestamp` 로 캐스팅했다가
         //   ClassCastException 으로 이 경로가 통째로 500 이었다(2026-11-25 실측).
-        LocalDateTime dataAsOf = toLocalDateTime(r.get("data_as_of"));
         LocalDateTime refreshedAt = toLocalDateTime(r.get("refreshed_at"));
         LocalDateTime dbNow = toLocalDateTime(r.get("db_now"));
 
@@ -564,8 +582,12 @@ public class JdbcDsreGateway implements DsreGateway {
         }
         // 찍은 시각을 모르면 **낡은 것으로 본다** — 「모른다」를 「최신」으로 보이게 하지 않는다.
         boolean stale = (daysAgo < 0) || daysAgo >= 2;
+
+        LocalDateTime dataAsOf = withDataAsOf
+                ? toLocalDateTime(dsreJdbcTemplate.queryForMap(DATA_AS_OF_SQL).get("data_as_of"))
+                : null;
         return new DsreSnapshot(refreshedAt, daysAgo, stale, dataAsOf,
-                num(r.get("material_rows")), num(r.get("request_rows")));
+                num(r.get("material_rows")), num(r.get("request_rows")), dbNow);
     }
 
     /**
