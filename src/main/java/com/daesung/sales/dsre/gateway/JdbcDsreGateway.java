@@ -575,10 +575,18 @@ public class JdbcDsreGateway implements DsreGateway {
         LocalDateTime refreshedAt = toLocalDateTime(r.get("refreshed_at"));
         LocalDateTime dbNow = toLocalDateTime(r.get("db_now"));
 
+        // ‼️**사본 DB 시계로 날짜를 세면 타임존만큼 하루가 어긋난다.**
+        //   실측 2026-11-26: 두 사본을 11/24 아침에 **같이** 갱신했는데
+        //   운영(KST)은 2일 전 → 밀림, 시험(UTC)은 1일 전 → 안 밀림으로 **갈렸다**.
+        //   UTC 사본은 "오늘"이 9시간 늦게 시작해 날짜 차이가 하나 작게 나온다.
+        //   → **한국 시각으로 바꾼 뒤** 우리 쪽 오늘과 센다. 프론트에 "타임존 무관"이라고
+        //     답했던 것이 이 때문에 틀렸다.
+        LocalDateTime refreshedKst = toKst(refreshedAt, dbNow);
         long daysAgo = -1;
-        if (refreshedAt != null && dbNow != null) {
+        if (refreshedKst != null) {
             daysAgo = java.time.temporal.ChronoUnit.DAYS.between(
-                    refreshedAt.toLocalDate(), dbNow.toLocalDate());
+                    refreshedKst.toLocalDate(),
+                    java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul")));
         }
         // 찍은 시각을 모르면 **낡은 것으로 본다** — 「모른다」를 「최신」으로 보이게 하지 않는다.
         boolean stale = (daysAgo < 0) || daysAgo >= 2;
@@ -588,7 +596,7 @@ public class JdbcDsreGateway implements DsreGateway {
                 : null;
         return new DsreSnapshot(refreshedAt, daysAgo, stale, dataAsOf,
                 num(r.get("material_rows")), num(r.get("request_rows")), dbNow,
-                toKst(refreshedAt, dbNow));
+                refreshedKst);
     }
 
     /**

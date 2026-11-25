@@ -33,8 +33,12 @@ public record DsreSnapshot(
         LocalDateTime refreshedAt,
 
         @Schema(description = """
-                사본을 찍은 지 **며칠 됐는지**(사본 DB 의 현재 시각 기준이라 타임존 영향이 없다).
-                0이면 오늘 찍은 것이다. 알 수 없으면 −1.""", example = "1")
+                사본을 찍은 지 **며칠 됐는지** — **한국 시각 기준**으로 센다.
+                0이면 오늘 찍은 것이다. 알 수 없으면 −1.
+
+                ‼️예전엔 **사본 DB 시계로** 셌는데, 그러면 타임존만큼 하루가 어긋났다 —
+                두 사본을 11/24 아침에 같이 갱신했는데 운영(KST)은 2일 전,
+                시험(UTC)은 1일 전으로 **갈렸다**(실측 2026-11-26).""", example = "1")
         long refreshedDaysAgo,
 
         @Schema(description = """
