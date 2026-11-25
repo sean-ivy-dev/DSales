@@ -44,6 +44,14 @@ public interface DsreGateway {
     PeriodLogisCost calcReturnPeriod(java.time.LocalDate from, java.time.LocalDate to, LogisMode mode);
 
     /**
+     * DSRE <b>사본이 언제 기준인지</b>. 화면의 「DSRE 자료 기준 시각」에 쓴다
+     * (프론트 요청 2026-11-25).
+     *
+     * <p>‼️사본이 10/26 에서 11/24 까지 멈춰 있었고 아무도 몰랐다 — 그래서 만들었다.
+     */
+    DsreSnapshot snapshot();
+
+    /**
      * 회수 작업비 <b>행 명세</b>. 출고는 상세가 있는데 회수는 기간 총계뿐이었다(2026-09-18 지적).
      * 총계와 <b>같은 단가 규칙</b>을 쓴다 — 다르면 행 합이 총계와 안 맞는다.
      */

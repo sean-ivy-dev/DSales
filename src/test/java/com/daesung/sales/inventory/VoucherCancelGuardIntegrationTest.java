@@ -111,6 +111,45 @@ class VoucherCancelGuardIntegrationTest extends IntegrationTestSupport {
         assertThat(data(c).path("voucherKind").asText()).isEqualTo("INBOUND");
     }
 
+    @Test
+    @DisplayName("★★**자재 출고·회수 전표 수정은 막지 않는다** — 가드가 쓰던 기능을 죽였다(2026-11-25)")
+    void 자재전표_수정은_통과() {
+        // 자재 입출고는 출고=OUTBOUND · 회수=RETURN 을 쓰고, 그 전표 **수정**은 서버 안에서
+        // deleteVoucher 를 부른다. 종류만 보고 막았더니 수정이 통째로 거부됐다.
+        Long material = createId("/masters/materials",
+                Map.of("code", "VGM" + SFX, "name", "전표가드자재", "materialType", "EXAM_PAPER"));
+        JsonNode min = post("/stock/materials/inbound", Map.of(
+                "processedDate", YEAR + "-01-06", "destinationWarehouseId", warehouse,
+                "items", List.of(Map.of("materialId", material, "qty", 100, "unitCost", 100))));
+        assertThat(min.path("success").asBoolean()).as("자재 입고: %s", min).isTrue();
+
+        // 자재 출고 전표를 만든다(TxnType.OUTBOUND — 매출 출고와 같은 종류다).
+        JsonNode out = post("/stock/materials/io", Map.of(
+                "processedDate", YEAR + "-04-01", "warehouseId", warehouse, "io", "OUTBOUND",
+                "items", List.of(Map.of("materialId", material, "qty", 10))));
+        assertThat(out.path("success").asBoolean()).as("자재 출고: %s", out).isTrue();
+        String refNo = data(out).path("refNo").asText();
+
+        // ★그 전표를 수정한다 — 서버가 지우고 다시 등록한다. 가드에 걸리면 안 된다.
+        JsonNode rev = patch("/stock/materials/io/" + refNo, Map.of(
+                "processedDate", YEAR + "-04-01", "warehouseId", warehouse, "io", "OUTBOUND",
+                "items", List.of(Map.of("materialId", material, "qty", 4))));
+        assertThat(rev.path("success").asBoolean())
+                .as("‼️거부되면 가드가 자재 전표까지 막은 것이다: %s", rev)
+                .isTrue();
+
+        // 회수(반품) 전표도 같다 — TxnType.RETURN 을 쓴다.
+        JsonNode rec = post("/stock/materials/io", Map.of(
+                "processedDate", YEAR + "-04-02", "warehouseId", warehouse, "io", "RECOVER_RETURN",
+                "items", List.of(Map.of("materialId", material, "qty", 3))));
+        assertThat(rec.path("success").asBoolean()).as("자재 회수: %s", rec).isTrue();
+        JsonNode rec2 = patch("/stock/materials/io/" + data(rec).path("refNo").asText(), Map.of(
+                "processedDate", YEAR + "-04-02", "warehouseId", warehouse, "io", "RECOVER_RETURN",
+                "items", List.of(Map.of("materialId", material, "qty", 2))));
+        assertThat(rec2.path("success").asBoolean())
+                .as("‼️회수 수정도 막히면 안 된다: %s", rec2).isTrue();
+    }
+
     private int stock() {
         for (JsonNode n : data(get("/stock/ledger?fromDate=" + YEAR + "-01-01&toDate=" + YEAR
                 + "-12-31&productId=" + book + "&size=50")).path("content")) {

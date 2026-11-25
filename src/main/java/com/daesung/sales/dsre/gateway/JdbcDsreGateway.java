@@ -1,6 +1,7 @@
 package com.daesung.sales.dsre.gateway;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -511,6 +512,35 @@ public class JdbcDsreGateway implements DsreGateway {
                     rs.getString("CUST_CD"), rs.getString("CUST_FNM"), rs.getString("CITY_NM"),
                     qty, unit, (long) qty * unit);
         }, from.format(YYYYMMDD), to.format(YYYYMMDD), dtlList, dtlList);
+    }
+
+    /**
+     * 사본 기준 시각 — <b>자재 수량의 최신 등록시각</b>과 행 수.
+     *
+     * <p>★{@code tbl_logis_cnt} 를 보는 이유: 물류 작업비·인원 산출이 그 표를 쓰고,
+     * 자료가 어디까지 들어왔는지가 그 표에 가장 정확히 나타난다
+     * ({@code tbl_request_info.REQ_DATE} 는 <b>시행일</b>이라 미래 날짜가 섞인다 —
+     * 실측에서 20261130 이 최대였다. 기준 시각으로 쓰면 「오늘 자료」로 잘못 보인다).
+     *
+     * <p>★한 번에 묻는다 — 화면이 열릴 때마다 부르는 값이라 왕복을 늘리지 않는다.
+     */
+    private static final String SNAPSHOT_SQL = """
+            SELECT (SELECT MAX(REG_DATE) FROM tbl_logis_cnt) AS data_as_of,
+                   (SELECT COUNT(*)      FROM tbl_logis_cnt) AS material_rows,
+                   (SELECT COUNT(*)      FROM tbl_request_info) AS request_rows
+            """;
+
+    @Override
+    public DsreSnapshot snapshot() {
+        Map<String, Object> r = dsreJdbcTemplate.queryForMap(SNAPSHOT_SQL);
+        java.sql.Timestamp ts = (java.sql.Timestamp) r.get("data_as_of");
+        LocalDateTime asOf = (ts == null) ? null : ts.toLocalDateTime();
+        long behind = (asOf == null) ? Long.MAX_VALUE
+                : java.time.temporal.ChronoUnit.DAYS.between(asOf.toLocalDate(), LocalDate.now());
+        // 사본이 비어 있으면(asOf 없음) 가장 낡은 것으로 본다 — 「모른다」를 「최신」으로 보이게 하면 안 된다.
+        return new DsreSnapshot(asOf, (asOf == null) ? -1 : behind,
+                asOf == null || behind >= 2,
+                num(r.get("material_rows")), num(r.get("request_rows")));
     }
 
     private static final DateTimeFormatter YYYYMMDD = DateTimeFormatter.BASIC_ISO_DATE;

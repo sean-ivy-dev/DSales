@@ -401,6 +401,29 @@ public class InventoryService {
      * @param stockDelta 재고 증감(= 새 부호수량 − 원 부호수량)
      * @return 보정 후 잔량. 재고를 쓰지 않는 매출(미출고·재고미관리)이면 0
      */
+    /**
+     * 그 매출의 <b>재고 이벤트가 달린 전표번호</b>를 고른다.
+     *
+     * <p>‼️<b>이관 매출은 매출번호가 아니다.</b> 이관 스크립트가 재고 이벤트를
+     * {@code SALE-{매출 id}} 로 넣었고(그쪽은 {@code (ref_no, product_id)} 쌍으로 이었다),
+     * 매출번호는 {@code DL-…}·{@code DT-…} 다. 그래서 매출번호로만 찾으면
+     * <b>이관 매출을 고치거나 취소·삭제해도 재고가 움직이지 않았다</b>
+     * (프론트 지적 2026-11-25. 운영 실측: 9~10월 반품 60건 중 <b>59건이 {@code SALE-}</b>,
+     * 새로 등록한 1건만 {@code I-}).
+     *
+     * <p>신규 등록분은 매출번호가 그대로 전표번호다 — 그쪽을 먼저 보고, 없으면
+     * {@code SALE-{id}} 를 본다. 둘 다 없으면 매출번호를 돌려준다(창고 없는 매출·
+     * 재고미관리 상품이라 되돌릴 재고가 애초에 없다 — 호출부가 0건으로 처리한다).
+     */
+    @Transactional(readOnly = true)
+    public String stockRefNo(String salesNo, Long saleId) {
+        if (!inventoryTxnRepository.findAllByRefNo(salesNo).isEmpty()) {
+            return salesNo;
+        }
+        String legacy = "SALE-" + saleId;
+        return inventoryTxnRepository.findAllByRefNo(legacy).isEmpty() ? salesNo : legacy;
+    }
+
     public int adjustShipment(String refNo, int stockDelta, String memo) {
         if (stockDelta == 0) {
             return 0;
@@ -455,7 +478,7 @@ public class InventoryService {
             throw new BusinessException(ErrorCode.NOT_FOUND, "전표가 없습니다: " + refNo);
         }
         // ‼️종류를 먼저 본다 — 매출이 따라오는 전표(반품·출고)는 여기서 처리할 수 없다.
-        assertVoucherCancelable(origins.get(0).getTxnType(), refNo);
+        assertVoucherCancelable(origins.get(0), refNo);
         // 원 전표의 거래일 기준으로 마감을 본다 — 되돌리는 대상이 그 달의 숫자다.
         periodLockService.assertNotLocked(origins.get(0).getTradeDate());
 
@@ -1126,7 +1149,7 @@ public class InventoryService {
                     "이미 취소된 전표는 삭제할 수 없습니다: " + refNo + " (취소 기록이 장부에 남아 있습니다)");
         }
         // ‼️취소와 같은 규칙 — 매출이 따라오는 전표는 여기서 지울 수 없다.
-        assertVoucherCancelable(origins.get(0).getTxnType(), refNo);
+        assertVoucherCancelable(origins.get(0), refNo);
         periodLockService.assertNotLocked(origins.get(0).getTradeDate());
 
         // ‼️지운 내용을 먼저 남긴다 — 삭제 후에는 이 기록에만 남는다.
@@ -1246,10 +1269,24 @@ public class InventoryService {
      * <p>★실사({@code ADJUST})도 거부한다 — 되돌릴 일이 있으면 실사를 다시 해야 하고,
      * 전표 취소로 되돌리면 "언제 무엇을 실사했나"가 어긋난다.
      *
+     * <p>‼️<b>자재 전표는 종류를 보지 않고 통과시킨다</b>(아래 첫 줄). 자재 입출고가
+     * 출고·회수에 같은 {@code TxnType} 을 쓰는데, 그 전표 수정이 서버 안에서
+     * {@code deleteVoucher} 를 부른다 — 종류만 보면 **쓰던 기능이 죽는다**.
+     *
      * <p>통과: 입고 · 이고 · 세트조립 · 세트해체 · 폐기.
      */
-    private static void assertVoucherCancelable(TxnType txnType, String refNo) {
-        switch (txnType) {
+    private static void assertVoucherCancelable(InventoryTxn origin, String refNo) {
+        // ★★**자재 전표는 가리지 않는다**(프론트 지적 2026-11-25).
+        //   자재 입출고는 출고=OUTBOUND · 회수(사고·반품)=RETURN 을 쓰는데
+        //   ({@code MaterialIo}), 그 전표 **수정**은 서버 안에서
+        //   {@code MaterialStockService.reviseIo} → {@code deleteVoucher} 로 지우고 다시 등록한다.
+        //   ‼️종류만 보고 막았더니 **자재 출고·회수 수정이 통째로 죽었다** — 운영에서
+        //     「매출 출고 전표는 …」 로 거부됐다. 테스트가 그 경로를 타지 않아 못 잡았다.
+        //   여기서 막을 것은 **매출에 딸린 전표**뿐이다 — 그것만 매출 줄이 따로 남는다.
+        if (origin.getMaterial() != null) {
+            return;
+        }
+        switch (origin.getTxnType()) {
             case INBOUND, TRANSFER, BOM_ASSEMBLE, BOM_DISASSEMBLE, DISPOSE -> {
                 // 통과
             }

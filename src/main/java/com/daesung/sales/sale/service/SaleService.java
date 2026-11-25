@@ -760,7 +760,8 @@ public class SaleService {
         saleRepository.flush();
         SaleResponse response = SaleResponse.from(sale, divisionOf(sale));
         if (stockAdj != 0) {
-            inventoryService.adjustShipment(sale.getSalesNo(), stockAdj,
+            inventoryService.adjustShipment(
+                    inventoryService.stockRefNo(sale.getSalesNo(), sale.getId()), stockAdj,
                     "매출 수정: 수량 " + oldQty + " → " + newQty);
         }
         return response;
@@ -803,7 +804,10 @@ public class SaleService {
         // 역분개의 원자적 UPDATE(clearAutomatically)가 세션을 비우므로 순서가 중요.
         saleRepository.flush();
         SaleResponse response = SaleResponse.from(sale, divisionOf(sale));
-        inventoryService.reverseShipments(sale.getSalesNo(), LocalDate.now());
+        // ‼️이관 매출은 재고 이벤트 번호가 `SALE-{id}` 다 — 매출번호로만 찾으면 재고가 안 돌아온다
+        //   (InventoryService#stockRefNo 참고).
+        inventoryService.reverseShipments(
+                inventoryService.stockRefNo(sale.getSalesNo(), sale.getId()), LocalDate.now());
 
         // ★삭제와 같은 이유로 여기서도 본다(프론트 B-5는 삭제만 말했지만 원인이 같다).
         //   작업요청서 지시 목록은 **취소분도 빼고** 세므로, 한 주문이 통째로 취소되면
@@ -896,7 +900,9 @@ public class SaleService {
         sale.markDeleted(currentAuditor.username());
         saleRepository.flush();
 
-        inventoryService.softDeleteByRefNo(sale.getSalesNo(), currentAuditor.username());
+        inventoryService.softDeleteByRefNo(
+                inventoryService.stockRefNo(sale.getSalesNo(), sale.getId()),
+                currentAuditor.username());
 
         // ★묶여 있던 작업요청서에 남은 줄이 없으면 그 발송 건도 걷어낸다(프론트 B-5).
         //   예전엔 "지시 목록은 매출에서 파생되니 자동으로 빠진다"고 두었는데,
