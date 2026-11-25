@@ -533,14 +533,43 @@ public class JdbcDsreGateway implements DsreGateway {
     @Override
     public DsreSnapshot snapshot() {
         Map<String, Object> r = dsreJdbcTemplate.queryForMap(SNAPSHOT_SQL);
-        java.sql.Timestamp ts = (java.sql.Timestamp) r.get("data_as_of");
-        LocalDateTime asOf = (ts == null) ? null : ts.toLocalDateTime();
+        // ‼️**드라이버가 무엇으로 주는지에 기대지 않는다.** MariaDB 드라이버는 datetime 을
+        //   `LocalDateTime` 으로 주는데 `java.sql.Timestamp` 로 캐스팅했다가
+        //   ClassCastException 으로 **이 경로가 통째로 500** 이었다(배포 후 실측 2026-11-25).
+        //   같은 자리에서 Timestamp·LocalDateTime 둘 다 올 수 있으므로 양쪽을 받는다.
+        LocalDateTime asOf = toLocalDateTime(r.get("data_as_of"));
         long behind = (asOf == null) ? Long.MAX_VALUE
                 : java.time.temporal.ChronoUnit.DAYS.between(asOf.toLocalDate(), LocalDate.now());
         // 사본이 비어 있으면(asOf 없음) 가장 낡은 것으로 본다 — 「모른다」를 「최신」으로 보이게 하면 안 된다.
         return new DsreSnapshot(asOf, (asOf == null) ? -1 : behind,
                 asOf == null || behind >= 2,
                 num(r.get("material_rows")), num(r.get("request_rows")));
+    }
+
+    /**
+     * datetime 한 칸을 {@link LocalDateTime} 으로 — <b>드라이버가 무엇으로 주든</b> 받는다.
+     *
+     * <p>‼️MariaDB 드라이버는 {@code LocalDateTime} 을 준다. {@code java.sql.Timestamp} 로
+     * 캐스팅했다가 그 경로가 통째로 500 이었다. 드라이버·버전에 따라 갈리는 부분이라
+     * 한쪽으로 단정하지 않는다.
+     */
+    static LocalDateTime toLocalDateTime(Object v) {
+        if (v == null) {
+            return null;
+        }
+        if (v instanceof LocalDateTime t) {
+            return t;
+        }
+        if (v instanceof java.sql.Timestamp t) {
+            return t.toLocalDateTime();
+        }
+        if (v instanceof java.sql.Date d) {
+            return d.toLocalDate().atStartOfDay();
+        }
+        if (v instanceof LocalDate d) {
+            return d.atStartOfDay();
+        }
+        return null;   // 뜻을 모르는 타입을 날짜로 꾸며 내지 않는다 — 비어 있는 것으로 본다
     }
 
     private static final DateTimeFormatter YYYYMMDD = DateTimeFormatter.BASIC_ISO_DATE;

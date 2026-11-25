@@ -73,4 +73,25 @@ class ReturnSqlAssemblyTest {
                 .contains("LEFT JOIN tbl_product_info")
                 .contains("LEFT JOIN tbl_cust_info");
     }
+
+    @Test
+    @DisplayName("★★날짜 칸은 **드라이버가 무엇으로 주든** 받는다 — 캐스팅 한 줄로 500 이 났다")
+    void 날짜_타입_무관() {
+        java.time.LocalDateTime t = java.time.LocalDateTime.of(2026, 11, 16, 10, 53, 14);
+
+        // MariaDB 드라이버가 실제로 주는 것 — 이걸 Timestamp 로 캐스팅했다가
+        // ClassCastException 으로 /dsre/snapshot 이 통째로 500 이었다(배포 후 실측 2026-11-25).
+        assertThat(JdbcDsreGateway.toLocalDateTime(t)).isEqualTo(t);
+        // 드라이버·버전에 따라 이쪽으로 올 수도 있다.
+        assertThat(JdbcDsreGateway.toLocalDateTime(java.sql.Timestamp.valueOf(t))).isEqualTo(t);
+        // 날짜만 오는 경우 — 자정으로 본다.
+        assertThat(JdbcDsreGateway.toLocalDateTime(java.sql.Date.valueOf(t.toLocalDate())))
+                .isEqualTo(t.toLocalDate().atStartOfDay());
+        assertThat(JdbcDsreGateway.toLocalDateTime(t.toLocalDate()))
+                .isEqualTo(t.toLocalDate().atStartOfDay());
+
+        // 비어 있으면 null — 「모른다」를 날짜로 꾸며 내지 않는다.
+        assertThat(JdbcDsreGateway.toLocalDateTime(null)).isNull();
+        assertThat(JdbcDsreGateway.toLocalDateTime("2026-11-16")).isNull();
+    }
 }
