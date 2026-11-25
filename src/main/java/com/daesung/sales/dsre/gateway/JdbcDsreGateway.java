@@ -587,7 +587,34 @@ public class JdbcDsreGateway implements DsreGateway {
                 ? toLocalDateTime(dsreJdbcTemplate.queryForMap(DATA_AS_OF_SQL).get("data_as_of"))
                 : null;
         return new DsreSnapshot(refreshedAt, daysAgo, stale, dataAsOf,
-                num(r.get("material_rows")), num(r.get("request_rows")), dbNow);
+                num(r.get("material_rows")), num(r.get("request_rows")), dbNow,
+                toKst(refreshedAt, dbNow));
+    }
+
+    /**
+     * 찍은 시각을 <b>한국 시각으로</b> 바꿔 준다 — 화면이 그대로 찍을 값.
+     *
+     * <p>‼️<b>두 사본 DB 의 타임존이 서로 다르다</b>(실측 2026-11-25):
+     * 운영 사본은 KST, 시험 사본은 UTC 로 돈다. 그래서 같은 날 아침에 찍은 두 사본이
+     * {@code refreshedAt} 09:58 ↔ 01:53 으로 <b>9시간 차이</b>처럼 보였다.
+     * 화면이 받은 글자를 그대로 찍으면 한쪽이 9시간 이르게 보인다(프론트 지적 2026-11-25).
+     *
+     * <p>★보정은 <b>서버 한 곳에서</b> 한다. 화면마다 뺄셈을 두면 화면마다 달라진다.
+     *
+     * <p>치우침은 <b>사본 DB 의 현재 시각({@code dbNow}) 과 우리 시계</b>를 견줘 구한다 —
+     * 사본 DB 가 무슨 타임존으로 돌든 맞는다. 망 왕복·시계 오차를 걷어내려고
+     * <b>15분 단위로 맞춘다</b>(타임존 치우침은 전부 15분의 배수다).
+     *
+     * @return 한국 시각. 찍은 시각이나 사본 시계를 모르면 {@code null}
+     */
+    static LocalDateTime toKst(LocalDateTime refreshedAt, LocalDateTime dbNow) {
+        if (refreshedAt == null || dbNow == null) {
+            return null;
+        }
+        long skewMin = java.time.temporal.ChronoUnit.MINUTES.between(
+                LocalDateTime.now(java.time.ZoneOffset.UTC), dbNow);
+        long quarters = Math.round(skewMin / 15.0);
+        return refreshedAt.minusMinutes(quarters * 15L).plusHours(9);
     }
 
     /**

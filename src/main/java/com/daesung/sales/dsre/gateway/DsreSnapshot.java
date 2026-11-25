@@ -66,6 +66,19 @@ public record DsreSnapshot(
                 이 둘을 비교하면 그 DB 가 UTC 로 도는지 KST 로 도는지 **화면에서 바로 알 수 있다**
                 (프론트 질문 2026-11-25 — "두 서버 `refreshedAt` 이 9시간 차이인데 한쪽이 UTC 인가").
                 화면 시계와 이 값이 9시간 어긋나면 그 DB 가 UTC 다.""")
-        LocalDateTime dbNow
+        LocalDateTime dbNow,
+
+        @Schema(description = """
+                ★★**화면에 찍을 값 — 찍은 시각을 한국 시각으로 바꾼 것.**
+                「DSRE 자료 기준 : 2026-11-24 10:53」처럼 **그대로** 쓰면 된다.
+
+                ‼️**두 사본 DB 의 타임존이 서로 다르다**(실측 2026-11-25) — 운영 사본은 KST,
+                시험 사본은 UTC 로 돈다. 그래서 같은 날 아침에 찍은 두 사본이
+                `refreshedAt` 09:58 ↔ 01:53 으로 **9시간 차이**처럼 보였다.
+                `refreshedAt` 을 그대로 찍으면 한쪽이 9시간 이르게 보인다.
+
+                ★보정은 서버 한 곳에서 한다 — 화면마다 뺄셈을 두면 화면마다 달라진다.
+                사본 시계를 모르면 `null` 이다(그때는 「알 수 없음」으로).""")
+        LocalDateTime refreshedAtKst
 ) {
 }
