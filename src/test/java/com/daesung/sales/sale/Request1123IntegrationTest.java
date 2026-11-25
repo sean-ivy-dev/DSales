@@ -208,6 +208,54 @@ class Request1123IntegrationTest extends IntegrationTestSupport {
                 .containsExactly(java.util.Map.entry("요청1123 관리도서", 7L));
     }
 
+    @Test
+    @DisplayName("★★출고/반품 조회에서 **재고관리 N + 수불부노출 N** 만 뺀다(발주처 확정 2026-11-24 §2)")
+    void 재고관리N_수불부노출N만_제외() {
+        String day = YEAR + "-05-20";
+        // ① 재고관리 N + 수불부노출 N — **빠진다**
+        Long both = bookFlags("R23X1" + SFX, "둘다N", false, false);
+        // ② 재고관리 N + 수불부노출 Y — 남는다(한쪽만 N 이면 안 빠진다)
+        Long ledgerOnly = bookFlags("R23X2" + SFX, "수불부만Y", false, true);
+        // ③ 재고관리 Y + 수불부노출 N — 남는다
+        Long stockOnly = bookFlags("R23X3" + SFX, "재고관리만Y", true, false);
+
+        for (Long id : List.of(both, ledgerOnly, stockOnly)) {
+            assertThat(post("/sales/entries", Map.of(
+                    "salesDate", day, "partnerId", partner, "warehouseId", warehouse,
+                    "items", List.of(Map.of("productId", id, "shipmentType", "NORMAL_SHIP",
+                            "qty", 5, "unitPrice", 10000, "supplyRate", 70))))
+                    .path("success").asBoolean()).isTrue();
+        }
+
+        String q = "?fromDate=" + day + "&toDate=" + day + "&partnerIds=" + partner
+                + "&groupBy=PRODUCT";
+        java.util.Map<String, Long> all = qtyByName(get("/sales/group-totals" + q));
+        java.util.Map<String, Long> shipped =
+                qtyByName(get("/sales/group-totals" + q + "&shippedOnly=true"));
+
+        assertThat(all).as("‼️통합 매출 조회에서는 **빼지 않는다**(발주처 명시)")
+                .containsKeys("둘다N", "수불부만Y", "재고관리만Y");
+        assertThat(shipped.keySet())
+                .as("‼️출고/반품 조회 — 둘 다 N 인 것만 빠진다: %s", shipped)
+                .containsExactlyInAnyOrder("수불부만Y", "재고관리만Y");
+    }
+
+    /** 재고관리·수불부노출 플래그를 지정해 도서를 만든다. */
+    private Long bookFlags(String code, String name, boolean stockManaged, boolean ledgerVisible) {
+        Map<String, Object> b = new HashMap<>();
+        b.put("code", code);
+        b.put("name", name);
+        b.put("contentType", "SELF");
+        b.put("price", 10000);
+        b.put("catCode", CAT);
+        b.put("catName", CAT_NAME);
+        b.put("salesDivision", "교재");
+        b.put("taxFree", true);
+        b.put("stockManaged", stockManaged);
+        b.put("ledgerVisible", ledgerVisible);
+        return createId("/masters/products", b);
+    }
+
     private java.util.Map<String, Long> qtyByName(JsonNode res) {
         java.util.Map<String, Long> out = new java.util.LinkedHashMap<>();
         data(res).forEach(n -> out.put(n.path("name").asText(), n.path("qty").asLong()));

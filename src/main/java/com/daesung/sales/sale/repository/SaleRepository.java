@@ -473,7 +473,17 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
             "      coalesce(s.onlySales, false) = false "
             + "      and w.id is not null "
             + "      and coalesce(s.product.salesDivision, '') not in :lectureDivisions "
-            + "      and s.salesType <> com.daesung.sales.sale.entity.SalesType.CONSIGN_SALES ";
+            + "      and s.salesType <> com.daesung.sales.sale.entity.SalesType.CONSIGN_SALES "
+            // ★★**재고관리 N 그리고 수불부노출 N 인 상품은 뺀다**(발주처 확정 2026-11-24 §2).
+            //   "재고관리 N 그리고 수불부노출 N 인 상품만 출고/반품 조회에서 뺍니다.
+            //    통합 매출 조회에서는 빼지 않습니다."
+            //   → 두 조건을 **모두** 만족할 때만 빠진다. 한쪽이라도 Y 면 남는다.
+            //   ‼️통합 매출 조회는 이 조각을 쓰지 않으므로 그쪽은 그대로 전부 나온다.
+            //   실측(운영 2026-11-02): 통합 매출 591줄 · 출고/반품 조회 **29줄**
+            //   (제외 562줄은 거의 수능모의고사다 — DSRE 가 수불·작업비를 처리하는 상품이라
+            //    우리 쪽 출고 수량으로 세면 이중계산이 된다).
+            + "      and (coalesce(s.product.stockManaged, true) = true "
+            + "           or coalesce(s.product.ledgerVisible, true) = true) ";
 
     /**
      * [특약점 사이트] 재고현황 목록 범위(11/05 회신 §2 — 11/04 §4의 "최근 N개월"을
@@ -1359,6 +1369,7 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
              where s.canceled = false
                and s.deletedAt is null
                and p.ledgerVisible = true
+               and p.stockManaged = true
                and s.salesCategory <> com.daesung.sales.salestype.entity.SalesCategory.RETURN
                and s.salesDate between :from and :to
                and (:noPurchaser = true or pt.id not in :purchaserIds)
@@ -1430,6 +1441,7 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
              where s.canceled = false
                and s.deletedAt is null
                and p.ledgerVisible = true
+               and p.stockManaged = true
                and s.salesCategory = com.daesung.sales.salestype.entity.SalesCategory.RETURN
                and s.salesDate between :from and :to
                and (:noPurchaser = true or pt.id not in :purchaserIds)
