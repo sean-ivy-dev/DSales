@@ -49,7 +49,18 @@ public record PartnerResponse(
         @Schema(description = """
                 수정 버전 — **수정 요청에 그대로 되돌려 보내면** 다른 사람이 먼저 고친 것을
                 덮어쓰지 않는다(어긋나면 409). 안 보내면 예전처럼 그냥 덮어쓴다.""")
-        Long version
+        Long version,
+
+        @Schema(description = """
+                ★**마지막으로 고친 시각.** 거래처 변경은 상태변경 이력의 대상이 아니라
+                (`StatusEntityType` 에 거래처가 없다) <b>언제 바뀌었는지 알 길이 이것뿐이다</b>.
+
+                ‼️그래서 「담보 자료가 언제 운영에 반영됐나」에 답할 수 없었다(2026-11-26).
+                값은 전부터 DB 에 있었는데 응답에 담지 않았다.""")
+        java.time.LocalDateTime updatedAt,
+
+        @Schema(description = "마지막으로 고친 사람(로그인 사용자명). 위 `updatedAt` 과 짝이다")
+        String updatedBy
 ) {
     /**
      * 엔티티 → 응답. 사업자주민번호는 <b>여기서 마스킹</b>한다(DB-73).
@@ -65,6 +76,6 @@ public record PartnerResponse(
                 p.getZip(), p.getAddr1(), p.getAddr2(),
                 p.getStartDate(), p.getEndDate(), p.isExpired(),
                 p.getAssureAmount(), p.getAssureExpiry(), p.getAssureNote(),
-                p.getVersion());
+                p.getVersion(), p.getUpdatedAt(), p.getUpdatedBy());
     }
 }
