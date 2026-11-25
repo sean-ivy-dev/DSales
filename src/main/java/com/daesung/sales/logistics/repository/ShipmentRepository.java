@@ -512,4 +512,35 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             @org.springframework.data.repository.query.Param("phoneDigits") String phoneDigits,
             @org.springframework.data.repository.query.Param("fromDate") java.time.LocalDate fromDate,
             @org.springframework.data.repository.query.Param("toDate") java.time.LocalDate toDate);
+
+    /**
+     * <b>발송일이 빈 발송</b>을 연도별·진행상태별로 센다 — 이관 주문 일괄 발송완료 작업의
+     * <b>대상 건수</b>다(발주처 확정 2026-11-24 §1: "돌리기 전에 연도별 대상 건수를 먼저").
+     *
+     * <p>★진행상태는 {@code Shipment#progressState()} 와 <b>같은 판정</b>을 SQL 로 쓴다 —
+     * 삭제 → 취소 / 출력됨 → 발송준비중 / 접수단계 있으면 그 값 / 없으면 접수완료.
+     * ({@code sentDate} 가 비어 있는 것만 세므로 발송완료 가지는 들어올 수 없다)
+     * ‼️두 판정이 갈리면 「대상 건수」와 실제로 바뀌는 건수가 달라진다.
+     *
+     * <p>★<b>삭제분은 뺀다</b> — 지운 발송에 발송일을 채울 일은 없다.
+     *
+     * <p>반환 {@code Object[]}: [연도, 진행상태, 건수]. 연도는 거래일자 기준이다
+     * (발송일을 그 날짜로 채우기로 했으므로 같은 축으로 세는 것이 맞다).
+     */
+    @Query(value = """
+            SELECT YEAR(s.trade_date) AS yr,
+                   CASE WHEN s.printed_at IS NOT NULL THEN 'READY_TO_SHIP'
+                        WHEN s.intake_state IS NOT NULL THEN s.intake_state
+                        ELSE 'RECEIVED' END AS state,
+                   COUNT(*) AS cnt
+              FROM shipment s
+             WHERE s.deleted_at IS NULL
+               AND s.sent_date IS NULL
+             GROUP BY YEAR(s.trade_date),
+                   CASE WHEN s.printed_at IS NOT NULL THEN 'READY_TO_SHIP'
+                        WHEN s.intake_state IS NOT NULL THEN s.intake_state
+                        ELSE 'RECEIVED' END
+             ORDER BY yr, state
+            """, nativeQuery = true)
+    List<Object[]> missingSentDateByYear();
 }

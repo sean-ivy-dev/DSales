@@ -451,4 +451,23 @@ public class WorkController {
         return excel.asDownload(xlsx, "작업결과.xlsx");
     }
 
+    @Operation(summary = "발송일 빈 발송 — 연도·진행상태별 건수",
+            description = """
+                    **이관 주문 일괄 발송완료 작업의 대상 건수**다
+                    (발주처 확정 2026-11-24 — 발송일은 「각 주문의 거래일자와 같은 날」로 채운다).
+
+                    ★작업요청서 조회(`/logistics/work-orders`)로는 셀 수 없다 — 그쪽은 응답에
+                    발송일이 없고 **접수완료를 아예 제외**한다. 그래서 세는 경로를 따로 뒀다.
+
+                    · 연도는 **거래일자** 기준이다(발송일을 그 날짜로 채우므로 같은 축이다).
+                    · 삭제분은 뺀다 — 지운 발송에 발송일을 채울 일은 없다.
+                    · 진행상태 판정은 화면과 **같은 규칙**이다(출력됨 → 발송준비중 /
+                      접수단계 있으면 그 값 / 없으면 접수완료).
+
+                    ★**돌린 뒤 같은 경로로 다시 세면 전·후 비교**가 된다.""")
+    @GetMapping("/work-orders/missing-sent-date")
+    public ApiResponse<List<com.daesung.sales.logistics.dto.MissingSentDateRow>> missingSentDate() {
+        return ApiResponse.success(workService.missingSentDate());
+    }
+
 }

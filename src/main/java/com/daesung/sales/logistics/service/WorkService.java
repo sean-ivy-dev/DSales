@@ -527,4 +527,37 @@ public class WorkService {
     private static Integer boolToInt(Boolean b) {
         return (b == null) ? null : (b ? 1 : 0);
     }
+
+    /**
+     * <b>발송일이 빈 발송</b>의 연도별·진행상태별 건수 — 이관 주문 일괄 발송완료 작업의
+     * <b>대상 건수</b>다(발주처 확정 2026-11-24 §1 "돌리기 전에 연도별 대상 건수를 먼저").
+     *
+     * <p>★작업요청서 조회({@code workOrders})로는 셀 수 없다 — 그쪽은 응답에 발송일이 없고
+     * <b>접수완료를 아예 제외</b>한다(2026-11-16 (가)안). 그래서 세는 경로를 따로 둔다.
+     *
+     * <p>★돌린 뒤 같은 경로로 다시 세면 <b>전·후 비교</b>가 된다(발주처가 그것도 요구했다).
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<com.daesung.sales.logistics.dto.MissingSentDateRow> missingSentDate() {
+        java.util.List<com.daesung.sales.logistics.dto.MissingSentDateRow> out = new ArrayList<>();
+        for (Object[] r : shipmentRepository.missingSentDateByYear()) {
+            Integer year = (r[0] == null) ? null : ((Number) r[0]).intValue();
+            String state = (String) r[1];
+            out.add(new com.daesung.sales.logistics.dto.MissingSentDateRow(
+                    year, state, stateLabel(state), ((Number) r[2]).longValue()));
+        }
+        return out;
+    }
+
+    /** 진행상태 표기 — 담당자는 RECEIVED 가 아니라 '접수완료'라고 읽는다. */
+    private static String stateLabel(String state) {
+        return switch (state) {
+            case "RECEIVED" -> "접수완료";
+            case "PREPARING" -> "상품준비중";
+            case "READY_TO_SHIP" -> "발송준비중";
+            case "SHIPPED" -> "발송완료";
+            case "CANCELED" -> "취소";
+            default -> state;
+        };
+    }
 }
