@@ -681,6 +681,13 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
      * (회계구분·출고유형·창고·판매채널·거래순번)은 위탁 미결에 그 값이 없어 걸지 않는다 —
      * 억지로 맞추면 "위탁출고인데 출고유형으로 걸러 사라지는" 일이 생긴다.
      *
+     * <p>‼️<b>제외 기준(재고관리 N 「그리고」 수불부노출 N)도 여기 함께 건다</b>
+     * (발주처 확정 2026-11-24 §2). {@link #SHIPPED_PREDICATE} 에만 넣었다가
+     * <b>같은 상품이 매출로 나가면 빠지고 위탁으로 나가면 남는</b> 상태가 됐다 —
+     * 운영 실측으로 2줄(OUT-20261020-21·22)이 그렇게 남아 있었다.
+     * 발주처 기준은 <b>상품 기준</b>이므로 출고 경로를 가리지 않는다.
+     * 화면마다 재고 기준이 달랐던 레거시 실패 방식을 되풀이하지 않는다.
+     *
      * <p>★<b>이 조건은 이 파일 하나에만 있다.</b> {@code ConsignmentOutRepository}에
      * 같은 조건을 그대로 복사한 {@code findForShippedView}가 있었는데 <b>호출부가 0건</b>이었다
      * — 둘 중 하나만 고쳐지면 조회 결과가 갈릴 위험이라 2026-11-04 삭제했다. 위탁 미결 조회가
@@ -697,6 +704,8 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
                     or lower(cp.name) like :keyword or lower(cp.code) like :keyword
                     or lower(co.sourceOutNo) like :keyword
                     or lower(coalesce(co.schoolName, '')) like :keyword)
+               and (coalesce(cp.stockManaged, true) = true
+                    or coalesce(cp.ledgerVisible, true) = true)
             """;
 
     /**

@@ -240,6 +240,42 @@ class Request1123IntegrationTest extends IntegrationTestSupport {
                 .containsExactlyInAnyOrder("수불부만Y", "재고관리만Y");
     }
 
+    /**
+     * ‼️<b>위탁출고도 같은 기준으로 빠진다</b> — 예전엔 매출 줄만 빠지고 위탁 미결은 남았다.
+     *
+     * <p>제외 조건을 매출 쪽 판정 조각에만 넣었더니 <b>같은 상품이 매출로 나가면 빠지고
+     * 위탁으로 나가면 남는</b> 상태가 됐다(운영 실측 2줄 — OUT-20261020-21·22).
+     * 발주처 확정은 <b>상품 기준</b>이라 출고 경로를 가리지 않는다.
+     */
+    @Test
+    @DisplayName("★★위탁출고도 **재고관리 N + 수불부노출 N** 이면 출고/반품 조회에서 빠진다")
+    void 위탁출고도_같은_기준으로_제외() {
+        String day = YEAR + "-06-20";
+        Long consignWh = createId("/masters/warehouses", Map.of(
+                "code", "R23C" + SFX, "name", "요청1123위탁창고" + SFX,
+                "type", "CONSIGN", "ownerClientId", partner));
+        assertThat(consignWh).isNotNull();
+
+        Long bothN = bookFlags("R23Y1" + SFX, "위탁둘다N", false, false);
+        Long keepY = bookFlags("R23Y2" + SFX, "위탁재고관리Y", true, false);
+
+        for (Long id : List.of(bothN, keepY)) {
+            JsonNode r = post("/sales/entries", Map.of(
+                    "salesDate", day, "partnerId", partner, "warehouseId", warehouse,
+                    "items", List.of(Map.of("productId", id, "shipmentType", "CONSIGN_SHIP",
+                            "qty", 9, "unitPrice", 10000, "supplyRate", 70))));
+            assertThat(r.path("success").asBoolean()).as("위탁출고 등록: %s", r).isTrue();
+        }
+
+        String q = "?fromDate=" + day + "&toDate=" + day + "&partnerIds=" + partner
+                + "&groupBy=PRODUCT";
+        java.util.Map<String, Long> shipped =
+                qtyByName(get("/sales/group-totals" + q + "&shippedOnly=true"));
+        assertThat(shipped.keySet())
+                .as("‼️'위탁둘다N'이 남으면 같은 상품인데 출고 경로마다 기준이 다른 것이다: %s", shipped)
+                .containsExactly("위탁재고관리Y");
+    }
+
     /** 재고관리·수불부노출 플래그를 지정해 도서를 만든다. */
     private Long bookFlags(String code, String name, boolean stockManaged, boolean ledgerVisible) {
         Map<String, Object> b = new HashMap<>();
