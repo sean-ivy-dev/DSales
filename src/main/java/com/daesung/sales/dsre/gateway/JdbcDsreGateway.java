@@ -524,10 +524,27 @@ public class JdbcDsreGateway implements DsreGateway {
      *
      * <p>★한 번에 묻는다 — 화면이 열릴 때마다 부르는 값이라 왕복을 늘리지 않는다.
      */
+    /**
+     * 사본 상태 — <b>찍은 시각</b>·자료 끝·행 수를 한 번에 묻는다.
+     *
+     * <p>★★<b>찍은 시각은 {@code information_schema.TABLES.CREATE_TIME} 으로 안다.</b>
+     * 사본 갱신은 DB 를 통째로 지우고 다시 만드는 방식이라 <b>표 생성 시각이 곧 갱신 시각</b>이다
+     * (실측: 11/24 10:52 에 갱신했고 CREATE_TIME 이 그 시각이었다).
+     * 갱신 스크립트가 따로 기록을 남기지 않아도 되고, <b>누가 갱신했든</b> 알 수 있다 —
+     * 운영 쪽 사본은 우리가 갱신하지 않으므로 이 점이 중요하다.
+     *
+     * <p>★{@code NOW()} 를 함께 받는다 — 경과 일수를 <b>그 DB 의 현재</b>로 계산해야
+     * 사본 서버가 UTC 로 돌아도 「며칠 전」이 맞는다.
+     *
+     * <p>★{@code MAX(REG_DATE)} 는 <b>자료의 끝</b>이고 갱신 지연이 아니다(DTO 주석 참고).
+     */
     private static final String SNAPSHOT_SQL = """
-            SELECT (SELECT MAX(REG_DATE) FROM tbl_logis_cnt) AS data_as_of,
-                   (SELECT COUNT(*)      FROM tbl_logis_cnt) AS material_rows,
-                   (SELECT COUNT(*)      FROM tbl_request_info) AS request_rows
+            SELECT (SELECT MAX(REG_DATE) FROM tbl_logis_cnt)  AS data_as_of,
+                   (SELECT MAX(CREATE_TIME) FROM information_schema.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE())          AS refreshed_at,
+                   NOW()                                       AS db_now,
+                   (SELECT COUNT(*) FROM tbl_logis_cnt)        AS material_rows,
+                   (SELECT COUNT(*) FROM tbl_request_info)     AS request_rows
             """;
 
     @Override
@@ -535,14 +552,19 @@ public class JdbcDsreGateway implements DsreGateway {
         Map<String, Object> r = dsreJdbcTemplate.queryForMap(SNAPSHOT_SQL);
         // ‼️**드라이버가 무엇으로 주는지에 기대지 않는다.** MariaDB 드라이버는 datetime 을
         //   `LocalDateTime` 으로 주는데 `java.sql.Timestamp` 로 캐스팅했다가
-        //   ClassCastException 으로 **이 경로가 통째로 500** 이었다(배포 후 실측 2026-11-25).
-        //   같은 자리에서 Timestamp·LocalDateTime 둘 다 올 수 있으므로 양쪽을 받는다.
-        LocalDateTime asOf = toLocalDateTime(r.get("data_as_of"));
-        long behind = (asOf == null) ? Long.MAX_VALUE
-                : java.time.temporal.ChronoUnit.DAYS.between(asOf.toLocalDate(), LocalDate.now());
-        // 사본이 비어 있으면(asOf 없음) 가장 낡은 것으로 본다 — 「모른다」를 「최신」으로 보이게 하면 안 된다.
-        return new DsreSnapshot(asOf, (asOf == null) ? -1 : behind,
-                asOf == null || behind >= 2,
+        //   ClassCastException 으로 이 경로가 통째로 500 이었다(2026-11-25 실측).
+        LocalDateTime dataAsOf = toLocalDateTime(r.get("data_as_of"));
+        LocalDateTime refreshedAt = toLocalDateTime(r.get("refreshed_at"));
+        LocalDateTime dbNow = toLocalDateTime(r.get("db_now"));
+
+        long daysAgo = -1;
+        if (refreshedAt != null && dbNow != null) {
+            daysAgo = java.time.temporal.ChronoUnit.DAYS.between(
+                    refreshedAt.toLocalDate(), dbNow.toLocalDate());
+        }
+        // 찍은 시각을 모르면 **낡은 것으로 본다** — 「모른다」를 「최신」으로 보이게 하지 않는다.
+        boolean stale = (daysAgo < 0) || daysAgo >= 2;
+        return new DsreSnapshot(refreshedAt, daysAgo, stale, dataAsOf,
                 num(r.get("material_rows")), num(r.get("request_rows")));
     }
 
@@ -550,8 +572,8 @@ public class JdbcDsreGateway implements DsreGateway {
      * datetime 한 칸을 {@link LocalDateTime} 으로 — <b>드라이버가 무엇으로 주든</b> 받는다.
      *
      * <p>‼️MariaDB 드라이버는 {@code LocalDateTime} 을 준다. {@code java.sql.Timestamp} 로
-     * 캐스팅했다가 그 경로가 통째로 500 이었다. 드라이버·버전에 따라 갈리는 부분이라
-     * 한쪽으로 단정하지 않는다.
+     * 캐스팅했다가 {@code /dsre/snapshot} 이 통째로 500 이었다(배포 후 실측 2026-11-25).
+     * 드라이버·버전에 따라 갈리는 부분이라 한쪽으로 단정하지 않는다.
      */
     static LocalDateTime toLocalDateTime(Object v) {
         if (v == null) {
