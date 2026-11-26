@@ -231,10 +231,16 @@ public class ProductService {
         //   여기서 치우지 않으면 FK 가 가리키는 도서가 없어져 **500** 이 난다(PM 승인 2026-11-26).
         //   논리삭제를 쓰는 곳은 넷이다 — 매출 · 재고이벤트 · 세트구성 · 물류단가.
         //   ★살아 있는 행은 위 검사가 막으므로, 여기 오는 것은 전부 "이미 지운 것"뿐이다.
-        bomItemRepository.hardDeleteByProductId(id);
-        productRepository.hardDeleteSoftDeletedRates(id);
         productRepository.hardDeleteSoftDeletedTxns(id);
         productRepository.hardDeleteSoftDeletedSales(id);
+        // ★그리고 **이 도서에 딸린 설정·캐시**도 함께 치운다(PM 승인 2026-11-26) —
+        //   세트 구성 · 자재 매칭 · 물류단가 · 잔량 0 재고. 도서가 없으면 쓸 데가 없다.
+        //   ‼️**남의 세트 구성품**과 **잔량이 0이 아닌 재고**는 위 검사가 막는다.
+        //     조용히 지우면 남의 세트가 깨지고, 있는 물건이 장부에서 사라진다.
+        productRepository.hardDeleteOwnBom(id);
+        productRepository.hardDeleteMaterialBom(id);
+        productRepository.hardDeleteRates(id);
+        productRepository.hardDeleteEmptyInventory(id);
         Product target = getOrThrow(id);   // 벌크 DELETE 가 컨텍스트를 clear 한다
         productRepository.delete(target);
     }

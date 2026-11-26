@@ -33,6 +33,18 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * 오류 문구도 「매출 1,204건」처럼 나와 <b>살아 있는 매출이 있는 것처럼</b> 읽혔다.
      * (실측: 테스트 도서 3종의 「재고이벤트 6건」은 살아 있는 것이 <b>0줄</b>이었다)
      *
+     * <h3>★<b>막는 것</b>과 <b>함께 치우는 것</b>을 가른다</b>(PM 승인 2026-11-26)</h3>
+     * 「잘못 만든 도서를 바로 치우는 용도」라, 그 도서에 딸린 <b>설정·캐시</b>까지 담당자가
+     * 세 군데를 돌며 지우게 하지 않는다. 대신 <b>남의 것</b>과 <b>남는 숫자</b>는 막는다.
+     * <ul>
+     *   <li><b>막는다</b> — 매출 · 재고이벤트 · 위탁미결 · 재고실사 · 매출목표 ·
+     *       특약점 노출설정 · 특약점 재고 ·
+     *       <b>재고 잔량이 0이 아닌 것</b>(진짜 물건이 남아 있다) ·
+     *       <b>다른 세트의 구성품</b>(지우면 <b>남의 세트가 깨진다</b>)</li>
+     *   <li><b>함께 치운다</b>(삭제 시) — 이 도서의 <b>세트 구성</b> · <b>자재 매칭</b> ·
+     *       <b>물류단가</b> · <b>잔량 0인 재고 캐시</b>. 도서가 없으면 쓸 데가 없는 것들이다</li>
+     * </ul>
+     *
      * <p>★예전 주석 — 세트구성만 고쳤던 자리다.
      * 구성 비우기({@code DELETE /{id}/bom})는 <b>기록을 남기는 삭제</b>라, 그대로 세면
      * <b>구성을 비워도 도서를 지울 수 없었다</b> — 테스트로 등록한 2027 도서 3건이 그랬다.
@@ -44,19 +56,16 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     @Query(value = """
             SELECT '매출' AS ref, COUNT(*) AS cnt FROM sales
                        WHERE product_id = :id AND deleted_at IS NULL
-            UNION ALL SELECT '재고', COUNT(*) FROM inventory WHERE product_id = :id
+            UNION ALL SELECT '재고', COUNT(*) FROM inventory
+                       WHERE product_id = :id AND qty <> 0
             UNION ALL SELECT '재고이벤트', COUNT(*) FROM inventory_txn
                        WHERE product_id = :id AND deleted_at IS NULL
             UNION ALL SELECT '위탁미결', COUNT(*) FROM consignment_out WHERE product_id = :id
             UNION ALL SELECT '재고실사', COUNT(*) FROM stocktake_line WHERE product_id = :id
             UNION ALL SELECT '매출목표', COUNT(*) FROM sales_target WHERE product_id = :id
-            UNION ALL SELECT '세트구성', COUNT(*) FROM bom_items
-                       WHERE (parent_product_id = :id OR child_product_id = :id)
-                         AND deleted_at IS NULL
-            UNION ALL SELECT '자재매칭', COUNT(*) FROM material_bom
-                       WHERE set_product_id = :id OR round_product_id = :id
-            UNION ALL SELECT '물류단가', COUNT(*) FROM product_logis_rate
-                       WHERE product_id = :id AND deleted_at IS NULL
+            UNION ALL SELECT '다른 세트의 구성품', COUNT(*) FROM bom_items
+                       WHERE child_product_id = :id AND deleted_at IS NULL
+
             UNION ALL SELECT '특약점 노출설정', COUNT(*) FROM partner_product_visibility WHERE product_id = :id
             UNION ALL SELECT '특약점 재고', COUNT(*) FROM partner_product_stock WHERE product_id = :id
             """, nativeQuery = true)
@@ -320,4 +329,31 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             """, nativeQuery = true)
     int hardDeleteSoftDeletedSales(
             @org.springframework.data.repository.query.Param("id") Long id);
+
+    /** 이 도서가 <b>세트일 때</b>의 구성 — 함께 치운다. ‼️남의 세트 구성품은 위 검사가 막는다. */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @Query(value = "DELETE FROM bom_items WHERE parent_product_id = :id", nativeQuery = true)
+    int hardDeleteOwnBom(@org.springframework.data.repository.query.Param("id") Long id);
+
+    /** 이 도서의 <b>자재 매칭</b>(세트·회차 어느 쪽이든) — 도서가 없으면 쓸 데가 없다. */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @Query(value = """
+            DELETE FROM material_bom WHERE set_product_id = :id OR round_product_id = :id
+            """, nativeQuery = true)
+    int hardDeleteMaterialBom(@org.springframework.data.repository.query.Param("id") Long id);
+
+    /** 이 도서의 <b>물류단가</b> — 설정이라 함께 치운다. */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @Query(value = "DELETE FROM product_logis_rate WHERE product_id = :id", nativeQuery = true)
+    int hardDeleteRates(@org.springframework.data.repository.query.Param("id") Long id);
+
+    /**
+     * <b>잔량 0인 재고 캐시</b> — 치운다.
+     *
+     * <p>‼️재고는 {@code inventory_txn} 이 유일한 진실이고 이 표는 <b>다시 만들 수 있는 캐시</b>다.
+     * 잔량이 0이 아니면 위 검사가 막으므로, 여기 오는 것은 전부 0짜리다.
+     */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @Query(value = "DELETE FROM inventory WHERE product_id = :id AND qty = 0", nativeQuery = true)
+    int hardDeleteEmptyInventory(@org.springframework.data.repository.query.Param("id") Long id);
 }

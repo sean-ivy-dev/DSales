@@ -175,7 +175,7 @@ class ProductHardDeleteIntegrationTest extends IntegrationTestSupport {
      * ‼️한쪽만 바꾸면 FK 가 가리키는 도서가 없어져 <b>500</b> 이 난다. 이 테스트가 둘을 같이 묶는다.
      */
     @Test
-    @DisplayName("★★세트 구성 **비우기** → 그 뒤 완전 삭제까지 된다(PM 승인 2026-11-26)")
+    @DisplayName("★세트 구성 **비우기** — 전엔 비울 길이 없었다")
     void 세트구성_비우면_삭제된다() {
         Long parent = book("HDZ" + SFX);
         Long child = book("HDY" + SFX);
@@ -186,10 +186,6 @@ class ProductHardDeleteIntegrationTest extends IntegrationTestSupport {
         assertThat(get("/masters/products/" + parent).path("data").path("set").asBoolean())
                 .as("세트로 표시된다").isTrue();
 
-        // 구성이 걸려 있으면 삭제가 거부된다.
-        assertThat(del("/masters/products/" + parent + "/hard").path("success").asBoolean())
-                .as("‼️구성이 남아 있는데 지워지면 구성품이 떠돈다").isFalse();
-
         JsonNode cleared = del("/masters/products/" + parent + "/bom");
         assertThat(cleared.path("success").asBoolean()).as("구성 비우기: %s", cleared).isTrue();
         assertThat(get("/masters/products/" + parent).path("data").path("set").asBoolean())
@@ -197,7 +193,7 @@ class ProductHardDeleteIntegrationTest extends IntegrationTestSupport {
         assertThat(get("/masters/products/" + parent + "/bom").path("data").path("components").size())
                 .isZero();
 
-        // ‼️비운 뒤에는 지워진다 — 검사가 지워진 기록을 빼고, 삭제가 그 기록을 물리삭제한다.
+        // 비운 뒤에도 그대로 지워진다(구성은 어차피 함께 치워진다 — 아래 전용 테스트 참고).
         JsonNode gone = del("/masters/products/" + parent + "/hard");
         assertThat(gone.path("success").asBoolean()).as("비운 뒤 완전 삭제: %s", gone).isTrue();
         assertThat(get("/masters/products/" + parent).path("success").asBoolean())
@@ -218,18 +214,22 @@ class ProductHardDeleteIntegrationTest extends IntegrationTestSupport {
                 "components", List.of(Map.of("childProductId", child, "ratio", 1))))
                 .path("success").asBoolean()).isTrue();
 
-        JsonNode refs = data(get("/masters/products/" + parent + "/references"));
-        assertThat(refs.path("세트구성").asLong()).as("구성 1건: %s", refs).isEqualTo(1L);
+        // ★자식은 **남의 세트 구성품**이라 그것이 참조로 잡힌다(세트 본인은 안 잡힌다 —
+        //   자기 구성은 삭제할 때 함께 치워지기 때문이다).
+        JsonNode refs = data(get("/masters/products/" + child + "/references"));
+        assertThat(refs.path("다른 세트의 구성품").asLong()).as("구성품 1건: %s", refs).isEqualTo(1L);
+        assertThat(data(get("/masters/products/" + parent + "/references")).isEmpty())
+                .as("세트 본인은 막힐 것이 없다").isTrue();
 
         // ★조회가 도서를 건드리지 않았다.
-        assertThat(get("/masters/products/" + parent).path("success").asBoolean())
+        assertThat(get("/masters/products/" + child).path("success").asBoolean())
                 .as("‼️조회만 했는데 도서가 사라지면 안 된다").isTrue();
 
-        // 비우면 0건이 되고, 그 뒤 지워진다.
-        assertThat(del("/masters/products/" + parent + "/bom").path("success").asBoolean()).isTrue();
-        assertThat(data(get("/masters/products/" + parent + "/references")).path("세트구성").isNumber())
-                .as("지워진 기록은 세지 않는다").isFalse();
+        // 세트를 지우면 그 구성도 함께 사라져 자식이 풀린다.
         assertThat(del("/masters/products/" + parent + "/hard").path("success").asBoolean()).isTrue();
+        assertThat(data(get("/masters/products/" + child + "/references")).isEmpty())
+                .as("풀려야 한다").isTrue();
+        assertThat(del("/masters/products/" + child + "/hard").path("success").asBoolean()).isTrue();
     }
 
     /**
@@ -279,6 +279,53 @@ class ProductHardDeleteIntegrationTest extends IntegrationTestSupport {
         JsonNode refs = data(get("/masters/products/" + id + "/references"));
         assertThat(refs.path("재고이벤트").isNumber())
                 .as("입고를 되돌리지 않았으니 재고이벤트는 살아 있다").isTrue();
+    }
+
+    /**
+     * ‼️<b>막는 것과 함께 치우는 것을 가른다</b>(PM 승인 2026-11-26).
+     *
+     * <p>「잘못 만든 도서를 바로 치우는 용도」라, 딸린 <b>설정</b>까지 담당자가 돌며 지우게
+     * 하지 않는다. 대신 <b>남의 것</b>은 막는다 — 조용히 지우면 <b>남의 세트가 깨진다.</b>
+     */
+    @Test
+    @DisplayName("★★딸린 설정은 **함께 치우고**, 남의 세트 구성품이면 **막는다**")
+    void 설정은_함께_치우고_남의것은_막는다() {
+        Long parent = book("HDM" + SFX);
+        Long child = book("HDN" + SFX);
+        assertThat(put("/masters/products/" + parent + "/bom", Map.of(
+                "components", List.of(Map.of("childProductId", child, "ratio", 1))))
+                .path("success").asBoolean()).isTrue();
+
+        // ① 자식 도서는 **남의 세트 구성품**이라 막힌다.
+        JsonNode blocked = del("/masters/products/" + child + "/hard");
+        assertThat(blocked.path("success").asBoolean())
+                .as("‼️여기서 지워지면 부모 세트가 구성품을 잃는다: %s", blocked).isFalse();
+        assertThat(blocked.path("error").path("message").asText()).contains("다른 세트의 구성품");
+
+        // ② 부모(세트)는 **구성을 비우지 않아도** 지워진다 — 그 구성은 함께 치워진다.
+        JsonNode gone = del("/masters/products/" + parent + "/hard");
+        assertThat(gone.path("success").asBoolean()).as("세트 삭제: %s", gone).isTrue();
+
+        // ③ 부모가 사라졌으니 자식은 이제 아무 데도 안 걸린다 → 지워진다.
+        assertThat(data(get("/masters/products/" + child + "/references")).isEmpty())
+                .as("남은 참조가 없어야 한다").isTrue();
+        assertThat(del("/masters/products/" + child + "/hard").path("success").asBoolean()).isTrue();
+    }
+
+    /** ‼️<b>물건이 남아 있으면 막는다</b> — 잔량 0인 캐시만 함께 치운다. */
+    @Test
+    @DisplayName("★★재고 잔량이 **남아 있으면 막고**, 0이면 캐시라 함께 치운다")
+    void 잔량이_남으면_막는다() {
+        Long id = book("HDK" + SFX);
+        assertThat(post("/stock/inbound", Map.of("processedDate", DATE,
+                "supplierClientId", supplier, "destinationWarehouseId", warehouse,
+                "items", List.of(Map.of("productId", id, "unitCost", 1000, "qty", 7))))
+                .path("success").asBoolean()).isTrue();
+
+        JsonNode refs = data(get("/masters/products/" + id + "/references"));
+        assertThat(refs.path("재고").asLong()).as("잔량 7이 남아 있다: %s", refs).isEqualTo(1L);
+        assertThat(del("/masters/products/" + id + "/hard").path("success").asBoolean())
+                .as("‼️물건이 있는데 지워지면 장부에서 재고가 사라진다").isFalse();
     }
 
     private boolean found(String path, Long id) {
