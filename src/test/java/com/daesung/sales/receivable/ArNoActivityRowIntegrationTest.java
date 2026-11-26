@@ -38,6 +38,29 @@ class ArNoActivityRowIntegrationTest extends IntegrationTestSupport {
     private String freeOnlyCode;   // 무가(교사용)만 — 행이 없어야 한다
     private String nettedCode;     // 매출 = 수금 → 잔액 0 이지만 행이 있어야 한다
     private String plainCode;      // 보통 매출 — 대조용
+    private String zeroPriceSaleCode;  // 매출인데 공급률 0 — 행이 **있어야** 한다
+
+    /**
+     * ‼️<b>매출(공급률 0)만 있는 거래처는 행이 <u>있어야</u> 한다</b> — 무가만 있는 거래처와 다르다
+     * (발주처 2026-11-26 10번).
+     *
+     * <p>레거시 union 의 바깥 WHERE 가
+     * {@code (무상 and supRate>0) or (반품 and supRate>0) or (무상·반품·대체 아님)} 이라
+     * <b>매출은 공급률 0 이어도 세 번째 조건에 걸려 들어간다.</b>
+     *
+     * <p>운영 실측: 연구소(E10A122) 1~10월이 <b>매출 1줄·수량 10·금액 0</b> 인데,
+     * 금액만 보고 걸러 <b>거래처 줄이 통째로 사라졌다</b>(레거시는 매출수량 10 으로 보여준다).
+     * 발주처가 두 엑셀을 맞출 때 그 줄이 비어 보였다.
+     */
+    @Test
+    @DisplayName("★★매출 공급률 0 — **금액 0 이어도 행이 있다**(무가만 있는 것과 다르다)")
+    void 매출_공급률0은_행이_있다() {
+        JsonNode r = row(zeroPriceSaleCode);
+        assertThat(r).as("‼️금액만 보고 걸러내면 '수량은 있는데 거래처가 없는' 표가 된다").isNotNull();
+        assertThat(r.path("saleQty").asLong()).as("수량은 그대로 나온다").isEqualTo(30L);
+        assertThat(r.path("saleAmount").asLong()).as("금액은 0 이다").isZero();
+        assertThat(r.path("balance").asLong()).as("잔액도 0").isZero();
+    }
 
     @BeforeAll
     void seed() {
@@ -80,6 +103,17 @@ class ArNoActivityRowIntegrationTest extends IntegrationTestSupport {
                 "collDate", YEAR + "-03-20", "partnerId", netted,
                 "collKind", "도서대금", "collType", "CASH", "collAmt", 70_000));
         assertThat(coll.path("success").asBoolean()).as("수금 등록: %s", coll).isTrue();
+
+        // ④ **매출인데 공급률 0** — 금액은 0 이지만 레거시에 행이 있다(발주처 11/26 10번).
+        // ‼️접두어는 이 파일에서 안 쓰는 것으로 — NAD 는 아래 취소 테스트가 쓴다.
+        zeroPriceSaleCode = "NAZ" + SFX;
+        Long zeroPriceSale = createId("/masters/clients",
+                Map.of("code", zeroPriceSaleCode, "name", "공급률0 매출 거래처", "type", "NORMAL"));
+        assertThat(post("/sales/entries", Map.of(
+                "salesDate", YEAR + "-03-15", "partnerId", zeroPriceSale, "warehouseId", wh,
+                "items", List.of(Map.of("productId", book, "shipmentType", "NORMAL_SHIP",
+                        "qty", 30, "unitPrice", 10_000, "supplyRate", 0))))
+                .path("success").asBoolean()).isTrue();
 
         // ③ 보통 매출 — 화면이 비지 않았음을 보이는 대조군
         assertThat(post("/sales/entries", Map.of(

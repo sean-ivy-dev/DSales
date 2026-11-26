@@ -689,8 +689,20 @@ public class ReceivableService {
             //     됐다(D·G·H 구간이 통째로 사라짐. 금액은 0 이라 합계는 같았다 — 발주처 11/12 지적).
             boolean hasOpeningRecord = carry.containsKey(pid) || priorSales.containsKey(pid)
                     || priorColl.containsKey(pid) || priorPurchase.containsKey(pid);
+            // ‼️**수량만 있고 금액이 0 인 거래처도 내야 한다**(발주처 2026-11-26 10번).
+            //   공급률 0 으로 판 매출은 금액이 0 이라 `s[0] == 0` 에 걸려 **거래처 줄이 통째로
+            //   사라졌다** — 연구소(E10A122)가 그랬다(1~10월 매출 1줄·수량 10·금액 0).
+            //   레거시는 그 거래처를 **매출수량 10 으로 보여준다.** 금액만 보면 "수량은 있는데
+            //   거래처가 없는" 표가 되고, 발주처가 두 엑셀을 맞출 때 그 줄이 비어 보인다.
+            //   ‼️**교사용 수량(s[5])은 넣지 않는다.** 레거시 union 의 바깥 WHERE 가
+            //     `(무상 and supRate>0) or (반품 and supRate>0) or (무상·반품·대체 아님)` 이라
+            //     **공급률 0 무가(교사용·증정)만 있는 거래처는 레거시 화면에도 없다**
+            //     (PM 확정 2026-11-10 "레거시와 같게". {@code ArNoActivityRowIntegrationTest} 가 못박는다).
+            //     반면 **매출(무상·반품·대체가 아닌 것)** 은 공급률 0 이어도 세 번째 조건에 걸려 들어간다 —
+            //     연구소가 그 경우다. 그래서 보는 것은 **매출·반품 수량뿐**이다.
+            boolean hasQty = s[6] != 0 || s[7] != 0;
             boolean noActivity = !hasOpeningRecord && s[0] == 0 && collected == 0
-                    && purchased == 0 && purchasedQty == 0;
+                    && purchased == 0 && purchasedQty == 0 && !hasQty;
             if (noActivity) {
                 continue;
             }
