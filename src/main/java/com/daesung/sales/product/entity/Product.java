@@ -209,6 +209,16 @@ public class Product extends BaseEntity {
         this.set = true;
     }
 
+    /**
+     * 세트 표시를 <b>내린다</b> — 구성을 비울 때 쓴다.
+     *
+     * <p>‼️구성을 다 지웠는데 세트 표시가 남으면 <b>구성품 없는 세트</b>가 된다.
+     * 조립·해체 화면이 그걸 세트로 집어 올리고, 구성이 없어 아무 것도 못 한다.
+     */
+    public void markAsSingle() {
+        this.set = false;
+    }
+
     /** 변경이력용 스냅샷(필드명|한글라벨 → 값). 근거: 발주처 확정 3-1(라). */
     public java.util.Map<String, String> auditSnapshot() {
         java.util.Map<String, String> m = new java.util.LinkedHashMap<>();

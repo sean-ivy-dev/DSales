@@ -213,6 +213,22 @@ public class ProductController {
         return ApiResponse.success(productService.registerBom(id, req));
     }
 
+    @Operation(summary = "세트 구성 비우기",
+            description = """
+                    구성품을 다 지우고 **세트 표시도 내린다**(단품으로 돌아간다).
+
+                    ‼️`PUT /{id}/bom` 은 구성 목록이 **비면 거부**한다(`@NotEmpty`) —
+                    그래서 한 번 세트가 된 도서는 구성을 풀 길이 없었고,
+                    참조가 남아 **도서를 지울 수도 없었다**(발주처 2026-11-26 — 테스트로 등록한
+                    2027 도서 3건을 지우려는데 세트 구성 4행이 걸렸다).
+
+                    ★`PUT` 에서 빈 목록을 받아 주는 쪽은 택하지 않았다 — 실수로 빈 본문을 보내면
+                    멀쩡한 세트가 조용히 풀린다. **비우는 것은 이 경로로 따로** 부른다.""")
+    @DeleteMapping("/{id}/bom")
+    public ApiResponse<BomResponse> clearBom(@PathVariable Long id) {
+        return ApiResponse.success(productService.clearBom(id));
+    }
+
     // ── 거래처별 단가(34p)는 별도 컨트롤러다 ──────────────────────────────
     //   화면은 도서관리 3번째 탭이지만 데이터에 도서 차원이 없다 —
     //   정본 34p가 "거래처별로 상품군(대분류)마다"라고 못박고 있다.

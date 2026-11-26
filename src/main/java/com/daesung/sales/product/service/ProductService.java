@@ -271,6 +271,27 @@ public class ProductService {
         return BomResponse.from(parent, saved);
     }
 
+    /**
+     * 세트 <b>구성 비우기</b> — 구성품을 다 지우고 세트 표시도 내린다.
+     *
+     * <p>‼️{@code PUT /{id}/bom} 은 {@code @NotEmpty} 라 <b>빈 목록으로 비울 수 없었다</b>.
+     * 그래서 한 번 세트가 된 도서는 구성을 풀 길이 없고, 참조가 남아 <b>도서를 지울 수도 없었다</b>
+     * (발주처 2026-11-26 — 테스트로 등록한 2027 도서 3건을 지우려는데 세트 구성 4행이 걸렸다).
+     *
+     * <p>★{@code PUT} 에서 빈 목록을 허용하는 쪽은 택하지 않았다 — 실수로 빈 본문을 보내면
+     * 멀쩡한 세트가 조용히 풀린다. <b>비우는 것은 따로 부르게</b> 한다.
+     *
+     * @return 비운 뒤 상태(구성 0건)
+     */
+    @Transactional
+    public BomResponse clearBom(Long parentId) {
+        getOrThrow(parentId);
+        bomItemRepository.softDeleteByParentId(parentId, LocalDateTime.now(), currentAuditor.username());
+        Product parent = getOrThrow(parentId);   // 벌크 UPDATE 가 컨텍스트를 clear 한다
+        parent.markAsSingle();
+        return BomResponse.from(parent, List.of());
+    }
+
     public BomResponse getBom(Long parentId) {
         Product parent = getOrThrow(parentId);
         return BomResponse.from(parent, bomItemRepository.findByParentId(parentId));

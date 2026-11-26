@@ -162,6 +162,49 @@ class ProductHardDeleteIntegrationTest extends IntegrationTestSupport {
                 .as("useYn 이 더 구체적인 조건이라 이겨야 한다").isFalse();
     }
 
+    /**
+     * ‼️<b>세트 구성 비우기</b> — 비울 길이 아예 없었다(발주처 2026-11-26).
+     *
+     * <p>{@code PUT /{id}/bom} 은 구성 목록이 비면 거부한다({@code @NotEmpty}) —
+     * 그래서 한 번 세트가 된 도서는 <b>구성을 풀 길이 없었다.</b>
+     *
+     * <p>★★<b>비워도 완전 삭제는 여전히 거부된다</b> — 이 테스트가 그 사실까지 못박는다.
+     * 구성 비우기는 <b>논리삭제</b>(언제 어떤 구성이었는지 남긴다)인데,
+     * 참조 검사({@code countReferences})가 {@code bom_items} 를 <b>삭제 표시까지 포함해</b> 센다.
+     * 완전 삭제까지 풀려면 ①참조 검사에서 삭제 표시를 빼고 ②완전 삭제가 그 행을 물리삭제하는
+     * <b>두 가지를 함께</b> 바꿔야 한다(한쪽만 바꾸면 FK 로 500 이 난다).
+     * 발주처 승인 전에는 손대지 않는다.
+     */
+    @Test
+    @DisplayName("★★세트 구성 **비우기** — 전엔 비울 길이 없었다(비워도 완전삭제는 아직 거부)")
+    void 세트구성_비우면_삭제된다() {
+        Long parent = book("HDZ" + SFX);
+        Long child = book("HDY" + SFX);
+
+        assertThat(put("/masters/products/" + parent + "/bom", Map.of(
+                "components", List.of(Map.of("childProductId", child, "ratio", 1))))
+                .path("success").asBoolean()).isTrue();
+        assertThat(get("/masters/products/" + parent).path("data").path("set").asBoolean())
+                .as("세트로 표시된다").isTrue();
+
+        // 구성이 걸려 있으면 삭제가 거부된다.
+        assertThat(del("/masters/products/" + parent + "/hard").path("success").asBoolean())
+                .as("‼️구성이 남아 있는데 지워지면 구성품이 떠돈다").isFalse();
+
+        JsonNode cleared = del("/masters/products/" + parent + "/bom");
+        assertThat(cleared.path("success").asBoolean()).as("구성 비우기: %s", cleared).isTrue();
+        assertThat(get("/masters/products/" + parent).path("data").path("set").asBoolean())
+                .as("‼️세트 표시가 남으면 구성품 없는 세트가 된다").isFalse();
+        assertThat(get("/masters/products/" + parent + "/bom").path("data").path("components").size())
+                .isZero();
+
+        // ‼️비워도 **아직 지워지지 않는다** — 참조 검사가 삭제 표시된 구성까지 센다.
+        //   이게 발주처 11/26 "테스트 도서 3건 삭제"가 막히는 지점이다.
+        assertThat(del("/masters/products/" + parent + "/hard").path("success").asBoolean())
+                .as("‼️여기가 true 로 바뀌면 참조 검사·물리삭제를 함께 고친 것이다 — 문서도 함께 고칠 것")
+                .isFalse();
+    }
+
     private boolean found(String path, Long id) {
         JsonNode res = get(path);
         for (JsonNode n : res.path("data").path("content")) {
