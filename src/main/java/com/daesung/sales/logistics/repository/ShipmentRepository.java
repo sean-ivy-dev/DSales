@@ -600,6 +600,48 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             @org.springframework.data.repository.query.Param("toDate") java.time.LocalDate toDate);
 
     /**
+     * 위 집계의 <b>행 목록</b> — 주문 하나가 한 줄이다(발주처 2026-11-26 "지우기 전에 대상 목록 먼저").
+     *
+     * <p>★집계({@link #migratedMissingSentDateByYear})와 <b>같은 조건·같은 묶음</b>을 쓴다 —
+     * 갈리면 "목록 줄 수"와 "집계 건수"가 달라져 둘 다 못 믿는다.
+     *
+     * <p>★이 목록이 있어야 <b>11/23 에 드린 641행과 행 단위로 맞춰</b> 어느 줄이 더해지고
+     * 빠졌는지 볼 수 있다. 집계만으로는 "주문 +13 · 발송 −25" 까지만 알고 정체를 못 짚는다.
+     *
+     * <p>반환 {@code Object[]}: [주문일, 거래처코드, 거래처명, 학교코드, 학교명, 분류, 진행상태, 발송건수].
+     */
+    @Query(value = """
+            SELECT s.trade_date AS trade_date,
+                   p.code AS partner_code,
+                   p.name AS partner_name,
+                   COALESCE(s.school_code, '') AS school_code,
+                   COALESCE(MAX(s.school_name), '') AS school_name,
+                   COALESCE(s.trade_class, '') AS trade_class,
+                   CASE WHEN s.printed_at IS NOT NULL THEN 'READY_TO_SHIP'
+                        WHEN s.intake_state IS NOT NULL THEN s.intake_state
+                        ELSE 'RECEIVED' END AS state,
+                   COUNT(*) AS shipments
+              FROM shipment s
+              JOIN partners p ON p.id = s.partner_id
+             WHERE s.deleted_at IS NULL
+               AND s.sent_date IS NULL
+               AND COALESCE(s.entry_no, '') = ''
+               AND p.code NOT LIKE 'ZZT%'
+               AND p.name NOT LIKE '[TEST]%'
+               AND (:fromDate IS NULL OR s.trade_date >= :fromDate)
+               AND (:toDate   IS NULL OR s.trade_date <= :toDate)
+             GROUP BY s.trade_date, p.code, p.name,
+                   COALESCE(s.school_code, ''), COALESCE(s.trade_class, ''),
+                   CASE WHEN s.printed_at IS NOT NULL THEN 'READY_TO_SHIP'
+                        WHEN s.intake_state IS NOT NULL THEN s.intake_state
+                        ELSE 'RECEIVED' END
+             ORDER BY s.trade_date, p.code, school_code, trade_class
+            """, nativeQuery = true)
+    List<Object[]> migratedMissingSentDateRows(
+            @org.springframework.data.repository.query.Param("fromDate") java.time.LocalDate fromDate,
+            @org.springframework.data.repository.query.Param("toDate") java.time.LocalDate toDate);
+
+    /**
      * 발송의 <b>등록번호를 비운다</b> — 이관분과 같은 모양을 만드는 <b>검증 전용</b>이다.
      *
      * <p>운영 발송 34,515건이 이 상태다(이관이 등록번호 없이 넣었다). 그 모양을 테스트에서

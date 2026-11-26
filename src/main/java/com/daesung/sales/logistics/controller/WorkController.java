@@ -496,4 +496,29 @@ public class WorkController {
                 : workService.missingSentDate());
     }
 
+    @Operation(summary = "★발송일 빈 이관 주문 — 대상 목록(행 단위)",
+            description = """
+                    위 집계의 **행 목록**. 한 줄이 주문 하나다
+                    (발주처 2026-11-26 "지우기 전에 대상 목록 먼저").
+
+                    ★집계와 **같은 조건·같은 묶음**을 쓴다 — 갈리면 목록 줄 수와 집계 건수가
+                    달라져 둘 다 못 믿는다. 이관분은 등록번호가 없어 발송이
+                    **(일자 + 거래처 + 학교 + 분류)** 로 묶이고, 그 묶음이 주문이다.
+
+                    ★**돌리기 전에 이 목록을 내고, 돌린 뒤 같은 경로로 다시 받아**
+                    사라졌는지 확인한다. 전·후 대조가 이것으로 된다.""")
+    @GetMapping("/work-orders/missing-sent-date/detail")
+    public ApiResponse<List<com.daesung.sales.logistics.dto.MissingSentDateDetailRow>>
+            missingSentDateDetail(
+            @io.swagger.v3.oas.annotations.Parameter(description = "거래일자 시작(선택)")
+            @org.springframework.format.annotation.DateTimeFormat(
+                    iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE)
+            @RequestParam(required = false) java.time.LocalDate fromDate,
+            @io.swagger.v3.oas.annotations.Parameter(description = "거래일자 끝(선택)")
+            @org.springframework.format.annotation.DateTimeFormat(
+                    iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE)
+            @RequestParam(required = false) java.time.LocalDate toDate) {
+        return ApiResponse.success(workService.migratedMissingSentDateRows(fromDate, toDate));
+    }
+
 }

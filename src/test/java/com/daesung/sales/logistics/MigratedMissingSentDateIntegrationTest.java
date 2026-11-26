@@ -128,6 +128,39 @@ class MigratedMissingSentDateIntegrationTest extends IntegrationTestSupport {
                 .as("‼️4월 건인데 5월부터로 좁혔는데도 나왔다 — 기간이 안 먹는 것이다").isNull();
     }
 
+    /**
+     * ‼️<b>목록과 집계가 갈리면 둘 다 못 믿는다</b> — 같은 조건·같은 묶음을 쓰는지 못박는다.
+     *
+     * <p>대상 목록은 "돌리기 전에 무엇이 바뀌나"를 보여주고, 돌린 뒤 같은 경로로
+     * 다시 받아 사라졌는지 확인하는 용도다(발주처 2026-11-26).
+     */
+    @Test
+    @DisplayName("★★대상 목록 — **집계와 같은 줄 수·같은 발송 수**(갈리면 둘 다 못 믿는다)")
+    void 대상목록이_집계와_맞는다() {
+        JsonNode list = data(get("/logistics/work-orders/missing-sent-date/detail"
+                + "?fromDate=" + YEAR + "-01-01&toDate=" + YEAR + "-12-31"));
+        assertThat(list.size()).as("주문 1건(묶음 하나): %s", list).isEqualTo(1);
+
+        JsonNode row = list.get(0);
+        assertThat(row.path("shipmentCount").asLong())
+                .as("‼️한 주문에 발송 2건 — 1 로 나오면 묶음이 아니라 발송을 센 것이다").isEqualTo(2L);
+        assertThat(row.path("partnerCode").asText()).isEqualTo("MGP" + SFX);
+        assertThat(row.path("tradeDate").asText()).isEqualTo(DAY);
+        assertThat(row.path("progressStateName").asText()).isEqualTo("접수완료");
+
+        // 집계와 맞아야 한다 — 줄 수 = 주문 수, 발송 합 = 발송 수.
+        JsonNode agg = rowOf(get("/logistics/work-orders/missing-sent-date?migratedOnly=true"
+                + "&fromDate=" + YEAR + "-01-01&toDate=" + YEAR + "-12-31"));
+        long listShipments = 0;
+        for (JsonNode n : list) {
+            listShipments += n.path("shipmentCount").asLong();
+        }
+        assertThat((long) list.size()).as("목록 줄 수 = 집계 주문 수")
+                .isEqualTo(agg.path("orderCount").asLong());
+        assertThat(listShipments).as("목록 발송 합 = 집계 발송 수")
+                .isEqualTo(agg.path("count").asLong());
+    }
+
     /** 그 해 줄 하나를 꺼낸다(상태는 하나만 생긴다). */
     private JsonNode rowOf(JsonNode res) {
         for (JsonNode n : data(res)) {

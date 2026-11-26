@@ -570,6 +570,26 @@ public class WorkService {
         return out;
     }
 
+    /**
+     * 같은 조건의 <b>행 목록</b> — 일괄 발송완료의 <b>대상 목록</b>이다.
+     *
+     * <p>집계가 "몇 건"만 말한다면 이것은 "어느 줄"을 말한다. 돌리기 전에 이 목록을 내고,
+     * 돌린 뒤 같은 경로로 다시 받아 <b>사라졌는지</b> 확인한다.
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<com.daesung.sales.logistics.dto.MissingSentDateDetailRow>
+            migratedMissingSentDateRows(java.time.LocalDate fromDate, java.time.LocalDate toDate) {
+        java.util.List<com.daesung.sales.logistics.dto.MissingSentDateDetailRow> out = new ArrayList<>();
+        for (Object[] r : shipmentRepository.migratedMissingSentDateRows(fromDate, toDate)) {
+            String state = (String) r[6];
+            out.add(new com.daesung.sales.logistics.dto.MissingSentDateDetailRow(
+                    ((java.sql.Date) r[0]).toLocalDate(),
+                    (String) r[1], (String) r[2], (String) r[3], (String) r[4], (String) r[5],
+                    state, stateLabel(state), ((Number) r[7]).longValue()));
+        }
+        return out;
+    }
+
     /** 진행상태 표기 — 담당자는 RECEIVED 가 아니라 '접수완료'라고 읽는다. */
     private static String stateLabel(String state) {
         return switch (state) {
