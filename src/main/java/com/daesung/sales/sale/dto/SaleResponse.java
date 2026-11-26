@@ -119,6 +119,21 @@ public record SaleResponse(
         String memo,
 
         @Schema(description = """
+                ★**등록한 시각**. 거래일자(`salesDate`)와 <b>다르다</b> —
+                "일자는 10월인데 11월에 입력한 건"을 가려내는 칸이다.
+
+                ‼️12/10 차이분 이관이 그것 때문에 생겼다(발주처 2026-11-26):
+                자사몰 10/31 수금이 **11/11에 기존 프로그램에 입력**돼,
+                일자로 가르면 빠진다. 매출도 같은 일이 생길 수 있는데
+                이 칸이 없어 **셀 수가 없었다.**""")
+        java.time.LocalDateTime createdAt,
+
+        @Schema(description = """
+                ★**마지막으로 고친 시각.** 같은 건을 양쪽에서 고쳤는지 보는 칸이다
+                (발주처 2026-11-26 ④ "양쪽에서 고친 경우 어느 쪽을 남기나").""")
+        java.time.LocalDateTime updatedAt,
+
+        @Schema(description = """
                 **재고 경고**(차단 아님). 이 호출로 재고가 음수가 되면 담긴다.
                 조회에서는 비어 있고 <b>수정·삭제·취소 응답에만</b> 채워진다
                 (프론트 요청 2026-11-17 §6 — 「경고를 싣지 않는 세 경로」).
@@ -213,6 +228,9 @@ public record SaleResponse(
                 s.getEntryNo(), s.getEntrySeq(), s.getTradeSeq(), s.getOnlySales(),
                 s.isAmountOverridden(),
                 s.getMemo(),
+                // ★등록·수정 시각 — 거래일자와 다르다. "일자는 10월인데 11월에 입력한 건"을
+                //   가려내는 칸이다(발주처 2026-11-26 12/10 차이분).
+                s.getCreatedAt(), s.getUpdatedAt(),
                 // ★조회에는 재고 경고가 없다 — 수정·삭제·취소 응답에서 withWarnings 로 붙인다.
                 null);
     }
@@ -250,6 +268,7 @@ public record SaleResponse(
                 o.unitPrice(), o.supplyRate(), o.discountAmount(), o.qty(), o.supplyAmount(),
                 o.tax(), o.totalAmount(), o.canceled(), o.warehouseId(), o.warehouseName(),
                 o.salesChannel(), o.orderChannel(), o.orderChannelName(), o.entryNo(),
-                o.entrySeq(), o.tradeSeq(), o.onlySales(), o.amountOverridden(), o.memo(), w);
+                o.entrySeq(), o.tradeSeq(), o.onlySales(), o.amountOverridden(), o.memo(),
+                o.createdAt(), o.updatedAt(), w);
     }
 }
