@@ -494,7 +494,11 @@ public class WorkService {
                                     .displayLabel(s.getCourierName()),
                     s.getTrackingNo(),
                     trackingsOf(s),
-                    total, lines));
+                    total,
+                    // ★언제·누가 마지막으로 손댔나 — 발송은 상태가 조용히 바뀐다.
+                    //   값은 전부터 있었고 응답에만 없었다(PM 승인 2026-11-26).
+                    s.getUpdatedAt(), s.getUpdatedBy(),
+                    lines));
         }
         return out;
     }

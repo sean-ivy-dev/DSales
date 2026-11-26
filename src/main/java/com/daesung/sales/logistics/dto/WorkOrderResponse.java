@@ -74,6 +74,22 @@ public record WorkOrderResponse(
                 박스 번호 순으로 돌아온다. 비어 있으면 아직 송장이 없다.""")
         List<Tracking> trackings,
         @Schema(description = "총 수량") long totalQty,
+
+        @Schema(description = """
+                ★**이 발송이 마지막으로 바뀐 시각**(PM 승인 2026-11-26).
+
+                ‼️발송은 상태가 조용히 바뀐다 — 발송일이 채워지거나 지워지고, 출력됐다 취소되고,
+                지워졌다 되살아난다. 그런데 **언제 바뀌었는지 볼 자리가 없었다.**
+                11/23에 드린 641건 목록이 사흘 만에 654건이 됐을 때
+                **무엇이 언제 움직였는지 답할 수 없었다.**
+
+                거래일자(`tradeDate`)·발송일(`sentDate`)과 **다르다** — 저 둘은 업무 날짜이고
+                이것은 **자료가 손대진 시각**이다. 12/10 차이분 점검에도 이 축으로 본다.""")
+        java.time.LocalDateTime updatedAt,
+
+        @Schema(description = "마지막으로 바꾼 사람(로그인 사용자명)")
+        String updatedBy,
+
         @Schema(description = "도서별 지시 목록") List<Line> lines
 ) {
     /** 박스 한 줄의 송장. */
