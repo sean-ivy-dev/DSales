@@ -26,7 +26,14 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * {@code product_partner_price} 는 V42 에서 삭제돼 빠졌다.
      * ‼️테이블이 늘면 <b>여기도 늘려야 한다</b> — 빠뜨리면 FK 오류로 500 이 난다.
      *
-     * <p>‼️<b>세트구성은 「지워진 기록」을 빼고 센다</b>(PM 승인 2026-11-26).
+     * <p>‼️<b>「지워진 기록」은 빼고 센다</b>(PM 승인 2026-11-26).
+     * 논리삭제를 쓰는 곳은 <b>넷</b>이다 — 매출 · 재고이벤트 · 세트구성 · 물류단가.
+     * 그 넷을 지워진 행까지 세고 있었다. 그래서
+     * <b>목록·조회에서는 이미 사라진 것이 삭제만 막고</b> 있었고,
+     * 오류 문구도 「매출 1,204건」처럼 나와 <b>살아 있는 매출이 있는 것처럼</b> 읽혔다.
+     * (실측: 테스트 도서 3종의 「재고이벤트 6건」은 살아 있는 것이 <b>0줄</b>이었다)
+     *
+     * <p>★예전 주석 — 세트구성만 고쳤던 자리다.
      * 구성 비우기({@code DELETE /{id}/bom})는 <b>기록을 남기는 삭제</b>라, 그대로 세면
      * <b>구성을 비워도 도서를 지울 수 없었다</b> — 테스트로 등록한 2027 도서 3건이 그랬다.
      * ★짝으로 {@link com.daesung.sales.product.service.ProductService} 의 완전 삭제가
@@ -35,9 +42,11 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * @return [참조처 이름, 건수] — 건수가 0인 줄은 빠진다
      */
     @Query(value = """
-            SELECT '매출' AS ref, COUNT(*) AS cnt FROM sales WHERE product_id = :id
+            SELECT '매출' AS ref, COUNT(*) AS cnt FROM sales
+                       WHERE product_id = :id AND deleted_at IS NULL
             UNION ALL SELECT '재고', COUNT(*) FROM inventory WHERE product_id = :id
-            UNION ALL SELECT '재고이벤트', COUNT(*) FROM inventory_txn WHERE product_id = :id
+            UNION ALL SELECT '재고이벤트', COUNT(*) FROM inventory_txn
+                       WHERE product_id = :id AND deleted_at IS NULL
             UNION ALL SELECT '위탁미결', COUNT(*) FROM consignment_out WHERE product_id = :id
             UNION ALL SELECT '재고실사', COUNT(*) FROM stocktake_line WHERE product_id = :id
             UNION ALL SELECT '매출목표', COUNT(*) FROM sales_target WHERE product_id = :id
@@ -46,7 +55,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
                          AND deleted_at IS NULL
             UNION ALL SELECT '자재매칭', COUNT(*) FROM material_bom
                        WHERE set_product_id = :id OR round_product_id = :id
-            UNION ALL SELECT '물류단가', COUNT(*) FROM product_logis_rate WHERE product_id = :id
+            UNION ALL SELECT '물류단가', COUNT(*) FROM product_logis_rate
+                       WHERE product_id = :id AND deleted_at IS NULL
             UNION ALL SELECT '특약점 노출설정', COUNT(*) FROM partner_product_visibility WHERE product_id = :id
             UNION ALL SELECT '특약점 재고', COUNT(*) FROM partner_product_stock WHERE product_id = :id
             """, nativeQuery = true)
@@ -275,4 +285,39 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             """)
     boolean isDealerVisible(@org.springframework.data.repository.query.Param("partnerId") Long partnerId,
                             @org.springframework.data.repository.query.Param("product") Product product);
+
+    /**
+     * 이 상품에 걸린 <b>이미 지워진(논리삭제) 행</b>을 물리삭제한다 — 완전 삭제 전용이다.
+     *
+     * <p>‼️논리삭제를 쓰는 넷(매출·재고이벤트·세트구성·물류단가)은 <b>조회에서 사라져도
+     * 행은 남아 있다.</b> 도서를 완전히 지우려면 그 행들이 가리키는 도서가 없어지므로
+     * <b>FK 로 500</b> 이 난다. 그래서 함께 치운다.
+     *
+     * <p>★<b>살아 있는 행은 건드리지 않는다</b> — 하나라도 있으면 {@code countReferences} 가
+     * 세어 삭제 자체가 거부된다. 여기까지 왔다는 것은 살아 있는 참조가 없다는 뜻이다.
+     *
+     * @return 지운 줄 수(보고용)
+     */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @Query(value = """
+            DELETE FROM product_logis_rate WHERE product_id = :id AND deleted_at IS NOT NULL
+            """, nativeQuery = true)
+    int hardDeleteSoftDeletedRates(
+            @org.springframework.data.repository.query.Param("id") Long id);
+
+    /** 위와 같다 — 지워진 재고 이벤트. */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @Query(value = """
+            DELETE FROM inventory_txn WHERE product_id = :id AND deleted_at IS NOT NULL
+            """, nativeQuery = true)
+    int hardDeleteSoftDeletedTxns(
+            @org.springframework.data.repository.query.Param("id") Long id);
+
+    /** 위와 같다 — 지워진 매출. ‼️살아 있는 매출이 있으면 여기까지 오지 않는다. */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @Query(value = """
+            DELETE FROM sales WHERE product_id = :id AND deleted_at IS NOT NULL
+            """, nativeQuery = true)
+    int hardDeleteSoftDeletedSales(
+            @org.springframework.data.repository.query.Param("id") Long id);
 }

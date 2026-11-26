@@ -227,9 +227,14 @@ public class ProductService {
                             + ". 더 쓰지 않을 도서는 '사용 중지'로 두면 목록에서만 빠지고"
                             + " 과거 기록은 그대로 남습니다.");
         }
-        // ‼️**지워진 구성 기록을 먼저 물리삭제한다.** 위 검사는 그 기록을 빼고 세므로
+        // ‼️**이미 지워진(논리삭제) 행을 먼저 물리삭제한다.** 위 검사는 그 행을 빼고 세므로
         //   여기서 치우지 않으면 FK 가 가리키는 도서가 없어져 **500** 이 난다(PM 승인 2026-11-26).
+        //   논리삭제를 쓰는 곳은 넷이다 — 매출 · 재고이벤트 · 세트구성 · 물류단가.
+        //   ★살아 있는 행은 위 검사가 막으므로, 여기 오는 것은 전부 "이미 지운 것"뿐이다.
         bomItemRepository.hardDeleteByProductId(id);
+        productRepository.hardDeleteSoftDeletedRates(id);
+        productRepository.hardDeleteSoftDeletedTxns(id);
+        productRepository.hardDeleteSoftDeletedSales(id);
         Product target = getOrThrow(id);   // 벌크 DELETE 가 컨텍스트를 clear 한다
         productRepository.delete(target);
     }

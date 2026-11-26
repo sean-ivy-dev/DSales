@@ -232,6 +232,55 @@ class ProductHardDeleteIntegrationTest extends IntegrationTestSupport {
         assertThat(del("/masters/products/" + parent + "/hard").path("success").asBoolean()).isTrue();
     }
 
+    /**
+     * ‼️<b>이미 지운 매출은 삭제를 막지 않는다</b> — 막고 있었다(2026-11-26).
+     *
+     * <p>논리삭제를 쓰는 넷(매출·재고이벤트·세트구성·물류단가)을 참조 검사가
+     * <b>지워진 행까지 세고</b> 있었다. 그래서 조회에서 이미 사라진 것이 삭제만 막았고,
+     * 오류 문구도 「매출 N건」으로 나와 <b>살아 있는 매출이 있는 것처럼</b> 읽혔다.
+     *
+     * <p>★<b>살아 있는 매출은 여전히 막는다</b> — 이 테스트가 두 방향을 모두 못박는다.
+     */
+    @Test
+    @DisplayName("★★지운 매출은 삭제를 막지 않는다 — **살아 있는 매출은 여전히 막는다**")
+    void 지운_매출은_삭제를_막지_않는다() {
+        Long id = book("HDV" + SFX);
+        assertThat(post("/stock/inbound", Map.of("processedDate", DATE,
+                "supplierClientId", supplier, "destinationWarehouseId", warehouse,
+                "items", List.of(Map.of("productId", id, "unitCost", 1000, "qty", 50))))
+                .path("success").asBoolean()).isTrue();
+        assertThat(post("/sales/entries", Map.of("salesDate", DATE,
+                "partnerId", partner, "warehouseId", warehouse,
+                "items", List.of(Map.of("productId", id, "shipmentType", "NORMAL_SHIP",
+                        "qty", 2, "unitPrice", 10_000, "supplyRate", 70))))
+                .path("success").asBoolean()).isTrue();
+
+        // ① 살아 있는 매출이 있으면 **막는다**.
+        JsonNode blocked = del("/masters/products/" + id + "/hard");
+        assertThat(blocked.path("success").asBoolean()).as("살아 있는 매출: %s", blocked).isFalse();
+        assertThat(blocked.path("error").path("message").asText()).contains("매출");
+
+        // ② 그 매출을 지우면(논리삭제) 더 이상 막지 않아야 한다.
+        Long saleId = null;
+        for (JsonNode n : get("/sales?fromDate=" + DATE + "&toDate=" + DATE
+                + "&partnerId=" + partner + "&size=100").path("data").path("content")) {
+            if (n.path("productId").asLong() == id) {
+                saleId = n.path("id").asLong();
+            }
+        }
+        assertThat(saleId).as("방금 넣은 매출을 못 찾았다").isNotNull();
+        assertThat(del("/sales/" + saleId, Map.of("reason", "완전삭제 검증"))
+                .path("success").asBoolean()).isTrue();
+
+        assertThat(data(get("/masters/products/" + id + "/references")).path("매출").isNumber())
+                .as("‼️지운 매출이 참조로 세어지면 도서를 영영 못 지운다").isFalse();
+
+        // 재고 잔량이 남아 있으면 그것 때문에 막힌다 — 이 테스트의 관심은 '매출'이다.
+        JsonNode refs = data(get("/masters/products/" + id + "/references"));
+        assertThat(refs.path("재고이벤트").isNumber())
+                .as("입고를 되돌리지 않았으니 재고이벤트는 살아 있다").isTrue();
+    }
+
     private boolean found(String path, Long id) {
         JsonNode res = get(path);
         for (JsonNode n : res.path("data").path("content")) {
