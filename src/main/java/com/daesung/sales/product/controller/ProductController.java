@@ -181,6 +181,23 @@ public class ProductController {
         return ApiResponse.success();
     }
 
+    @Operation(summary = "상품을 참조하는 곳 — 지우지 않고 건수만",
+            description = """
+                    완전 삭제 전에 **무엇이 몇 건 걸려 있는지**만 본다. **아무것도 바꾸지 않는다.**
+
+                    ‼️전엔 이걸 알려면 **삭제를 호출해 보는 수밖에** 없었다 —
+                    참조가 없는 도서였다면 그 호출로 **정말 지워진다.**
+                    "지우기 전에 대상 목록을 먼저 보내 달라"(PM 2026-11-26)를
+                    안전하게 맞출 수가 없었다.
+
+                    세는 곳은 완전 삭제의 검사와 **같다** — 매출 · 재고 · 재고이벤트 · 위탁미결 ·
+                    재고실사 · 매출목표 · 세트구성(지워진 기록 제외) · 자재매칭 · 물류단가 ·
+                    특약점 노출설정 · 특약점 재고. **0건인 곳은 빠진다.**""")
+    @GetMapping("/{id}/references")
+    public ApiResponse<java.util.Map<String, Long>> references(@PathVariable Long id) {
+        return ApiResponse.success(productService.references(id));
+    }
+
     @Operation(summary = "★상품 완전 삭제 — 참조가 없을 때만(F-36)",
             description = """
                     화면의 **(우클릭) 삭제**. 행을 **실제로 지운다**.

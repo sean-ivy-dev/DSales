@@ -26,6 +26,12 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * {@code product_partner_price} 는 V42 에서 삭제돼 빠졌다.
      * ‼️테이블이 늘면 <b>여기도 늘려야 한다</b> — 빠뜨리면 FK 오류로 500 이 난다.
      *
+     * <p>‼️<b>세트구성은 「지워진 기록」을 빼고 센다</b>(PM 승인 2026-11-26).
+     * 구성 비우기({@code DELETE /{id}/bom})는 <b>기록을 남기는 삭제</b>라, 그대로 세면
+     * <b>구성을 비워도 도서를 지울 수 없었다</b> — 테스트로 등록한 2027 도서 3건이 그랬다.
+     * ★짝으로 {@link com.daesung.sales.product.service.ProductService} 의 완전 삭제가
+     * <b>그 지워진 기록까지 물리삭제</b>한다. 한쪽만 바꾸면 FK 로 500 이 난다.
+     *
      * @return [참조처 이름, 건수] — 건수가 0인 줄은 빠진다
      */
     @Query(value = """
@@ -36,7 +42,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             UNION ALL SELECT '재고실사', COUNT(*) FROM stocktake_line WHERE product_id = :id
             UNION ALL SELECT '매출목표', COUNT(*) FROM sales_target WHERE product_id = :id
             UNION ALL SELECT '세트구성', COUNT(*) FROM bom_items
-                       WHERE parent_product_id = :id OR child_product_id = :id
+                       WHERE (parent_product_id = :id OR child_product_id = :id)
+                         AND deleted_at IS NULL
             UNION ALL SELECT '자재매칭', COUNT(*) FROM material_bom
                        WHERE set_product_id = :id OR round_product_id = :id
             UNION ALL SELECT '물류단가', COUNT(*) FROM product_logis_rate WHERE product_id = :id

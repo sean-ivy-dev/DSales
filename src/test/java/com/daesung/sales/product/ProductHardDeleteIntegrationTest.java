@@ -168,15 +168,14 @@ class ProductHardDeleteIntegrationTest extends IntegrationTestSupport {
      * <p>{@code PUT /{id}/bom} 은 구성 목록이 비면 거부한다({@code @NotEmpty}) —
      * 그래서 한 번 세트가 된 도서는 <b>구성을 풀 길이 없었다.</b>
      *
-     * <p>★★<b>비워도 완전 삭제는 여전히 거부된다</b> — 이 테스트가 그 사실까지 못박는다.
-     * 구성 비우기는 <b>논리삭제</b>(언제 어떤 구성이었는지 남긴다)인데,
-     * 참조 검사({@code countReferences})가 {@code bom_items} 를 <b>삭제 표시까지 포함해</b> 센다.
-     * 완전 삭제까지 풀려면 ①참조 검사에서 삭제 표시를 빼고 ②완전 삭제가 그 행을 물리삭제하는
-     * <b>두 가지를 함께</b> 바꿔야 한다(한쪽만 바꾸면 FK 로 500 이 난다).
-     * 발주처 승인 전에는 손대지 않는다.
+     * <p>★★<b>비운 뒤에는 완전 삭제까지 된다</b>(PM 승인 2026-11-26).
+     * 구성 비우기는 <b>논리삭제</b>(언제 어떤 구성이었는지 남긴다)라, 참조 검사가 그 기록까지
+     * 세는 동안은 <b>비워도 지울 수 없었다.</b> 두 가지를 <b>함께</b> 바꿨다 —
+     * ①검사에서 지워진 기록을 빼고 ②완전 삭제가 그 기록을 물리삭제한다.
+     * ‼️한쪽만 바꾸면 FK 가 가리키는 도서가 없어져 <b>500</b> 이 난다. 이 테스트가 둘을 같이 묶는다.
      */
     @Test
-    @DisplayName("★★세트 구성 **비우기** — 전엔 비울 길이 없었다(비워도 완전삭제는 아직 거부)")
+    @DisplayName("★★세트 구성 **비우기** → 그 뒤 완전 삭제까지 된다(PM 승인 2026-11-26)")
     void 세트구성_비우면_삭제된다() {
         Long parent = book("HDZ" + SFX);
         Long child = book("HDY" + SFX);
@@ -198,11 +197,39 @@ class ProductHardDeleteIntegrationTest extends IntegrationTestSupport {
         assertThat(get("/masters/products/" + parent + "/bom").path("data").path("components").size())
                 .isZero();
 
-        // ‼️비워도 **아직 지워지지 않는다** — 참조 검사가 삭제 표시된 구성까지 센다.
-        //   이게 발주처 11/26 "테스트 도서 3건 삭제"가 막히는 지점이다.
-        assertThat(del("/masters/products/" + parent + "/hard").path("success").asBoolean())
-                .as("‼️여기가 true 로 바뀌면 참조 검사·물리삭제를 함께 고친 것이다 — 문서도 함께 고칠 것")
-                .isFalse();
+        // ‼️비운 뒤에는 지워진다 — 검사가 지워진 기록을 빼고, 삭제가 그 기록을 물리삭제한다.
+        JsonNode gone = del("/masters/products/" + parent + "/hard");
+        assertThat(gone.path("success").asBoolean()).as("비운 뒤 완전 삭제: %s", gone).isTrue();
+        assertThat(get("/masters/products/" + parent).path("success").asBoolean())
+                .as("행이 사라져야 한다").isFalse();
+    }
+
+    /**
+     * ‼️<b>지우지 않고 참조 건수만</b> 본다 — "지우기 전에 대상 목록 먼저"(PM 2026-11-26).
+     *
+     * <p>전엔 삭제를 호출해 보는 수밖에 없었고, 참조가 없는 도서면 <b>그 호출로 정말 지워졌다.</b>
+     */
+    @Test
+    @DisplayName("★참조 건수 조회 — **아무것도 바꾸지 않는다**(전엔 삭제를 호출해 봐야 알았다)")
+    void 참조건수만_본다() {
+        Long parent = book("HDR" + SFX);
+        Long child = book("HDQ" + SFX);
+        assertThat(put("/masters/products/" + parent + "/bom", Map.of(
+                "components", List.of(Map.of("childProductId", child, "ratio", 1))))
+                .path("success").asBoolean()).isTrue();
+
+        JsonNode refs = data(get("/masters/products/" + parent + "/references"));
+        assertThat(refs.path("세트구성").asLong()).as("구성 1건: %s", refs).isEqualTo(1L);
+
+        // ★조회가 도서를 건드리지 않았다.
+        assertThat(get("/masters/products/" + parent).path("success").asBoolean())
+                .as("‼️조회만 했는데 도서가 사라지면 안 된다").isTrue();
+
+        // 비우면 0건이 되고, 그 뒤 지워진다.
+        assertThat(del("/masters/products/" + parent + "/bom").path("success").asBoolean()).isTrue();
+        assertThat(data(get("/masters/products/" + parent + "/references")).path("세트구성").isNumber())
+                .as("지워진 기록은 세지 않는다").isFalse();
+        assertThat(del("/masters/products/" + parent + "/hard").path("success").asBoolean()).isTrue();
     }
 
     private boolean found(String path, Long id) {

@@ -27,4 +27,20 @@ public interface BomItemRepository extends JpaRepository<BomItem, Long> {
     int softDeleteByParentId(@Param("parentId") Long parentId,
                              @Param("now") LocalDateTime now,
                              @Param("actor") String actor);
+
+    /**
+     * 그 상품에 걸린 구성 기록을 <b>물리삭제</b>한다 — 도서 완전 삭제 전용이다.
+     *
+     * <p>‼️평소에는 <b>논리삭제</b>다(언제 어떤 구성이었는지 남긴다). 그런데 도서를 통째로
+     * 지울 때는 그 기록을 남길 수 없다 — <b>FK 가 가리키는 도서가 없어지기 때문</b>이다.
+     * 도서가 사라지면 그 구성 기록도 쓸 데가 없다(PM 승인 2026-11-26).
+     *
+     * <p>★{@code ProductRepository.countReferences} 가 <b>지워진 기록을 빼고 세는 것</b>과 짝이다.
+     * 한쪽만 바꾸면 "지울 수 있다고 해 놓고 FK 로 500" 이 난다.
+     */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @org.springframework.data.jpa.repository.Query(
+            value = "DELETE FROM bom_items WHERE parent_product_id = :id OR child_product_id = :id",
+            nativeQuery = true)
+    void hardDeleteByProductId(@org.springframework.data.repository.query.Param("id") Long id);
 }

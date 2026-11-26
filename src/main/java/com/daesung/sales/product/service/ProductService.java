@@ -227,7 +227,32 @@ public class ProductService {
                             + ". 더 쓰지 않을 도서는 '사용 중지'로 두면 목록에서만 빠지고"
                             + " 과거 기록은 그대로 남습니다.");
         }
-        productRepository.delete(product);
+        // ‼️**지워진 구성 기록을 먼저 물리삭제한다.** 위 검사는 그 기록을 빼고 세므로
+        //   여기서 치우지 않으면 FK 가 가리키는 도서가 없어져 **500** 이 난다(PM 승인 2026-11-26).
+        bomItemRepository.hardDeleteByProductId(id);
+        Product target = getOrThrow(id);   // 벌크 DELETE 가 컨텍스트를 clear 한다
+        productRepository.delete(target);
+    }
+
+    /**
+     * 이 도서를 <b>참조하는 곳</b>과 건수 — <b>지우지 않고</b> 본다.
+     *
+     * <p>★완전 삭제 전에 "무엇이 몇 건 걸려 있나"를 알려면 전엔 <b>삭제를 호출해 보는 수밖에</b>
+     * 없었다. 참조가 없는 도서였다면 그 호출로 <b>정말 지워진다</b> —
+     * "대상 목록을 먼저 보내 달라"(PM 2026-11-26)는 요구를 안전하게 맞출 수 없었다.
+     *
+     * @return 참조처 이름 → 건수. 0건인 곳은 빠진다
+     */
+    public java.util.Map<String, Long> references(Long id) {
+        getOrThrow(id);
+        java.util.Map<String, Long> out = new java.util.LinkedHashMap<>();
+        for (Object[] r : productRepository.countReferences(id)) {
+            long cnt = ((Number) r[1]).longValue();
+            if (cnt > 0) {
+                out.put((String) r[0], cnt);
+            }
+        }
+        return out;
     }
 
     /** 참조 요약 문자열. 없으면 null. */

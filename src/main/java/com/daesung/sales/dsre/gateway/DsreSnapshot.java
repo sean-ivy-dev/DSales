@@ -42,7 +42,8 @@ public record DsreSnapshot(
         long refreshedDaysAgo,
 
         @Schema(description = """
-                **갱신이 밀렸는지** — `refreshedDaysAgo` 가 2 이상이면 `true`.
+                **갱신이 밀렸는지** — `refreshedDaysAgo` 가 **7 이상**이면 `true`
+                (PM 확정 2026-11-26. 갱신이 주 1회라 2일로 두면 금·토·일에 늘 빨간불이었다).
                 참이면 빨간 표시 등으로 눈에 띄게 해 주면 좋다.
                 ‼️사본 갱신은 **사람이 돌린다** — 주말·휴일에는 1~2일 밀릴 수 있다.""")
         boolean stale,

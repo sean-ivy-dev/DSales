@@ -562,6 +562,15 @@ public class JdbcDsreGateway implements DsreGateway {
                        AND TABLE_NAME = 'tbl_request_info')    AS request_rows
             """;
 
+    /**
+     * 며칠째면 <b>밀림</b>으로 보나 — PM 확정 2026-11-26 <b>7일</b>.
+     *
+     * <p>갱신이 <b>주 1회(월요일 오전)</b> + 월말 마감 전이다. 2일로 두면 금·토·일에 늘
+     * 빨간불이 켜지고, <b>늘 켜진 경고는 아무도 안 본다.</b>
+     * 주기가 바뀌면 이 값도 같이 바꿀 것.
+     */
+    private static final int STALE_DAYS = 7;
+
     /** 사본 안 자료의 끝. 인덱스가 없어 330만 행을 훑는다 — 달라는 때만 돈다. */
     private static final String DATA_AS_OF_SQL =
             "SELECT MAX(REG_DATE) AS data_as_of FROM tbl_logis_cnt";
@@ -589,7 +598,9 @@ public class JdbcDsreGateway implements DsreGateway {
                     java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul")));
         }
         // 찍은 시각을 모르면 **낡은 것으로 본다** — 「모른다」를 「최신」으로 보이게 하지 않는다.
-        boolean stale = (daysAgo < 0) || daysAgo >= 2;
+        // ★기준 **7일**(PM 확정 2026-11-26) — 갱신이 **주 1회(월요일)** 라 2일로 두면
+        //   금·토·일에 늘 빨간불이 켜진다. 경고가 늘 켜져 있으면 아무도 안 본다.
+        boolean stale = (daysAgo < 0) || daysAgo >= STALE_DAYS;
 
         LocalDateTime dataAsOf = withDataAsOf
                 ? toLocalDateTime(dsreJdbcTemplate.queryForMap(DATA_AS_OF_SQL).get("data_as_of"))
