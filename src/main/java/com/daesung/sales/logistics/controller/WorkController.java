@@ -466,8 +466,22 @@ public class WorkController {
 
                     ★**돌린 뒤 같은 경로로 다시 세면 전·후 비교**가 된다.""")
     @GetMapping("/work-orders/missing-sent-date")
-    public ApiResponse<List<com.daesung.sales.logistics.dto.MissingSentDateRow>> missingSentDate() {
-        return ApiResponse.success(workService.missingSentDate());
+    public ApiResponse<List<com.daesung.sales.logistics.dto.MissingSentDateRow>> missingSentDate(
+            @io.swagger.v3.oas.annotations.Parameter(description = """
+                    **이관분만** 세고 **주문 수**도 함께 낸다 — 기본 `false`.
+
+                    발주처 2026-11-26: "이관분만 연도별 **주문 수 · 발송 수**.
+                    신규 등록 주문 · [TEST] · ZZT1111 제외".
+
+                    ★이관분은 **등록번호가 없다**(신규 등록은 매출등록번호가 붙는다) —
+                    11/23 에 드린 **641건 목록과 같은 기준**이다.
+                    주문 수는 발송 묶음 키 **(일자 + 거래처 + 학교 + 분류)** 로 센다.
+
+                    ‼️**검산**: 2026년 주문 수가 **641** 이어야 한다. 다르면 기준이 어긋난 것이다.""")
+            @RequestParam(required = false, defaultValue = "false") boolean migratedOnly) {
+        return ApiResponse.success(migratedOnly
+                ? workService.migratedMissingSentDate()
+                : workService.missingSentDate());
     }
 
 }

@@ -543,8 +543,28 @@ public class WorkService {
         for (Object[] r : shipmentRepository.missingSentDateByYear()) {
             Integer year = (r[0] == null) ? null : ((Number) r[0]).intValue();
             String state = (String) r[1];
-            out.add(new com.daesung.sales.logistics.dto.MissingSentDateRow(
+            out.add(com.daesung.sales.logistics.dto.MissingSentDateRow.of(
                     year, state, stateLabel(state), ((Number) r[2]).longValue()));
+        }
+        return out;
+    }
+
+    /**
+     * 같은 집계를 <b>이관분만</b> — 주문 수와 발송 수를 함께 낸다
+     * (발주처 2026-11-26: "이관분만 연도별 주문 수·발송 수. 신규 등록·[TEST]·ZZT1111 제외").
+     *
+     * <p>★<b>검산</b>: 2026년 주문 수가 <b>641</b> 이어야 한다 — 11/23 에 드린 목록과 같은 수다.
+     * 다르면 이관분을 가리는 기준이 어긋난 것이니 숫자를 내보내기 전에 맞춘다.
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<com.daesung.sales.logistics.dto.MissingSentDateRow> migratedMissingSentDate() {
+        java.util.List<com.daesung.sales.logistics.dto.MissingSentDateRow> out = new ArrayList<>();
+        for (Object[] r : shipmentRepository.migratedMissingSentDateByYear()) {
+            Integer year = (r[0] == null) ? null : ((Number) r[0]).intValue();
+            String state = (String) r[1];
+            out.add(new com.daesung.sales.logistics.dto.MissingSentDateRow(
+                    year, state, stateLabel(state),
+                    ((Number) r[3]).longValue(), ((Number) r[2]).longValue()));
         }
         return out;
     }

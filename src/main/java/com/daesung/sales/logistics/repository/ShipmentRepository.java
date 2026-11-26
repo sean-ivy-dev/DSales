@@ -543,4 +543,61 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
              ORDER BY yr, state
             """, nativeQuery = true)
     List<Object[]> missingSentDateByYear();
+
+    /**
+     * 위와 같은데 <b>이관분만</b> 세고, <b>주문 수</b>도 함께 낸다
+     * (발주처 2026-11-26: "이관분만 연도별 주문 수·발송 수. 신규 등록 주문·[TEST]·ZZT1111 제외").
+     *
+     * <h3>★이관분을 어떻게 가리나 — <b>등록번호가 없다</b></h3>
+     * 11/23 에 드린 641건 목록의 기준과 <b>같은 것</b>을 쓴다 — 그 641건은 전부
+     * "접수경로 수기 · <b>등록번호 없음</b>" 이었다. 신규 등록은 매출등록번호({@code E-…})가 붙는다.
+     *
+     * <h3>★주문 수는 <b>발송 묶음 키</b>로 센다</h3>
+     * {@link Shipment#entryNo} 가 비면 발송은 <b>(일자 + 거래처 + 학교 + 분류)</b> 로 묶인다
+     * — 그 묶음 하나가 주문 하나다. 그래서 {@code COUNT(DISTINCT …)} 가 주문 수다.
+     * ‼️묶음 키가 바뀌면 이 수도 바뀐다 — {@code Shipment} 의 그 주석과 <b>같이</b> 고칠 것.
+     *
+     * <p>★<b>검산이 들어 있다</b> — 2026년 주문 수가 <b>641</b> 이어야 한다(11/23 목록과 같은 수).
+     * 다르면 기준이 어긋난 것이니 숫자를 내보내기 전에 먼저 맞춰야 한다.
+     *
+     * <p>반환 {@code Object[]}: [연도, 진행상태, 주문 수, 발송 수].
+     *
+     * <p>‼️<b>{@code YEAR(...)} 를 {@code CAST(... AS UNSIGNED)} 로 감싼 이유</b> —
+     * 안 감싸면 드라이버가 그 칸을 <b>날짜로</b> 돌려준다(실측: {@code Date=2069-01-01}).
+     * 숫자로 읽다가 {@code ClassCastException} 으로 이 경로가 통째로 500 이었다.
+     * ‼️그러면 {@code GROUP BY} 도 <b>똑같이 감싸야 한다</b> — 글자가 다르면
+     * {@code only_full_group_by} 가 거부한다(이것도 500 으로 드러났다).
+     */
+    @Query(value = """
+            SELECT CAST(YEAR(s.trade_date) AS UNSIGNED) AS yr,
+                   CASE WHEN s.printed_at IS NOT NULL THEN 'READY_TO_SHIP'
+                        WHEN s.intake_state IS NOT NULL THEN s.intake_state
+                        ELSE 'RECEIVED' END AS state,
+                   COUNT(DISTINCT CONCAT_WS('|', s.trade_date, s.partner_id,
+                         COALESCE(s.school_code, ''), COALESCE(s.trade_class, ''))) AS orders,
+                   COUNT(*) AS shipments
+              FROM shipment s
+              JOIN partners p ON p.id = s.partner_id
+             WHERE s.deleted_at IS NULL
+               AND s.sent_date IS NULL
+               AND COALESCE(s.entry_no, '') = ''
+               AND p.code NOT LIKE 'ZZT%'
+               AND p.name NOT LIKE '[TEST]%'
+             GROUP BY CAST(YEAR(s.trade_date) AS UNSIGNED),
+                   CASE WHEN s.printed_at IS NOT NULL THEN 'READY_TO_SHIP'
+                        WHEN s.intake_state IS NOT NULL THEN s.intake_state
+                        ELSE 'RECEIVED' END
+             ORDER BY yr, state
+            """, nativeQuery = true)
+    List<Object[]> migratedMissingSentDateByYear();
+
+    /**
+     * 발송의 <b>등록번호를 비운다</b> — 이관분과 같은 모양을 만드는 <b>검증 전용</b>이다.
+     *
+     * <p>운영 발송 34,515건이 이 상태다(이관이 등록번호 없이 넣었다). 그 모양을 테스트에서
+     * 재현해야 "이관분만 센다"를 못박을 수 있는데, 엔티티에 세터를 열면 <b>운영 코드가 쓸 수 있게</b> 된다.
+     */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @Query("update Shipment s set s.entryNo = null where s.id = :id")
+    void clearEntryNoForTest(@org.springframework.data.repository.query.Param("id") Long id);
 }

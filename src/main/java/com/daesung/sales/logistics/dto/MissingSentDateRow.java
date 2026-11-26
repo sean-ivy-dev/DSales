@@ -21,7 +21,19 @@ public record MissingSentDateRow(
         @Schema(description = "진행상태 표기", example = "접수완료")
         String progressStateName,
 
-        @Schema(description = "건수", example = "641")
-        long count
+        @Schema(description = "발송 건수", example = "1217")
+        long count,
+
+        @Schema(description = """
+                **주문 수**(발송을 묶은 수). 이관분만 셀 때만 채워진다 — 그 밖에는 `null`.
+
+                ★이관분은 등록번호가 없어 발송이 **(일자 + 거래처 + 학교 + 분류)** 로 묶이고,
+                그 묶음 하나가 주문 하나다. 한 주문에 발송이 여럿일 수 있어
+                **주문 수 ≤ 발송 수** 다(11/23 목록: 641 주문 · 1,217 발송).""", example = "641")
+        Long orderCount
 ) {
+    /** 이관분이 아닌 집계 — 주문 수는 낼 수 없다. */
+    public static MissingSentDateRow of(Integer year, String state, String label, long count) {
+        return new MissingSentDateRow(year, state, label, count, null);
+    }
 }
