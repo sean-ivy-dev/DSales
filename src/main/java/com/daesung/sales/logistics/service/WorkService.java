@@ -553,13 +553,14 @@ public class WorkService {
      * 같은 집계를 <b>이관분만</b> — 주문 수와 발송 수를 함께 낸다
      * (발주처 2026-11-26: "이관분만 연도별 주문 수·발송 수. 신규 등록·[TEST]·ZZT1111 제외").
      *
-     * <p>★<b>검산</b>: 2026년 주문 수가 <b>641</b> 이어야 한다 — 11/23 에 드린 목록과 같은 수다.
-     * 다르면 이관분을 가리는 기준이 어긋난 것이니 숫자를 내보내기 전에 맞춘다.
+     * <p>★<b>검산</b>: <b>2026-01-02 ~ 10-31</b> 로 좁히면 주문 <b>641</b> 이어야 한다
+     * — 11/23 에 드린 목록이 그 기간이다. ‼️연도 전체(654)와 <b>다르다</b>. 기간부터 맞출 것.
      */
     @Transactional(readOnly = true)
-    public java.util.List<com.daesung.sales.logistics.dto.MissingSentDateRow> migratedMissingSentDate() {
+    public java.util.List<com.daesung.sales.logistics.dto.MissingSentDateRow> migratedMissingSentDate(
+            java.time.LocalDate fromDate, java.time.LocalDate toDate) {
         java.util.List<com.daesung.sales.logistics.dto.MissingSentDateRow> out = new ArrayList<>();
-        for (Object[] r : shipmentRepository.migratedMissingSentDateByYear()) {
+        for (Object[] r : shipmentRepository.migratedMissingSentDateByYear(fromDate, toDate)) {
             Integer year = (r[0] == null) ? null : ((Number) r[0]).intValue();
             String state = (String) r[1];
             out.add(new com.daesung.sales.logistics.dto.MissingSentDateRow(

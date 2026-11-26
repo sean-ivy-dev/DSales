@@ -478,9 +478,21 @@ public class WorkController {
                     주문 수는 발송 묶음 키 **(일자 + 거래처 + 학교 + 분류)** 로 센다.
 
                     ‼️**검산**: 2026년 주문 수가 **641** 이어야 한다. 다르면 기준이 어긋난 것이다.""")
-            @RequestParam(required = false, defaultValue = "false") boolean migratedOnly) {
+            @RequestParam(required = false, defaultValue = "false") boolean migratedOnly,
+            @io.swagger.v3.oas.annotations.Parameter(description = """
+                    거래일자 시작(선택). `migratedOnly=true` 일 때만 먹는다.
+
+                    ‼️**기간을 맞추지 않으면 숫자가 어긋난다** — 11/23 에 드린 641건 목록은
+                    **2026-01-02 ~ 10-31** 이다. 연도 전체로 세면 11~12월이 더해져 654 가 된다.""")
+            @org.springframework.format.annotation.DateTimeFormat(
+                    iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE)
+            @RequestParam(required = false) java.time.LocalDate fromDate,
+            @io.swagger.v3.oas.annotations.Parameter(description = "거래일자 끝(선택)")
+            @org.springframework.format.annotation.DateTimeFormat(
+                    iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE)
+            @RequestParam(required = false) java.time.LocalDate toDate) {
         return ApiResponse.success(migratedOnly
-                ? workService.migratedMissingSentDate()
+                ? workService.migratedMissingSentDate(fromDate, toDate)
                 : workService.missingSentDate());
     }
 

@@ -75,23 +75,22 @@ class MigratedMissingSentDateIntegrationTest extends IntegrationTestSupport {
                 "destinationWarehouseId", warehouse,
                 "items", List.of(Map.of("productId", book, "qty", 500, "unitCost", 1000))))
                 .path("success").asBoolean()).isTrue();
+
+        // ‼️발송을 **여기서** 만든다 — 테스트 메서드 안에서 만들면 먼저 도는 다른 메서드가 빈 집계를 본다.
+        // ① 이관분 흉내 — 같은 날·같은 거래처로 두 건, 등록번호를 비운다(= 한 묶음).
+        sell(partner, 3);
+        sell(partner, 5);
+        clearEntryNo(partner);
+        // ② 신규 등록분 — 등록번호가 그대로 있다. 빠져야 한다.
+        sell(partner, 7);
+        // ③ [TEST] 거래처 — 등록번호를 비워도 빠져야 한다.
+        sell(testPartner, 9);
+        clearEntryNo(testPartner);
     }
 
     @Test
     @DisplayName("★★등록번호 **없는** 발송만 세고, 묶음 하나를 **주문 1 · 발송 N** 으로 센다")
     void 이관분만_주문수와_발송수() {
-        // ① 이관분 흉내 — 같은 날·같은 거래처로 두 건, 등록번호를 비운다(= 한 묶음).
-        sell(partner, 3);
-        sell(partner, 5);
-        clearEntryNo(partner);
-
-        // ② 신규 등록분 — 등록번호가 그대로 있다. 빠져야 한다.
-        sell(partner, 7);
-
-        // ③ [TEST] 거래처 — 등록번호를 비워도 빠져야 한다.
-        sell(testPartner, 9);
-        clearEntryNo(testPartner);
-
         JsonNode mineRes = get("/logistics/work-orders/missing-sent-date?migratedOnly=true");
         JsonNode mine = rowOf(mineRes);
         assertThat(mine).as("이관분 집계에 그 해가 없다: %s", mineRes).isNotNull();
@@ -109,6 +108,24 @@ class MigratedMissingSentDateIntegrationTest extends IntegrationTestSupport {
         // 비어 있으면 응답에서 빠진다(없는 값을 0 으로 내보내면 "주문이 0건"으로 읽힌다).
         assertThat(all.path("orderCount").isNumber())
                 .as("‼️이관분이 아닐 땐 주문 수를 낼 수 없다 — 0 으로 내보내면 거짓이 된다").isFalse();
+    }
+
+    /**
+     * ‼️<b>기간으로 좁힐 수 있어야 한다</b> — 11/23 에 드린 641건 목록이 <b>1~10월</b> 이라,
+     * 연도 전체로 세면 11~12월이 더해져 숫자가 어긋난다(운영 실측 641 ↔ 654).
+     */
+    @Test
+    @DisplayName("★기간으로 좁힌다 — 목록과 숫자를 맞추려면 기간부터 같아야 한다")
+    void 기간으로_좁힌다() {
+        JsonNode inRange = rowOf(get("/logistics/work-orders/missing-sent-date"
+                + "?migratedOnly=true&fromDate=" + YEAR + "-01-01&toDate=" + YEAR + "-12-31"));
+        assertThat(inRange).as("기간 안이면 나와야 한다").isNotNull();
+        assertThat(inRange.path("count").asLong()).isEqualTo(2L);
+
+        JsonNode outOfRange = rowOf(get("/logistics/work-orders/missing-sent-date"
+                + "?migratedOnly=true&fromDate=" + YEAR + "-05-01&toDate=" + YEAR + "-12-31"));
+        assertThat(outOfRange)
+                .as("‼️4월 건인데 5월부터로 좁혔는데도 나왔다 — 기간이 안 먹는 것이다").isNull();
     }
 
     /** 그 해 줄 하나를 꺼낸다(상태는 하나만 생긴다). */

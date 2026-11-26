@@ -557,8 +557,12 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
      * — 그 묶음 하나가 주문 하나다. 그래서 {@code COUNT(DISTINCT …)} 가 주문 수다.
      * ‼️묶음 키가 바뀌면 이 수도 바뀐다 — {@code Shipment} 의 그 주석과 <b>같이</b> 고칠 것.
      *
-     * <p>★<b>검산이 들어 있다</b> — 2026년 주문 수가 <b>641</b> 이어야 한다(11/23 목록과 같은 수).
-     * 다르면 기준이 어긋난 것이니 숫자를 내보내기 전에 먼저 맞춰야 한다.
+     * <p>★<b>검산</b> — <b>2026-01-02 ~ 10-31</b> 로 좁히면 주문 <b>641</b> · 발송 <b>1,217</b> 이어야 한다
+     * (11/23 에 드린 목록이 그 기간이다). ‼️<b>연도 전체로 세면 다르다</b> — 2026 전체는
+     * 11~12월이 더해져 654 주문 · 1,192 발송이다. 숫자를 비교할 때 <b>기간부터 맞출 것.</b>
+     *
+     * <p>★기간을 안 주면 전체다. 전체 발송 합계는 <b>18,257</b> 이고,
+     * 이는 발주처가 말한 그 수와 같다(전체 18,260 중 신규 등록 3건을 뺀 값).
      *
      * <p>반환 {@code Object[]}: [연도, 진행상태, 주문 수, 발송 수].
      *
@@ -583,13 +587,17 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
                AND COALESCE(s.entry_no, '') = ''
                AND p.code NOT LIKE 'ZZT%'
                AND p.name NOT LIKE '[TEST]%'
+               AND (:fromDate IS NULL OR s.trade_date >= :fromDate)
+               AND (:toDate   IS NULL OR s.trade_date <= :toDate)
              GROUP BY CAST(YEAR(s.trade_date) AS UNSIGNED),
                    CASE WHEN s.printed_at IS NOT NULL THEN 'READY_TO_SHIP'
                         WHEN s.intake_state IS NOT NULL THEN s.intake_state
                         ELSE 'RECEIVED' END
              ORDER BY yr, state
             """, nativeQuery = true)
-    List<Object[]> migratedMissingSentDateByYear();
+    List<Object[]> migratedMissingSentDateByYear(
+            @org.springframework.data.repository.query.Param("fromDate") java.time.LocalDate fromDate,
+            @org.springframework.data.repository.query.Param("toDate") java.time.LocalDate toDate);
 
     /**
      * 발송의 <b>등록번호를 비운다</b> — 이관분과 같은 모양을 만드는 <b>검증 전용</b>이다.
