@@ -243,9 +243,19 @@ jobs:
   #     빈 DB 로 띄우면 Flyway 가 빈 스키마를 만들어 버려 이관과 엉킨다.
   #   ‼️DB 비밀번호를 Secrets Manager 에서 읽지 않는다(서버 역할에 권한 없음) — aws 프로필을 쓰지 않고
   #     기본 프로필 + SPRING_DATASOURCE_* 로 넘긴다. 값은 --env-file(권한 600)로만 넘겨 ps 에 안 남긴다.
+  # ★★운영 배포는 **사람이 실행할 때만** 돈다(PM 확정 2026-11-26, 11/28 시작).
+  #   main 에 올려도 자동으로 돌지 않는다 — Actions 화면에서 「Run workflow」 를 눌러야 한다.
+  #
+  #   ‼️**시험(build-deploy)은 그대로 자동**이다. 바뀐 것은 운영 하나뿐이다.
+  #
+  #   ★왜 승인자 지정(Environment) 이 아니라 수동 실행인가 —
+  #     승인자 지정은 저장소 설정 권한이 있어야 한다. 이 방식은 파일 한 줄이라
+  #     같은 결과(사람이 눌러야 운영에 올라감)를 지금 만들 수 있다.
+  #
+  #   ‼️**누르기 전에 PM 에게 「무엇을·언제」 알리고 답을 받은 뒤** 누른다.
   deploy-prod:
     needs: test
-    if: vars.PROD_DEPLOY_ENABLED == 'true'
+    if: github.event_name == 'workflow_dispatch' && vars.PROD_DEPLOY_ENABLED == 'true'
     runs-on: [self-hosted, dssales-prod]
     env:
       REGISTRY: 902734531372.dkr.ecr.ap-northeast-2.amazonaws.com
